@@ -27,7 +27,8 @@ komunikuje **česky**, je fullstack (React i Java/Spring Boot na stejné úrovni
   Node server, žádné SEO, cloud později = klasický BE.
 - **BE = Node + TypeScript (Fastify 5, tsx), ne Spring Boot.** Zvažováno, Lukáš souhlasil s Node kvůli sdíleným
   typům s FE (`packages/shared` + Zod), snadnému SSE streamingu z LLM, Markdown ekosystému a levnějšímu hostingu.
-- Monorepo přes **npm workspaces**, root `c:\development\solo-rpg`. Není to git repozitář (zatím).
+- Monorepo přes **npm workspaces**, root `c:\development\solo-rpg`. Git repozitář, remote
+  `origin` = https://github.com/lukas2035/solo-rpg (větev `main`); push funguje přes Git Credential Manager.
 - Windows prostředí, PowerShell 5 – používat `npm.cmd`, ne `&&`.
 
 ## 3. Aktuální stav – co je HOTOVÉ a otestované
@@ -98,7 +99,7 @@ npm.cmd run dev          # BE http://127.0.0.1:3001 + FE http://localhost:5173
 1. **OpenRouter endpoint** `POST /api/generate` (+ `ModelRouter`, SSE streaming, klíč v `.env`, mature flag).
 2. **Další typy poznámek ve vaultu:** lokace (`locations/*.md`), questy (`quests/*.md`), rozšířené NPC.
 3. Případně `chokidar` sledování vaultu (live reload při editaci v Obsidianu) – zatím se načítá tlačítky 💬 / 📂.
-4. Git init monorepa (zatím není repozitář).
+4. ~~Git init monorepa~~ – hotovo, repo je na GitHubu.
 
 ## 6. Pracovní konvence z minulé session
 - Odpovídat česky, stručně; komentáře v kódu česky.
