@@ -96,8 +96,10 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
 - Hra bez scén → dialog s `required` (bez Zrušit, Esc nezavře). Smazat lze i poslední scénu → znovu povinný dialog.
 - **Postavy scény**: každá scéna má `characters` (celá jména). V pásu a v InputArea jsou jen postavy aktuální scény
   (+ dočasní `tmp-` mluvčí, kteří v ní mluví). Checklist v `SceneModal` vybírá z postav hry; nová scéna předvyplní
-  postavy poslední scény (BE to dělá i bez `characters` v POST), první scéna všechny postavy hry. „+“ v pásu vytvoří
-  postavu a přidá ji do aktuální scény (`PATCH /scenes/:id {title, characters}`). BE při rename/delete postavy
+  postavy poslední scény (BE to dělá i bez `characters` v POST), první scéna všechny postavy hry. „+“ v pásu (malé
+  tlačítko) vytvoří postavu a přidá ji do aktuální scény (`PATCH /scenes/:id {title, characters}`). Tlačítko
+  „Nová postava“ v `SceneModal` otevře vnořený `CharacterModal` (`onCreateCharacter`) a novou postavu zaškrtne.
+  BE při rename/delete postavy
   přepíše seznamy ve scénách; soubor scény bez klíče `characters` = všechny postavy hry (zpětná kompatibilita).
 - Sdílené: `ImageDropField` (klik/drop/URL), `utils/forms.ts` (`selectAll`, `inputClass`).
 

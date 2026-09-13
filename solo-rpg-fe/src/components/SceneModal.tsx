@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { SceneMeta } from '@solo-rpg/shared'
 import ImageDropField from './ImageDropField'
+import CharacterModal, { type CharacterFormValues } from './CharacterModal'
 import { inputClass, selectAll } from '../utils/forms'
 
 /** Hodnoty formuláře; `image` = undefined → obrázek beze změny, null → odstranit, string → nový (data:/http URL) */
@@ -35,16 +36,19 @@ interface SceneModalProps {
   required?: boolean
   /** Uloží scénu; při chybě (např. duplicitní název) vyhodí výjimku s hláškou pro uživatele */
   onSubmit: (values: SceneFormValues) => Promise<void>
+  /** Vytvoří novou postavu hry (z vnořeného dialogu postavy); vrátí ji pro checklist */
+  onCreateCharacter?: (values: CharacterFormValues) => Promise<SceneCharacterOption>
   onDelete?: () => Promise<void>
   onClose: () => void
 }
 
 /** Dialog pro vytvoření a úpravu scény (název, obrázek = pozadí scény, markdown popis, přítomné postavy) */
-export default function SceneModal({ scene, image, defaultTitle = '', defaultCharacters = [], allCharacters, required = false, onSubmit, onDelete, onClose }: SceneModalProps) {
+export default function SceneModal({ scene, image, defaultTitle = '', defaultCharacters = [], allCharacters, required = false, onSubmit, onCreateCharacter, onDelete, onClose }: SceneModalProps) {
   const isEdit = scene !== null
   const [title, setTitle] = useState(scene?.title ?? defaultTitle)
   const [description, setDescription] = useState(scene?.description ?? '')
   const [selected, setSelected] = useState<string[]>(scene?.characters ?? defaultCharacters)
+  const [creatingCharacter, setCreatingCharacter] = useState(false)
   const [editImage, setEditImage] = useState<string | null>(image)
   const [imageChanged, setImageChanged] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -54,11 +58,18 @@ export default function SceneModal({ scene, image, defaultTitle = '', defaultCha
   const close = () => { if (!required) onClose() }
 
   useEffect(() => {
-    if (required) return
+    // Při otevřeném vnořeném dialogu postavy Esc zavírá jen ten
+    if (required || creatingCharacter) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, required])
+  }, [onClose, required, creatingCharacter])
+
+  const handleCreateCharacter = async (values: CharacterFormValues) => {
+    if (!onCreateCharacter) return
+    const created = await onCreateCharacter(values)
+    setSelected(prev => (prev.includes(created.name) ? prev : [...prev, created.name]))
+  }
 
   const handleImageChange = (next: string | null) => {
     setEditImage(next)
@@ -160,11 +171,23 @@ export default function SceneModal({ scene, image, defaultTitle = '', defaultCha
         </div>
 
         <fieldset className="flex flex-col gap-2 text-left text-sm text-[var(--text)]">
-          <legend className="mb-1">
-            Postavy ve scéně <span className="opacity-60">({selected.length} z {allCharacters.length})</span>
+          <legend className="mb-1 flex items-center gap-3 w-full">
+            <span>
+              Postavy ve scéně <span className="opacity-60">({selected.length} z {allCharacters.length})</span>
+            </span>
+            {onCreateCharacter && (
+              <button
+                type="button"
+                onClick={() => setCreatingCharacter(true)}
+                title="Vytvořit novou postavu a přidat ji do scény"
+                className="ml-auto px-2 py-1 rounded-md border border-dashed border-[var(--accent)]/70 text-xs text-[var(--accent)] hover:border-solid hover:bg-black/40 transition-all"
+              >
+                ＋ Nová postava
+              </button>
+            )}
           </legend>
           {allCharacters.length === 0 ? (
-            <p className="opacity-60 text-xs">Hra zatím nemá žádné postavy – přidáš je tlačítkem „+“ v horním pásu.</p>
+            <p className="opacity-60 text-xs">Hra zatím nemá žádné postavy – vytvoř první tlačítkem „Nová postava“.</p>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
               {allCharacters.map(c => {
@@ -227,6 +250,18 @@ export default function SceneModal({ scene, image, defaultTitle = '', defaultCha
           </div>
         </div>
       </form>
+
+      {/* Vnořený dialog nové postavy – vykreslen za formulářem, takže leží nad ním */}
+      {creatingCharacter && (
+        <div onClick={(e) => e.stopPropagation()}>
+          <CharacterModal
+            character={null}
+            image={null}
+            onSubmit={handleCreateCharacter}
+            onClose={() => setCreatingCharacter(false)}
+          />
+        </div>
+      )}
     </div>
   )
 }

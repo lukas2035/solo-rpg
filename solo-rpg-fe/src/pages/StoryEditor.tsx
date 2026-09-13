@@ -249,6 +249,18 @@ export default function StoryEditor() {
     if (!persisted) await addCharacterToCurrentScene(saved.name)
   }
 
+  /** Nová postava z dialogu scény – do scény ji přidá checklist při submitu, ne aktuální scéna */
+  const createCharacterFromSceneModal = async (values: CharacterFormValues) => {
+    const base: CharacterInput = { firstName: values.firstName, lastName: values.lastName, nickname: values.nickname, notes: values.notes }
+    let saved = await api.createCharacter(gameName, base)
+    if (values.image) {
+      const ref = await api.storeImage(gameName, 'portrait', values.image, saved.name)
+      saved = await api.updateCharacter(gameName, saved.id, { ...base, image: ref })
+    }
+    setCharacters(prev => [...prev, saved])
+    return { name: saved.name, nickname: saved.nickname, image: assetUrl(gameName, saved.image) }
+  }
+
   const deleteCharacter = async (characterId: string) => {
     const character = characters.find(c => c.id === characterId)
     if (!character) return
@@ -575,6 +587,7 @@ export default function StoryEditor() {
           allCharacters={sceneCharacterOptions}
           required={scenes.length === 0}
           onSubmit={handleSceneSubmit}
+          onCreateCharacter={createCharacterFromSceneModal}
           onDelete={editingScene ? () => deleteScene(editingScene.id) : undefined}
           onClose={() => setSceneModal(null)}
         />

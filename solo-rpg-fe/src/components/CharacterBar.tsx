@@ -216,14 +216,11 @@ export default function CharacterBar({
 
         <button
           onClick={onAddCharacter}
-          className="flex-shrink-0 rounded-lg border-2 border-dashed border-[var(--accent)] bg-black/50 flex items-center justify-center cursor-pointer hover:bg-black/80 hover:border-solid transition-all"
-          style={{
-            height: `${CHARACTER_HEIGHT}px`,
-            width: `${CHARACTER_HEIGHT}px`,
-          }}
+          title="Nová postava (přidá se do aktuální scény)"
+          className="flex-shrink-0 self-center w-10 h-10 rounded-lg border-2 border-dashed border-[var(--accent)] bg-black/50 flex items-center justify-center cursor-pointer hover:bg-black/80 hover:border-solid transition-all"
           type="button"
         >
-          <span className="text-3xl text-[var(--accent)]">+</span>
+          <span className="text-2xl leading-none text-[var(--accent)]">+</span>
         </button>
 
         <div className="flex-shrink-0 ml-auto self-start grid grid-rows-3 grid-flow-col gap-1">
