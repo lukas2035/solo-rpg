@@ -10,7 +10,7 @@ import CharacterModal, { type CharacterFormValues } from '../components/Characte
 import SceneModal, { type SceneFormValues } from '../components/SceneModal'
 import SceneBar from '../components/SceneBar'
 import * as api from '../utils/api'
-import { assetUrl } from '../utils/api'
+import { assetUrl, useAssetVersion } from '../utils/api'
 
 /** Postava s obrázkem převedeným na URL použitelnou v <img> */
 interface DisplayCharacter {
@@ -72,9 +72,10 @@ export default function StoryEditor() {
   const setupLoadedRef = useRef(false)
   const lastSavedSetupRef = useRef<string>('')
 
+  const assetVersion = useAssetVersion()
   const toDisplay = useCallback(
-    (c: Character): DisplayCharacter => ({ id: c.id, name: c.name, nickname: c.nickname, image: assetUrl(gameName, c.image) }),
-    [gameName]
+    (c: Character): DisplayCharacter => ({ id: c.id, name: c.name, nickname: c.nickname, image: assetUrl(gameName, c.image, assetVersion) }),
+    [gameName, assetVersion]
   )
   const currentScene = useMemo(() => scenes.find(s => s.id === currentSceneId) ?? null, [scenes, currentSceneId])
   // V pásu a při psaní jen postavy aktuální scény (+ dočasní mluvčí, kteří v ní mluví)
@@ -88,16 +89,16 @@ export default function StoryEditor() {
     [storyEntries, toDisplay]
   )
   const sceneCharacterOptions = useMemo(
-    () => characters.filter(c => !isEphemeral(c)).map(c => ({ name: c.name, nickname: c.nickname, image: assetUrl(gameName, c.image) })),
-    [characters, gameName]
+    () => characters.filter(c => !isEphemeral(c)).map(c => ({ name: c.name, nickname: c.nickname, image: assetUrl(gameName, c.image, assetVersion) })),
+    [characters, gameName, assetVersion]
   )
   const editingScene = useMemo(
     () => (sceneModal?.mode === 'edit' ? scenes.find(s => s.id === sceneModal.id) ?? null : null),
     [sceneModal, scenes]
   )
   // Obrázek scény má přednost před pozadím hry
-  const displayBackground = assetUrl(gameName, currentScene?.image ?? backgroundImage)
-  const displayDmImage = assetUrl(gameName, dmImage)
+  const displayBackground = assetUrl(gameName, currentScene?.image ?? backgroundImage, assetVersion)
+  const displayDmImage = assetUrl(gameName, dmImage, assetVersion)
 
   // Při držení Ctrl nebo Alt zobrazit u jmen postav jejich pořadové číslo (klávesová zkratka)
   useEffect(() => {
@@ -373,6 +374,8 @@ export default function StoryEditor() {
       setCurrentSceneId(scene?.id ?? null)
       applySetup({ ...detail.setup, characters: resolved.characters })
       setVaultChanges(null)
+      // obrázky mohly být přepsány v Obsidianu se stejným názvem
+      api.bumpAssetVersion()
       if (!scene) setSceneModal({ mode: 'create' })
       return true
     } catch (error) {
@@ -573,7 +576,7 @@ export default function StoryEditor() {
         <CharacterModal
           key={characterModal.mode === 'edit' ? characterModal.id : 'new'}
           character={editingCharacter}
-          image={editingCharacter ? assetUrl(gameName, editingCharacter.image) : null}
+          image={editingCharacter ? assetUrl(gameName, editingCharacter.image, assetVersion) : null}
           onSubmit={handleCharacterSubmit}
           onDelete={editingCharacter ? () => deleteCharacter(editingCharacter.id) : undefined}
           onClose={() => setCharacterModal(null)}
@@ -584,7 +587,7 @@ export default function StoryEditor() {
         <SceneModal
           key={sceneModal.mode === 'edit' ? sceneModal.id : 'new'}
           scene={editingScene}
-          image={editingScene ? assetUrl(gameName, editingScene.image) : null}
+          image={editingScene ? assetUrl(gameName, editingScene.image, assetVersion) : null}
           defaultTitle={`Scéna ${scenes.length + 1}`}
           defaultCharacters={scenes.length > 0 ? scenes[scenes.length - 1].characters : sceneCharacterOptions.map(c => c.name)}
           allCharacters={sceneCharacterOptions}

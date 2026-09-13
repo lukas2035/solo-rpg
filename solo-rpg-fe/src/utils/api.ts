@@ -13,6 +13,7 @@ import type {
   StoryEntry,
 } from '@solo-rpg/shared'
 import { isRemoteImage } from '@solo-rpg/shared'
+import { useSyncExternalStore } from 'react'
 
 /**
  * Klient lokálního API (solo-rpg-be). Ve vývoji Vite proxy přesměruje
@@ -80,11 +81,13 @@ export async function uploadAsset(game: string, kind: AssetKind, file: Blob, fil
   if (ownerName) form.append('ownerName', ownerName)
   form.append('file', file, filename)
   const result = await request<AssetResponse>('POST', `${gamePath(game)}/assets`, form)
+  bumpAssetVersion()
   return result.path
 }
 
 export async function assetFromUrl(game: string, kind: AssetKind, url: string, ownerName?: string): Promise<ImageRef> {
   const result = await request<AssetResponse>('POST', `${gamePath(game)}/assets/from-url`, { kind, url, ownerName })
+  bumpAssetVersion()
   return result.path
 }
 
@@ -103,12 +106,34 @@ export async function storeImage(game: string, kind: AssetKind, image: File | st
   return image
 }
 
+// Verze obrázků: soubor ve vaultu má po přepsání stejnou cestu, takže by prohlížeč
+// zobrazoval starou verzi z cache. Po každém uploadu / načtení z vaultu verzi zvýšíme
+// a přidáme ji do URL jako ?v=.
+let assetVersion = Date.now()
+const assetVersionListeners = new Set<() => void>()
+
+export function bumpAssetVersion(): void {
+  assetVersion = Date.now()
+  assetVersionListeners.forEach(listener => listener())
+}
+
+/** React hook – aktuální verze obrázků; změna vyvolá překreslení komponenty. */
+export function useAssetVersion(): number {
+  return useSyncExternalStore(
+    listener => {
+      assetVersionListeners.add(listener)
+      return () => assetVersionListeners.delete(listener)
+    },
+    () => assetVersion
+  )
+}
+
 /** Převod odkazu na obrázek (cesta ve vaultu / vzdálená URL) na URL použitelnou v <img>. */
-export function assetUrl(game: string, ref: ImageRef): string | null {
+export function assetUrl(game: string, ref: ImageRef, version: number = assetVersion): string | null {
   if (!ref) return null
   if (isRemoteImage(ref)) return ref
   const encodedPath = ref.split('/').map(encodeURIComponent).join('/')
-  return `${API_BASE}/vault/${encodeURIComponent(game)}/${encodedPath}`
+  return `${API_BASE}/vault/${encodeURIComponent(game)}/${encodedPath}?v=${version}`
 }
 
 // ---------- scény ----------
