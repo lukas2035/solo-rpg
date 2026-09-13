@@ -331,14 +331,6 @@ export default function StoryEditor() {
     setSelectedPortrait({ image, character: characterName })
   }
 
-  const handleBackgroundImageDrop = async (image: File | string) => {
-    try {
-      setBackgroundImage(await api.storeImage(gameName, 'background', image))
-    } catch (error) {
-      console.error('Uložení pozadí selhalo:', error)
-    }
-  }
-
   const handleDmSave = async (name: string, image: string | null) => {
     setDmName(name)
     if (image === displayDmImage) return
@@ -500,7 +492,6 @@ export default function StoryEditor() {
         onCharacterClick={(id) => setCharacterModal({ mode: 'edit', id })}
         onCharacterImageDrop={handleCharacterImageDrop}
         onCharacterDelete={handleCharacterDelete}
-        onBackgroundImageDrop={handleBackgroundImageDrop}
         onExportMarkdown={handleExportMarkdown}
         onSaveSetup={handleSaveSetup}
         onLoadSetup={handleLoadSetup}

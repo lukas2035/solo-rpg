@@ -67,7 +67,8 @@ vault/<Název hry>/
                           tělo = markdown poznámky (editovatelné v modalu i v Obsidianu). PC i NPC bez rozlišení.
                           (stará složka npcs/ se při prvním čtení automaticky přejmenuje, `name` se rozdělí na jméno/příjmení)
   portraits/<Celé jméno>.png   (_dm.png pro vypravěče)
-  backgrounds/<soubor>    pozadí hry + obrázky scén jako backgrounds/<Název scény>.ext
+  backgrounds/<soubor>    obrázky scén jako backgrounds/<Název scény>.ext (+ případné staré pozadí hry `background` v game.md;
+                          v UI se už nenastavuje, jen slouží jako fallback a lze ho smazat 🚫)
   scenes/001 - Název.md   frontmatter: id, title, order, image, characters (wikilinky `[[Celé jméno]]` postav ve scéně), createdAt, updatedAt
                           tělo: markdown popis scény, pak značka `<!-- entries -->`, pak záznamy
                           záznamy: <!-- entry id="..." ts="..." --> + **[[Celé jméno|nickname]]**: text  |  **DM**:\n víceřádkový text

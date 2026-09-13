@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 interface Character {
@@ -19,7 +19,6 @@ interface CharacterBarProps {
   onCharacterClick: (characterId: string) => void
   onCharacterImageDrop: (characterId: string, file: File) => void
   onCharacterDelete?: (characterId: string) => void
-  onBackgroundImageDrop?: (image: File | string) => void
   onExportMarkdown?: () => string
   onSaveSetup?: () => Promise<boolean>
   onLoadSetup?: () => Promise<boolean>
@@ -38,7 +37,6 @@ export default function CharacterBar({
   onCharacterClick,
   onCharacterImageDrop,
   onCharacterDelete,
-  onBackgroundImageDrop,
   onExportMarkdown,
   onSaveSetup,
   onLoadSetup,
@@ -84,7 +82,6 @@ export default function CharacterBar({
     if (!window.confirm('Opravdu vymazat všechny záznamy aktuální scény (i ve vaultu)?')) return
     showFeedback((await onClearStory()) ? 'story-cleared' : 'story-clear-failed')
   }
-  const backgroundInputRef = useRef<HTMLInputElement | null>(null)
 
   const isImageFile = (f: File) =>
     f.type.startsWith('image/') ||
@@ -112,34 +109,6 @@ export default function CharacterBar({
     }
   }
 
-  const handleBackgroundDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (!onBackgroundImageDrop) return
-
-    // Soubor z disku (některé soubory z Průzkumníka mají prázdný MIME typ)
-    const files = Array.from(e.dataTransfer?.files ?? [])
-    const imageFile = files.find(isImageFile)
-    if (imageFile) {
-      onBackgroundImageDrop(imageFile)
-      return
-    }
-
-    // Obrázek přetažený z webu (URL v dataTransfer)
-    const html = e.dataTransfer.getData('text/html')
-    const srcMatch = html.match(/<img[^>]+src="([^"]+)"/i)
-    const url = srcMatch?.[1] || e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain')
-    if (url && /^(https?:|data:image\/)/i.test(url.trim())) {
-      onBackgroundImageDrop(url.trim())
-    }
-  }
-
-  const handleBackgroundPicker = (file: File | null | undefined) => {
-    if (file && isImageFile(file) && onBackgroundImageDrop) {
-      onBackgroundImageDrop(file)
-    }
-  }
-
   const handleCopyMarkdown = async () => {
     if (!onExportMarkdown) return
     try {
@@ -160,18 +129,6 @@ export default function CharacterBar({
 
   return (
     <div className="relative bg-gradient-to-b from-black/80 to-black/40 border-b-2 border-[var(--accent)] px-4 py-4">
-      <input
-        ref={backgroundInputRef}
-        type="file"
-        accept="image/*"
-        hidden
-        onChange={(e) => {
-          const file = e.target.files?.[0]
-          handleBackgroundPicker(file)
-          e.target.value = ''
-        }}
-      />
-
       <div className="flex gap-3 overflow-x-auto items-center w-full">
         {characters.map((character, index) => {
           const ratio = aspectRatios[character.id] || 1
@@ -304,19 +261,6 @@ export default function CharacterBar({
           >
             🖼️
           </button>
-        </div>
-
-        <div
-          className="flex-shrink-0 w-[120px] h-[112px] border-2 border-dashed border-[var(--accent)]/80 bg-black/30 flex items-center justify-center cursor-pointer relative"
-          onClick={() => backgroundInputRef.current?.click()}
-          onDragOver={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            e.dataTransfer.dropEffect = 'copy'
-          }}
-          onDrop={handleBackgroundDrop}
-        >
-          <span className="text-2xl leading-none text-[var(--accent)] absolute left-2 top-2">+</span>
         </div>
       </div>
     </div>
