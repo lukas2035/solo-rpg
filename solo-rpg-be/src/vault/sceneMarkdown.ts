@@ -7,12 +7,13 @@ import type { StoryEntry } from '@solo-rpg/shared'
  * **[[Aria]]**: Jednořádková replika postavy.
  *
  * <!-- entry id="1700000000001" ts="1700000000001" -->
- * **DM**:
+ * **[[Kronikář]]**:
  * Víceřádkový markdown vypravěče
  * pokračuje na dalších řádcích.
  *
  * Postavy jsou wikilinky na soubory v `characters/` (celé jméno) s aliasem = nickname,
- * vypravěč je uveden bez odkazu.
+ * vypravěči jsou wikilinky na soubory v `narrators/`. Záznam vypravěče bez souboru
+ * (starý zápis `**DM**:` / `**Vypravěč**:`) se čte jako vypravěč bez jména.
  * Text za dvojtečkou na téže řádce = jednořádkový záznam, text od nové řádky = markdown.
  */
 
@@ -21,6 +22,15 @@ const ATTR = /(\w+)="([^"]*)"/g
 const SPEAKER_LINE = /^\*\*(?:\[\[([^\]]+?)(?:\|[^\]]*)?\]\]|([^*\n]+?))\*\*:(?:[ \t]+|(?=\n)|$)/
 /** Začátek řádku s mluvčím kdekoli v textu – pro záznamy dopsané ručně bez markeru */
 const SPEAKER_LINE_GLOBAL = /^\*\*(?:\[\[[^\]]+?\]\]|[^*\n]+?)\*\*:/gm
+/** Hlavička vypravěče bez souboru; `DM` je historický zápis */
+const NARRATOR_FALLBACK = 'Vypravěč'
+const LEGACY_NARRATOR_NAMES = new Set(['DM', NARRATOR_FALLBACK])
+
+/** Známí mluvčí scény: celá jména + nicknamy postav a jména vypravěčů */
+export interface SceneSpeakers {
+  characters: Iterable<string>
+  narrators: Iterable<string>
+}
 
 function escapeSpeaker(name: string): string {
   return name.replace(/[[\]|*]/g, '')
@@ -44,12 +54,14 @@ export function renameSpeaker(body: string, oldName: string, newName: string, ne
   return body.replace(pattern, speakerLink(newName, newNickname))
 }
 
-export function serializeEntries(entries: StoryEntry[], dmName: string, nicknames: ReadonlyMap<string, string> = new Map()): string {
+export function serializeEntries(entries: StoryEntry[], nicknames: ReadonlyMap<string, string> = new Map()): string {
   return entries
     .map(entry => {
-      const speaker = entry.characterName === null
-        ? `**${escapeSpeaker(dmName)}**:`
-        : speakerLink(entry.characterName, nicknames.get(entry.characterName))
+      const speaker = entry.characterName !== null
+        ? speakerLink(entry.characterName, nicknames.get(entry.characterName))
+        : entry.narratorName
+          ? speakerLink(entry.narratorName)
+          : `**${NARRATOR_FALLBACK}**:`
       const text = entry.text.trim()
       // Víceřádkový text musí začínat na nové řádce, jinak by se při čtení rozpadl na více záznamů
       const separator = entry.markdown || text.includes('\n') ? '\n' : ' '
@@ -59,21 +71,24 @@ export function serializeEntries(entries: StoryEntry[], dmName: string, nickname
     .concat(entries.length ? '\n' : '')
 }
 
-export function parseEntries(body: string, dmName: string, knownSpeakers: Iterable<string> = []): StoryEntry[] {
+export function parseEntries(body: string, known: SceneSpeakers = { characters: [], narrators: [] }): StoryEntry[] {
   const entries: StoryEntry[] = []
   const markers = [...body.matchAll(ENTRY_MARKER)]
-  const speakers = new Set([dmName, 'DM', ...knownSpeakers])
+  const characters = new Set(known.characters)
+  const narrators = new Set(known.narrators)
+  const speakers = new Set([...LEGACY_NARRATOR_NAMES, ...narrators, ...characters])
   let generated = 0
 
   const pushSingle = (attrs: Record<string, string>, chunk: string) => {
     const trimmed = chunk.trim()
     if (!trimmed) return
-    const parsed = parseSpeaker(trimmed, dmName)
+    const parsed = parseSpeaker(trimmed, characters, narrators)
     const fallbackTs = Date.now() + generated++
     const timestamp = Number(attrs.ts)
     entries.push({
       id: attrs.id || `md-${fallbackTs}`,
       characterName: parsed.characterName,
+      narratorName: parsed.characterName === null ? parsed.narratorName : undefined,
       text: parsed.text,
       timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : fallbackTs,
       markdown: parsed.markdown || undefined,
@@ -111,11 +126,18 @@ export function parseEntries(body: string, dmName: string, knownSpeakers: Iterab
   return entries
 }
 
-function parseSpeaker(chunk: string, dmName: string): { characterName: string | null; text: string; markdown: boolean } {
+interface ParsedSpeaker {
+  characterName: string | null
+  narratorName: string | null
+  text: string
+  markdown: boolean
+}
+
+function parseSpeaker(chunk: string, characters: ReadonlySet<string>, narrators: ReadonlySet<string>): ParsedSpeaker {
   const match = chunk.match(SPEAKER_LINE)
   if (!match) {
     // Bez hlavičky mluvčího – bereme jako text vypravěče
-    return { characterName: null, text: chunk, markdown: chunk.includes('\n') }
+    return { characterName: null, narratorName: null, text: chunk, markdown: chunk.includes('\n') }
   }
   const linked = match[1]
   const plain = match[2]
@@ -123,7 +145,9 @@ function parseSpeaker(chunk: string, dmName: string): { characterName: string | 
   const text = rest.replace(/^\n/, '').trim()
   const markdown = rest.startsWith('\n') || text.includes('\n')
 
-  if (linked) return { characterName: linked.trim(), text, markdown }
-  const name = (plain ?? '').trim()
-  return { characterName: name === dmName || name === 'DM' ? null : name, text, markdown }
+  const name = (linked ?? plain ?? '').trim()
+  // Wikilink na vypravěče (pokud stejné jméno nemá i postava); prosté jméno vypravěče nebo starý zápis `DM`
+  if (narrators.has(name) && !characters.has(name)) return { characterName: null, narratorName: name, text, markdown }
+  if (!linked && LEGACY_NARRATOR_NAMES.has(name)) return { characterName: null, narratorName: null, text, markdown }
+  return { characterName: name, narratorName: null, text, markdown }
 }

@@ -15,15 +15,18 @@ interface InputAreaProps {
   onAddEntry: (text: string, characterId: string | null, markdown?: boolean) => void
   brightBackground?: boolean
   onBrightBackgroundChange?: (value: boolean) => void
-  /** Vlastní jméno vypravěče (výchozí „DM") */
-  dmName?: string
+  /** Jméno aktuálního vypravěče; null = hra vypravěče nemá a text vypravěče nelze zadávat */
+  narratorName: string | null
+  /** Otevře vytvoření prvního vypravěče (tlačítko „Zadat vypravěče“) */
+  onCreateNarrator: () => void
 }
 
-export default function InputArea({ characters, showShortcutNumbers, onAddEntry, brightBackground, onBrightBackgroundChange, dmName }: InputAreaProps) {
+export default function InputArea({ characters, showShortcutNumbers, onAddEntry, brightBackground, onBrightBackgroundChange, narratorName, onCreateNarrator }: InputAreaProps) {
   const [text, setText] = useState('')
   const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null)
   const [quoteMode, setQuoteMode] = useState(false)
   const [multilineMode, setMultilineMode] = useState(false)
+  const hasNarrator = narratorName !== null
   // Víceřádkový mód nejde vypnout, dokud je v textu znak nového řádku
   const multilineLocked = multilineMode && text.includes('\n')
   // Uživatel pro aktuální záznam uvozovky odmítl (mezera/smazání) – nepředvyplňovat znovu
@@ -32,6 +35,9 @@ export default function InputArea({ characters, showShortcutNumbers, onAddEntry,
   // AltGr+číslo vloží na české klávesnici znak – po zpracování zkratky ho zahodit
   const suppressNextInputRef = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+
+  // Bez vypravěče nelze mluvit „za vypravěče“ → výchozí výběr padne na první postavu scény
+  const activeCharacterId = selectedCharacterId === null && !hasNarrator ? characters[0]?.id ?? null : selectedCharacterId
 
   // Držet viditelný poslední (aktuálně psaný) řádek – starší zalomené řádky odjedou nahoru
   useEffect(() => {
@@ -68,6 +74,7 @@ export default function InputArea({ characters, showShortcutNumbers, onAddEntry,
       const digit = match[1]
 
       if (digit === '0') {
+        if (!hasNarrator) return
         e.preventDefault()
         suppressNextInputRef.current = true
         selectCharacter(null)
@@ -124,6 +131,11 @@ export default function InputArea({ characters, showShortcutNumbers, onAddEntry,
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    // Text vypravěče nelze zadat, dokud hra žádného vypravěče nemá
+    if (activeCharacterId === null && !hasNarrator) {
+      onCreateNarrator()
+      return
+    }
     let finalText = text
     if (quoteMode) {
       // Samotná předvyplněná uvozovka není záznam
@@ -135,7 +147,7 @@ export default function InputArea({ characters, showShortcutNumbers, onAddEntry,
       }
     }
     if (finalText.trim()) {
-      onAddEntry(finalText, selectedCharacterId, multilineMode)
+      onAddEntry(finalText, activeCharacterId, multilineMode)
       quoteEscapedRef.current = false
       setText(quoteMode ? '"' : '')
     }
@@ -161,18 +173,29 @@ export default function InputArea({ characters, showShortcutNumbers, onAddEntry,
             key={char.id}
             type="button"
             onClick={() => selectCharacter(char.id)}
-            className={tabClass(selectedCharacterId === char.id)}
+            className={tabClass(activeCharacterId === char.id)}
           >
             {showShortcutNumbers ? `${char.nickname} ${index + 1}` : char.nickname}
           </button>
         ))}
-        <button
-          type="button"
-          onClick={() => selectCharacter(null)}
-          className={`ml-6 ${tabClass(selectedCharacterId === null)}`}
-        >
-          {showShortcutNumbers ? `${dmName ?? 'DM'} 0` : dmName ?? 'DM'}
-        </button>
+        {hasNarrator ? (
+          <button
+            type="button"
+            onClick={() => selectCharacter(null)}
+            className={`ml-6 ${tabClass(activeCharacterId === null)}`}
+          >
+            {showShortcutNumbers ? `${narratorName} 0` : narratorName}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onCreateNarrator}
+            title="Hra zatím nemá vypravěče – vytvoř prvního"
+            className="ml-6 px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap cursor-pointer transition-all bg-black/70 text-[#aa3bff] border-2 border-dashed border-[#aa3bff]/60 hover:border-[#aa3bff] hover:border-solid"
+          >
+            Zadat vypravěče
+          </button>
+        )}
 
         <div className="ml-auto flex items-center gap-3 flex-shrink-0">
           <label
@@ -250,7 +273,7 @@ export default function InputArea({ characters, showShortcutNumbers, onAddEntry,
             // Tab přepne na předchozí vybraný charakter (střídání dvou mluvčích)
             if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
               e.preventDefault()
-              selectCharacter(previousCharacterIdRef.current)
+              if (previousCharacterIdRef.current !== null || hasNarrator) selectCharacter(previousCharacterIdRef.current)
             }
           }}
           placeholder="Napíš další akci nebo dialog..."

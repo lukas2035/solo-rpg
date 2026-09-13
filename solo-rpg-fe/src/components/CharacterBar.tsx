@@ -21,7 +21,16 @@ interface CharacterBarProps {
   onCharacterDelete?: (characterId: string) => void
   onExportMarkdown?: () => string
   onRenameGame?: () => Promise<boolean>
-  onEditDm?: () => void
+  /** Otevře výběr aktuálního vypravěče */
+  onSelectNarrator?: () => void
+  onToggleThreads?: () => void
+  onToggleFactions?: () => void
+  threadsOpen?: boolean
+  factionsOpen?: boolean
+  /** Počet otevřených dějových nití (odznak na tlačítku) */
+  openThreadCount?: number
+  /** Počet aktivních frakcí (odznak na tlačítku) */
+  activeFactionCount?: number
   onClearStory?: () => Promise<boolean>
   onShowBackground?: () => void
 }
@@ -35,7 +44,13 @@ export default function CharacterBar({
   onCharacterDelete,
   onExportMarkdown,
   onRenameGame,
-  onEditDm,
+  onSelectNarrator,
+  onToggleThreads,
+  onToggleFactions,
+  threadsOpen = false,
+  factionsOpen = false,
+  openThreadCount = 0,
+  activeFactionCount = 0,
   onClearStory,
   onShowBackground,
 }: CharacterBarProps) {
@@ -184,8 +199,8 @@ export default function CharacterBar({
           </button>
           <button
             type="button"
-            onClick={() => onEditDm?.()}
-            title="Nastavit jméno a portrét vypravěče (DM)"
+            onClick={() => onSelectNarrator?.()}
+            title="Vybrat vypravěče (nebo vytvořit nového)"
             className="w-8 h-8 rounded-md border border-[var(--accent)]/60 bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all"
           >
             🎭
@@ -205,6 +220,36 @@ export default function CharacterBar({
             className="w-8 h-8 rounded-md border border-[var(--accent)]/60 bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all"
           >
             🖼️
+          </button>
+          <button
+            type="button"
+            onClick={() => onToggleThreads?.()}
+            title={threadsOpen ? 'Skrýt dějové nitě' : 'Zobrazit dějové nitě'}
+            className={`relative w-8 h-8 rounded-md border bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all ${
+              threadsOpen ? 'border-[var(--accent)] bg-[var(--accent)]/20' : 'border-[var(--accent)]/60'
+            }`}
+          >
+            🧵
+            {openThreadCount > 0 && (
+              <span className="absolute top-0 right-0 min-w-[1rem] h-4 px-1 rounded-full bg-[var(--accent)] text-white text-[10px] font-bold flex items-center justify-center leading-none pointer-events-none">
+                {openThreadCount}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => onToggleFactions?.()}
+            title={factionsOpen ? 'Skrýt frakce' : 'Zobrazit frakce'}
+            className={`relative w-8 h-8 rounded-md border bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all ${
+              factionsOpen ? 'border-[var(--accent)] bg-[var(--accent)]/20' : 'border-[var(--accent)]/60'
+            }`}
+          >
+            🏴
+            {activeFactionCount > 0 && (
+              <span className="absolute top-0 right-0 min-w-[1rem] h-4 px-1 rounded-full bg-[var(--accent)] text-white text-[10px] font-bold flex items-center justify-center leading-none pointer-events-none">
+                {activeFactionCount}
+              </span>
+            )}
           </button>
         </div>
       </div>

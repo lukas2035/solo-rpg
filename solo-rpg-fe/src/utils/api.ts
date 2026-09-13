@@ -8,9 +8,15 @@ import type {
   GameSettings,
   GameSetup,
   ImageRef,
+  Narrator,
+  NarratorInput,
   SceneInput,
   SceneMeta,
   StoryEntry,
+  StoryThread,
+  ThreadInput,
+  Faction,
+  FactionInput,
 } from '@solo-rpg/shared'
 import { isRemoteImage } from '@solo-rpg/shared'
 import { useSyncExternalStore } from 'react'
@@ -60,7 +66,7 @@ export const getGame = (game: string) => request<GameDetail>('GET', gamePath(gam
 export const renameGame = (game: string, name: string) => request<GameMeta>('PATCH', gamePath(game), { name })
 export const deleteGame = (game: string) => request<void>('DELETE', gamePath(game))
 
-// ---------- setup (pozadí, DM) ----------
+// ---------- setup (pozadí, aktuální vypravěč) ----------
 
 export const saveSetup = (game: string, settings: GameSettings) => request<GameSetup>('PUT', `${gamePath(game)}/setup`, settings)
 
@@ -72,6 +78,15 @@ export const updateCharacter = (game: string, characterId: string, input: Charac
   request<Character>('PUT', `${gamePath(game)}/characters/${encodeURIComponent(characterId)}`, input)
 export const deleteCharacter = (game: string, characterId: string) =>
   request<void>('DELETE', `${gamePath(game)}/characters/${encodeURIComponent(characterId)}`)
+
+// ---------- vypravěči ----------
+
+export const createNarrator = (game: string, input: NarratorInput) =>
+  request<Narrator>('POST', `${gamePath(game)}/narrators`, input)
+export const updateNarrator = (game: string, narratorId: string, input: NarratorInput) =>
+  request<Narrator>('PUT', `${gamePath(game)}/narrators/${encodeURIComponent(narratorId)}`, input)
+export const deleteNarrator = (game: string, narratorId: string) =>
+  request<void>('DELETE', `${gamePath(game)}/narrators/${encodeURIComponent(narratorId)}`)
 
 // ---------- obrázky ----------
 
@@ -93,7 +108,7 @@ export async function assetFromUrl(game: string, kind: AssetKind, url: string, o
 
 /**
  * Uloží obrázek zadaný jako File, data: URL nebo http(s) URL do vaultu
- * a vrátí odkaz použitelný v GameSetup. `ownerName` = celé jméno postavy (portrait) / název scény (scene).
+ * a vrátí odkaz použitelný v GameSetup. `ownerName` = celé jméno postavy (portrait) / jméno vypravěče (narrator) / název scény (scene).
  */
 export async function storeImage(game: string, kind: AssetKind, image: File | string, ownerName?: string): Promise<ImageRef> {
   if (image instanceof File) return uploadAsset(game, kind, image, image.name, ownerName)
@@ -148,6 +163,24 @@ export const saveSceneEntries = (game: string, sceneId: string, entries: StoryEn
   request<void>('PUT', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}`, entries)
 export const deleteScene = (game: string, sceneId: string) =>
   request<void>('DELETE', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}`)
+
+// ---------- dějové nitě (threads) ----------
+
+export const listThreads = (game: string) => request<StoryThread[]>('GET', `${gamePath(game)}/threads`)
+export const createThread = (game: string, input: ThreadInput) => request<StoryThread>('POST', `${gamePath(game)}/threads`, input)
+export const updateThread = (game: string, threadId: string, input: ThreadInput) =>
+  request<StoryThread>('PUT', `${gamePath(game)}/threads/${encodeURIComponent(threadId)}`, input)
+export const deleteThread = (game: string, threadId: string) =>
+  request<void>('DELETE', `${gamePath(game)}/threads/${encodeURIComponent(threadId)}`)
+
+// ---------- frakce (factions) ----------
+
+export const listFactions = (game: string) => request<Faction[]>('GET', `${gamePath(game)}/factions`)
+export const createFaction = (game: string, input: FactionInput) => request<Faction>('POST', `${gamePath(game)}/factions`, input)
+export const updateFaction = (game: string, factionId: string, input: FactionInput) =>
+  request<Faction>('PUT', `${gamePath(game)}/factions/${encodeURIComponent(factionId)}`, input)
+export const deleteFaction = (game: string, factionId: string) =>
+  request<void>('DELETE', `${gamePath(game)}/factions/${encodeURIComponent(factionId)}`)
 
 // ---------- změny ve vaultu ----------
 

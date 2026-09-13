@@ -1,8 +1,8 @@
-import type { Character, CharacterInput, GameDetail, GameMeta, GameSettings, GameSetup, SceneInput, SceneMeta, StoryEntry, AssetKind } from '@solo-rpg/shared'
+import type { Character, CharacterInput, Faction, FactionInput, GameDetail, GameMeta, GameSettings, GameSetup, Narrator, NarratorInput, SceneInput, SceneMeta, StoryEntry, StoryThread, ThreadInput, AssetKind } from '@solo-rpg/shared'
 
 export interface AssetInput {
   kind: AssetKind
-  /** Celé jméno postavy (portrait) nebo název scény (scene) – určuje název souboru */
+  /** Celé jméno postavy (portrait), jméno vypravěče (narrator) nebo název scény (scene) – určuje název souboru */
   ownerName?: string
   /** Původní název souboru (pro odvození přípony a jména pozadí) */
   filename: string
@@ -27,6 +27,10 @@ export interface StorageProvider {
   updateCharacter(name: string, characterId: string, input: CharacterInput): Promise<Character>
   deleteCharacter(name: string, characterId: string): Promise<void>
 
+  createNarrator(name: string, input: NarratorInput): Promise<Narrator>
+  updateNarrator(name: string, narratorId: string, input: NarratorInput): Promise<Narrator>
+  deleteNarrator(name: string, narratorId: string): Promise<void>
+
   saveAsset(name: string, asset: AssetInput): Promise<string>
 
   listScenes(name: string): Promise<SceneMeta[]>
@@ -35,6 +39,16 @@ export interface StorageProvider {
   getSceneEntries(name: string, sceneId: string): Promise<StoryEntry[] | null>
   saveSceneEntries(name: string, sceneId: string, entries: StoryEntry[]): Promise<void>
   deleteScene(name: string, sceneId: string): Promise<void>
+
+  listThreads(name: string): Promise<StoryThread[]>
+  createThread(name: string, input: ThreadInput): Promise<StoryThread>
+  updateThread(name: string, threadId: string, input: ThreadInput): Promise<StoryThread>
+  deleteThread(name: string, threadId: string): Promise<void>
+
+  listFactions(name: string): Promise<Faction[]>
+  createFaction(name: string, input: FactionInput): Promise<Faction>
+  updateFaction(name: string, factionId: string, input: FactionInput): Promise<Faction>
+  deleteFaction(name: string, factionId: string): Promise<void>
 }
 
 export class NotFoundError extends Error {}

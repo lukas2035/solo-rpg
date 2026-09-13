@@ -11,9 +11,17 @@ interface Character {
   image: string | null
 }
 
+interface Narrator {
+  id: string
+  name: string
+  image: string | null
+}
+
 interface StoryEntry {
   id: string
   character: Character | null
+  /** Vypravěč záznamu (jen když `character` je null); null = vypravěč bez souboru (starý zápis) */
+  narrator: Narrator | null
   text: string
   timestamp: number
   /** Text je víceřádkový markdown */
@@ -27,15 +35,13 @@ interface StoryPanelProps {
   onEntryEdit?: (entryId: string, newText: string) => void
   /** Ztmavit podklad textů (při zesvětleném pozadí) */
   darkenEntries?: boolean
-  /** Vlastní jméno vypravěče (výchozí „DM") */
-  dmName?: string
-  /** Vlastní portrét vypravěče (null = výchozí /dm.png) */
-  dmImage?: string | null
 }
 
 const ENTRY_IMAGE_MAX_WIDTH = 140 // Zvětšená šířka pro obrázky
+/** Popisek záznamu vypravěče bez souboru */
+const NARRATOR_FALLBACK = 'Vypravěč'
 
-export default function StoryPanel({ entries, onPortraitClick, onEntryDelete, onEntryEdit, darkenEntries, dmName, dmImage }: StoryPanelProps) {
+export default function StoryPanel({ entries, onPortraitClick, onEntryDelete, onEntryEdit, darkenEntries }: StoryPanelProps) {
   const [aspectRatios, setAspectRatios] = useState<Record<string, number>>({})
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
@@ -96,34 +102,26 @@ export default function StoryPanel({ entries, onPortraitClick, onEntryDelete, on
       {entries.map((entry) => {
         const ratio = aspectRatios[entry.id] || 1
         const width = Math.min(ENTRY_IMAGE_HEIGHT * ratio, ENTRY_IMAGE_MAX_WIDTH)
+        // Mluvčí záznamu: postava, nebo vypravěč (portrét + jméno)
+        const speaker = entry.character
+          ? { name: entry.character.name, label: entry.character.nickname, image: entry.character.image }
+          : { name: entry.narrator?.name ?? NARRATOR_FALLBACK, label: entry.narrator?.name ?? NARRATOR_FALLBACK, image: entry.narrator?.image ?? null }
 
         return (
           <div key={entry.id} className="flex animate-fadeIn gap-4" style={{ alignItems: 'flex-start' }}>
             {/* Fixní šířka kontejner pro obrázek */}
             <div style={{ width: `${ENTRY_IMAGE_MAX_WIDTH}px`, flexShrink: 0 }}>
-              {entry.character && entry.character.image ? (
+              {speaker.image ? (
                 <img
-                  src={entry.character.image}
-                  alt={entry.character.name}
+                  src={speaker.image}
+                  alt={speaker.name}
                   className="rounded-md object-contain flex-shrink-0 border border-[var(--accent)] cursor-pointer hover:opacity-80 transition-opacity"
                   style={{
                     height: `${ENTRY_IMAGE_HEIGHT}px`,
                     width: `${width}px`,
                   }}
                   onLoad={(e) => handleImageLoad(entry.id, e.currentTarget)}
-                  onClick={() => onPortraitClick(entry.character!.image!, entry.character!.name)}
-                />
-              ) : !entry.character ? (
-                <img
-                  src={dmImage ?? '/dm.png'}
-                  alt={dmName ?? 'DM'}
-                  className="rounded-md object-contain flex-shrink-0 border border-[var(--accent)] cursor-pointer hover:opacity-80 transition-opacity"
-                  style={{
-                    height: `${ENTRY_IMAGE_HEIGHT}px`,
-                    width: `${width}px`,
-                  }}
-                  onLoad={(e) => handleImageLoad(entry.id, e.currentTarget)}
-                  onClick={() => onPortraitClick(dmImage ?? '/dm.png', dmName ?? 'DM')}
+                  onClick={() => onPortraitClick(speaker.image!, speaker.name)}
                 />
               ) : (
                 <div
@@ -134,7 +132,7 @@ export default function StoryPanel({ entries, onPortraitClick, onEntryDelete, on
                   }}
                 >
                   <span className="text-xs text-[var(--text)]">
-                    {entry.character.nickname.charAt(0)}
+                    {speaker.label.charAt(0)}
                   </span>
                 </div>
               )}
@@ -142,9 +140,9 @@ export default function StoryPanel({ entries, onPortraitClick, onEntryDelete, on
 
             {/* Text vlevo */}
             <div className="flex-1 text-left">
-              {entry.character && (
-                <div className="text-sm font-semibold text-[var(--accent)] mb-1" title={entry.character.name}>
-                  {entry.character.nickname}:
+              {(entry.character || entry.narrator) && (
+                <div className="text-sm font-semibold text-[var(--accent)] mb-1" title={speaker.name}>
+                  {speaker.label}:
                 </div>
               )}
               <div

@@ -6,9 +6,12 @@ import {
   CharacterInputSchema,
   CreateGameRequestSchema,
   GameSettingsSchema,
+  NarratorInputSchema,
   RenameGameRequestSchema,
   SceneInputSchema,
   StoryEntrySchema,
+  ThreadInputSchema,
+  FactionInputSchema,
   isValidGameName,
 } from '@solo-rpg/shared'
 import { ConflictError, NotFoundError, ValidationError, type StorageProvider } from '../vault/StorageProvider.js'
@@ -21,6 +24,9 @@ const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 const GameParams = z.object({ game: z.string().min(1) })
 const SceneParams = GameParams.extend({ scene: z.string().min(1) })
 const CharacterParams = GameParams.extend({ character: z.string().min(1) })
+const NarratorParams = GameParams.extend({ narrator: z.string().min(1) })
+const ThreadParams = GameParams.extend({ thread: z.string().min(1) })
+const FactionParams = GameParams.extend({ faction: z.string().min(1) })
 
 function sendError(reply: FastifyReply, error: unknown): FastifyReply {
   if (error instanceof z.ZodError) return reply.code(400).send({ error: z.prettifyError(error) })
@@ -101,7 +107,7 @@ export async function registerGameRoutes(app: FastifyInstance, storage: StorageP
     return reply.code(204).send()
   })
 
-  // ---------- setup (pozadí, DM) ----------
+  // ---------- setup (pozadí, aktuální vypravěč) ----------
 
   app.put('/api/games/:game/setup', async (request) => {
     const { game } = GameParams.parse(request.params)
@@ -126,6 +132,26 @@ export async function registerGameRoutes(app: FastifyInstance, storage: StorageP
   app.delete('/api/games/:game/characters/:character', async (request, reply) => {
     const { game, character } = CharacterParams.parse(request.params)
     await storage.deleteCharacter(game, character)
+    return reply.code(204).send()
+  })
+
+  // ---------- vypravěči ----------
+
+  app.post('/api/games/:game/narrators', async (request, reply) => {
+    const { game } = GameParams.parse(request.params)
+    const input = NarratorInputSchema.parse(request.body)
+    return reply.code(201).send(await storage.createNarrator(game, input))
+  })
+
+  app.put('/api/games/:game/narrators/:narrator', async (request) => {
+    const { game, narrator } = NarratorParams.parse(request.params)
+    const input = NarratorInputSchema.parse(request.body)
+    return storage.updateNarrator(game, narrator, input)
+  })
+
+  app.delete('/api/games/:game/narrators/:narrator', async (request, reply) => {
+    const { game, narrator } = NarratorParams.parse(request.params)
+    await storage.deleteNarrator(game, narrator)
     return reply.code(204).send()
   })
 
@@ -214,6 +240,56 @@ export async function registerGameRoutes(app: FastifyInstance, storage: StorageP
   app.delete('/api/games/:game/scenes/:scene', async (request, reply) => {
     const { game, scene } = SceneParams.parse(request.params)
     await storage.deleteScene(game, scene)
+    return reply.code(204).send()
+  })
+
+  // ---------- dějové nitě (threads) ----------
+
+  app.get('/api/games/:game/threads', async (request) => {
+    const { game } = GameParams.parse(request.params)
+    return storage.listThreads(game)
+  })
+
+  app.post('/api/games/:game/threads', async (request, reply) => {
+    const { game } = GameParams.parse(request.params)
+    const input = ThreadInputSchema.parse(request.body)
+    return reply.code(201).send(await storage.createThread(game, input))
+  })
+
+  app.put('/api/games/:game/threads/:thread', async (request) => {
+    const { game, thread } = ThreadParams.parse(request.params)
+    const input = ThreadInputSchema.parse(request.body)
+    return storage.updateThread(game, thread, input)
+  })
+
+  app.delete('/api/games/:game/threads/:thread', async (request, reply) => {
+    const { game, thread } = ThreadParams.parse(request.params)
+    await storage.deleteThread(game, thread)
+    return reply.code(204).send()
+  })
+
+  // ---------- frakce (factions) ----------
+
+  app.get('/api/games/:game/factions', async (request) => {
+    const { game } = GameParams.parse(request.params)
+    return storage.listFactions(game)
+  })
+
+  app.post('/api/games/:game/factions', async (request, reply) => {
+    const { game } = GameParams.parse(request.params)
+    const input = FactionInputSchema.parse(request.body)
+    return reply.code(201).send(await storage.createFaction(game, input))
+  })
+
+  app.put('/api/games/:game/factions/:faction', async (request) => {
+    const { game, faction } = FactionParams.parse(request.params)
+    const input = FactionInputSchema.parse(request.body)
+    return storage.updateFaction(game, faction, input)
+  })
+
+  app.delete('/api/games/:game/factions/:faction', async (request, reply) => {
+    const { game, faction } = FactionParams.parse(request.params)
+    await storage.deleteFaction(game, faction)
     return reply.code(204).send()
   })
 }
