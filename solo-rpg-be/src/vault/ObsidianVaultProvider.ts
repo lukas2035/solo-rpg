@@ -114,6 +114,23 @@ function joinSceneBody(description: string, entriesMd: string): string {
   return `${head}<!-- entries -->\n${entriesMd}`
 }
 
+/** Frontmatter `characters` scény: wikilinky `[[Celé jméno|alias]]` nebo prostá jména → celá jména */
+function parseCharacterLinks(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const names: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string') continue
+    const link = item.trim().match(/^\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]$/)
+    const name = (link ? link[1] : item).trim()
+    if (name && !names.includes(name)) names.push(name)
+  }
+  return names
+}
+
+function toCharacterLinks(names: string[]): string[] {
+  return names.map(n => `[[${n}]]`)
+}
+
 /**
  * Úložiště her ve struktuře čitelné Obsidianem:
  *
@@ -346,12 +363,25 @@ export class ObsidianVaultProvider implements StorageProvider {
     if (!used) await removeIfExists(path.join(dir, portrait))
   }
 
-  /** Po přejmenování postavy / změně nicku přepsat hlavičky mluvčího ve všech scénách. */
+  /** Po přejmenování postavy / změně nicku přepsat hlavičky mluvčího i seznam postav ve všech scénách. */
   private async renameSpeakerInScenes(dir: string, oldName: string, newName: string, nickname: string): Promise<void> {
     for (const scene of await this.readScenes(dir)) {
       const body = renameSpeaker(scene.body, oldName, newName, nickname)
-      if (body === null) continue
-      await writeFileAtomic(path.join(dir, SCENE_DIR, scene.fileName), matter.stringify(body, scene.data))
+      const inScene = scene.meta.characters.includes(oldName)
+      if (body === null && !inScene) continue
+      const data: Frontmatter = inScene
+        ? { ...scene.data, characters: toCharacterLinks(scene.meta.characters.map(n => (n === oldName ? newName : n))) }
+        : scene.data
+      await writeFileAtomic(path.join(dir, SCENE_DIR, scene.fileName), matter.stringify(body ?? scene.body, data))
+    }
+  }
+
+  /** Po smazání postavy ji odebrat ze seznamů postav scén. */
+  private async removeCharacterFromScenes(dir: string, name: string): Promise<void> {
+    for (const scene of await this.readScenes(dir)) {
+      if (!scene.meta.characters.includes(name)) continue
+      const data: Frontmatter = { ...scene.data, characters: toCharacterLinks(scene.meta.characters.filter(n => n !== name)) }
+      await writeFileAtomic(path.join(dir, SCENE_DIR, scene.fileName), matter.stringify(scene.body, data))
     }
   }
 
@@ -433,6 +463,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     if (!current) throw new NotFoundError(`Postava „${characterId}“ neexistuje.`)
     await removeIfExists(path.join(charDir, current.fileName))
     if (current.character.image) await this.removePortraitIfUnused(dir, current.character.image, existing, characterId)
+    await this.removeCharacterFromScenes(dir, current.character.name)
     await this.touchGame(dir)
   }
 
@@ -519,11 +550,16 @@ export class ObsidianVaultProvider implements StorageProvider {
     const sceneDir = path.join(dir, SCENE_DIR)
     const files = await listFiles(sceneDir, '.md')
     const scenes: SceneFile[] = []
+    // Starší soubory scén bez klíče `characters` → všechny postavy hry
+    let allCharacterNames: string[] | null = null
     for (const [index, fileName] of files.entries()) {
       const raw = await readTextIfExists(path.join(sceneDir, fileName))
       if (raw === null) continue
       const parsed = matter(raw)
       const data = parsed.data as Frontmatter
+      if (data.characters === undefined && allCharacterNames === null) {
+        allCharacterNames = (await this.readCharacters(dir)).map(c => c.character.name)
+      }
       const stat = await fs.stat(path.join(sceneDir, fileName))
       const baseName = fileName.replace(/\.md$/i, '')
       const orderFromName = parseInt(baseName, 10)
@@ -539,6 +575,7 @@ export class ObsidianVaultProvider implements StorageProvider {
           order: typeof data.order === 'number' ? data.order : Number.isFinite(orderFromName) ? orderFromName : index + 1,
           description,
           image: stringOrNull(data.image),
+          characters: data.characters === undefined ? (allCharacterNames ?? []) : parseCharacterLinks(data.characters),
           createdAt: toTimestamp(data.createdAt, stat.birthtimeMs),
           updatedAt: toTimestamp(data.updatedAt, stat.mtimeMs),
         },
@@ -559,6 +596,17 @@ export class ObsidianVaultProvider implements StorageProvider {
     }
   }
 
+  /** Jména postav scény: bez duplicit, jen existující postavy hry (kanonický zápis jména podle souboru). */
+  private async normalizeSceneCharacters(dir: string, names: string[]): Promise<string[]> {
+    const known = await this.readCharacters(dir)
+    const result: string[] = []
+    for (const raw of names) {
+      const match = known.find(c => nameKey(c.character.name) === nameKey(raw))
+      if (match && !result.includes(match.character.name)) result.push(match.character.name)
+    }
+    return result
+  }
+
   private async writeSceneFile(dir: string, meta: SceneMeta, entriesBody: string, extra: Frontmatter): Promise<void> {
     const data: Frontmatter = {
       ...extra,
@@ -566,6 +614,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       title: meta.title,
       order: meta.order,
       image: meta.image,
+      characters: toCharacterLinks(meta.characters),
       createdAt: toIso(meta.createdAt),
       updatedAt: toIso(meta.updatedAt),
     }
@@ -592,6 +641,9 @@ export class ObsidianVaultProvider implements StorageProvider {
     const title = input.title.trim()
     this.assertSceneTitleFree(scenes, title)
     const order = scenes.reduce((max, s) => Math.max(max, s.meta.order), 0) + 1
+    // Bez explicitního seznamu převzít postavy z poslední scény
+    const last = scenes[scenes.length - 1]
+    const characters = await this.normalizeSceneCharacters(dir, input.characters ?? last?.meta.characters ?? [])
     const now = Date.now()
     const meta: SceneMeta = {
       id: `scene-${now}`,
@@ -599,6 +651,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       order,
       description: input.description ?? '',
       image: input.image ?? null,
+      characters,
       createdAt: now,
       updatedAt: now,
     }
@@ -639,6 +692,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       title,
       description: input.description ?? previous.description,
       image,
+      characters: input.characters ? await this.normalizeSceneCharacters(dir, input.characters) : previous.characters,
       updatedAt: Date.now(),
     }
     await this.writeSceneFile(dir, meta, current.entriesBody, current.data)

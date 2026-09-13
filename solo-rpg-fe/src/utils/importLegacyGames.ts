@@ -80,7 +80,7 @@ export async function importLegacyGames(): Promise<LegacyImportResult> {
       })
 
       if (story && story.length > 0) {
-        const scene = await api.createScene(target, { title: 'Scéna 1' })
+        const scene = await api.createScene(target, { title: 'Scéna 1', characters: [...created] })
         await api.saveSceneEntries(target, scene.id, story)
       }
 

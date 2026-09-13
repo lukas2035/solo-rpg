@@ -8,6 +8,16 @@ export interface SceneFormValues {
   title: string
   description: string
   image: string | null | undefined
+  /** Celá jména postav přítomných ve scéně */
+  characters: string[]
+}
+
+/** Postava hry nabízená v checklistu */
+export interface SceneCharacterOption {
+  name: string
+  nickname: string
+  /** URL portrétu použitelná v <img> */
+  image: string | null
 }
 
 interface SceneModalProps {
@@ -17,6 +27,10 @@ interface SceneModalProps {
   image: string | null
   /** Navržený název pro novou scénu */
   defaultTitle?: string
+  /** Předvybrané postavy pro novou scénu (typicky postavy poslední scény) */
+  defaultCharacters?: string[]
+  /** Všechny postavy hry, ze kterých scéna vybírá */
+  allCharacters: SceneCharacterOption[]
   /** Hra nemá žádnou scénu – dialog nelze zavřít bez vytvoření */
   required?: boolean
   /** Uloží scénu; při chybě (např. duplicitní název) vyhodí výjimku s hláškou pro uživatele */
@@ -25,11 +39,12 @@ interface SceneModalProps {
   onClose: () => void
 }
 
-/** Dialog pro vytvoření a úpravu scény (název, obrázek = pozadí scény, markdown popis) */
-export default function SceneModal({ scene, image, defaultTitle = '', required = false, onSubmit, onDelete, onClose }: SceneModalProps) {
+/** Dialog pro vytvoření a úpravu scény (název, obrázek = pozadí scény, markdown popis, přítomné postavy) */
+export default function SceneModal({ scene, image, defaultTitle = '', defaultCharacters = [], allCharacters, required = false, onSubmit, onDelete, onClose }: SceneModalProps) {
   const isEdit = scene !== null
   const [title, setTitle] = useState(scene?.title ?? defaultTitle)
   const [description, setDescription] = useState(scene?.description ?? '')
+  const [selected, setSelected] = useState<string[]>(scene?.characters ?? defaultCharacters)
   const [editImage, setEditImage] = useState<string | null>(image)
   const [imageChanged, setImageChanged] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -50,6 +65,9 @@ export default function SceneModal({ scene, image, defaultTitle = '', required =
     setImageChanged(true)
   }
 
+  const toggleCharacter = (name: string) =>
+    setSelected(prev => (prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]))
+
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault()
     if (saving) return
@@ -62,7 +80,7 @@ export default function SceneModal({ scene, image, defaultTitle = '', required =
     setSaving(true)
     setError(null)
     try {
-      await onSubmit({ title: trimmed, description, image: imageChanged ? editImage : undefined })
+      await onSubmit({ title: trimmed, description, image: imageChanged ? editImage : undefined, characters: selected.filter(n => allCharacters.some(c => c.name === n)) })
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Uložení scény selhalo.')
@@ -140,6 +158,39 @@ export default function SceneModal({ scene, image, defaultTitle = '', required =
             className="sm:w-56"
           />
         </div>
+
+        <fieldset className="flex flex-col gap-2 text-left text-sm text-[var(--text)]">
+          <legend className="mb-1">
+            Postavy ve scéně <span className="opacity-60">({selected.length} z {allCharacters.length})</span>
+          </legend>
+          {allCharacters.length === 0 ? (
+            <p className="opacity-60 text-xs">Hra zatím nemá žádné postavy – přidáš je tlačítkem „+“ v horním pásu.</p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
+              {allCharacters.map(c => {
+                const checked = selected.includes(c.name)
+                return (
+                  <label
+                    key={c.name}
+                    title={checked ? `Odebrat ${c.name} ze scény` : `Přidat ${c.name} do scény`}
+                    className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border cursor-pointer select-none transition-colors ${
+                      checked ? 'border-[var(--accent)] bg-[var(--accent)]/15' : 'border-[var(--accent)]/30 opacity-70 hover:opacity-100'
+                    }`}
+                  >
+                    <input type="checkbox" checked={checked} onChange={() => toggleCharacter(c.name)} className="accent-[var(--accent)]" />
+                    <span className="w-8 h-8 rounded overflow-hidden bg-gray-800 flex-shrink-0 flex items-center justify-center text-xs">
+                      {c.image ? <img src={c.image} alt="" className="w-full h-full object-cover" /> : c.nickname.slice(0, 1)}
+                    </span>
+                    <span className="flex flex-col min-w-0">
+                      <span className="font-semibold truncate">{c.nickname}</span>
+                      {c.name !== c.nickname && <span className="text-xs opacity-60 truncate">{c.name}</span>}
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          )}
+        </fieldset>
 
         {error && (
           <div className="px-3 py-2 rounded-lg bg-red-900/70 border border-red-500 text-sm text-red-100">{error}</div>

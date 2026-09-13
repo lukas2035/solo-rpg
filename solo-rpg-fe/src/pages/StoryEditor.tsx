@@ -67,12 +67,21 @@ export default function StoryEditor() {
     (c: Character): DisplayCharacter => ({ id: c.id, name: c.name, nickname: c.nickname, image: assetUrl(gameName, c.image) }),
     [gameName]
   )
-  const displayCharacters = useMemo(() => characters.map(toDisplay), [characters, toDisplay])
+  const currentScene = useMemo(() => scenes.find(s => s.id === currentSceneId) ?? null, [scenes, currentSceneId])
+  // V pásu a při psaní jen postavy aktuální scény (+ dočasní mluvčí, kteří v ní mluví)
+  const displayCharacters = useMemo(() => {
+    const inScene = new Set(currentScene?.characters ?? [])
+    const speaking = new Set(storyEntries.map(e => e.character?.id))
+    return characters.filter(c => inScene.has(c.name) || (isEphemeral(c) && speaking.has(c.id))).map(toDisplay)
+  }, [characters, currentScene, storyEntries, toDisplay])
   const displayEntries = useMemo(
     () => storyEntries.map(e => ({ ...e, character: e.character ? toDisplay(e.character) : null })),
     [storyEntries, toDisplay]
   )
-  const currentScene = useMemo(() => scenes.find(s => s.id === currentSceneId) ?? null, [scenes, currentSceneId])
+  const sceneCharacterOptions = useMemo(
+    () => characters.filter(c => !isEphemeral(c)).map(c => ({ name: c.name, nickname: c.nickname, image: assetUrl(gameName, c.image) })),
+    [characters, gameName]
+  )
   const editingScene = useMemo(
     () => (sceneModal?.mode === 'edit' ? scenes.find(s => s.id === sceneModal.id) ?? null : null),
     [sceneModal, scenes]
@@ -201,6 +210,14 @@ export default function StoryEditor() {
     return updatedEntries
   }
 
+  /** Přidá postavu do seznamu postav aktuální scény (uloží do souboru scény) */
+  const addCharacterToCurrentScene = async (name: string) => {
+    const scene = currentScene
+    if (!scene || scene.characters.includes(name)) return
+    const saved = await api.updateScene(gameName, scene.id, { title: scene.title, characters: [...scene.characters, name] })
+    setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))
+  }
+
   /** Submit dialogu postavy: vytvoří/aktualizuje soubor postavy a uloží portrét */
   const handleCharacterSubmit = async (values: CharacterFormValues) => {
     const editing = editingCharacter
@@ -221,9 +238,15 @@ export default function StoryEditor() {
       const updatedEntries = replaceCharacter(editing.id, saved)
       // Dočasná postava vznikla z ručně dopsané repliky – scénu přepsat na odkaz na nový soubor
       if (!persisted) persistStory(updatedEntries)
+      // BE přepsal jméno i v seznamech postav scén → promítnout do stavu
+      if (persisted && editing.name !== saved.name) {
+        setScenes(prev => prev.map(s => ({ ...s, characters: s.characters.map(n => (n === editing.name ? saved.name : n)) })))
+      }
     } else {
       setCharacters(prev => [...prev, saved])
     }
+    // Nová postava (i z dočasné) patří do scény, ve které vznikla
+    if (!persisted) await addCharacterToCurrentScene(saved.name)
   }
 
   const deleteCharacter = async (characterId: string) => {
@@ -231,6 +254,7 @@ export default function StoryEditor() {
     if (!character) return
     if (!isEphemeral(character)) await api.deleteCharacter(gameName, characterId)
     setCharacters(prev => prev.filter(c => c.id !== characterId))
+    setScenes(prev => prev.map(s => ({ ...s, characters: s.characters.filter(n => n !== character.name) })))
   }
 
   const handleCharacterImageDrop = async (characterId: string, file: File) => {
@@ -411,7 +435,7 @@ export default function StoryEditor() {
   /** Submit dialogu scény: vytvoří/aktualizuje soubor scény a uloží její obrázek pod jejím názvem */
   const handleSceneSubmit = async (values: SceneFormValues) => {
     const editing = editingScene
-    const base: SceneInput = { title: values.title, description: values.description }
+    const base: SceneInput = { title: values.title, description: values.description, characters: values.characters }
 
     // Nejdřív scéna (kontrola duplicitního názvu), teprve pak obrázek pojmenovaný podle ní
     let saved = editing
@@ -547,6 +571,8 @@ export default function StoryEditor() {
           scene={editingScene}
           image={editingScene ? assetUrl(gameName, editingScene.image) : null}
           defaultTitle={`Scéna ${scenes.length + 1}`}
+          defaultCharacters={scenes.length > 0 ? scenes[scenes.length - 1].characters : sceneCharacterOptions.map(c => c.name)}
+          allCharacters={sceneCharacterOptions}
           required={scenes.length === 0}
           onSubmit={handleSceneSubmit}
           onDelete={editingScene ? () => deleteScene(editingScene.id) : undefined}

@@ -45,7 +45,7 @@ vault/
     └── scenes/001 - Název.md  # scény = popis + záznamy příběhu
 ```
 
-Formát scény (frontmatter `title`, `image`, tělo = markdown popis, značka `<!-- entries -->`, záznamy):
+Formát scény (frontmatter `title`, `image`, `characters` = wikilinky postav přítomných ve scéně; tělo = markdown popis, značka `<!-- entries -->`, záznamy):
 
 ```markdown
 Popis scény v markdownu (upravuje se v dialogu scény i v Obsidianu).
@@ -76,8 +76,8 @@ PUT           /api/games/:game/setup
 POST/PUT/DEL  /api/games/:game/characters[/:id]
 POST          /api/games/:game/assets            (multipart: kind, ownerName?, file)
 POST          /api/games/:game/assets/from-url   ({ kind, url, ownerName? })
-GET/POST      /api/games/:game/scenes            (POST: { title, description?, image? })
-GET/PUT/PATCH/DEL /api/games/:game/scenes/:scene (PUT = záznamy, PATCH = název/popis/obrázek)
+GET/POST      /api/games/:game/scenes            (POST: { title, description?, image?, characters? })
+GET/PUT/PATCH/DEL /api/games/:game/scenes/:scene (PUT = záznamy, PATCH = název/popis/obrázek/postavy)
 GET           /vault/<Hra>/<cesta>                (statické soubory z vaultu)
 ```
 

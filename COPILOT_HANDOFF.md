@@ -68,7 +68,7 @@ vault/<Název hry>/
                           (stará složka npcs/ se při prvním čtení automaticky přejmenuje, `name` se rozdělí na jméno/příjmení)
   portraits/<Celé jméno>.png   (_dm.png pro vypravěče)
   backgrounds/<soubor>    pozadí hry + obrázky scén jako backgrounds/<Název scény>.ext
-  scenes/001 - Název.md   frontmatter: id, title, order, image, createdAt, updatedAt
+  scenes/001 - Název.md   frontmatter: id, title, order, image, characters (wikilinky `[[Celé jméno]]` postav ve scéně), createdAt, updatedAt
                           tělo: markdown popis scény, pak značka `<!-- entries -->`, pak záznamy
                           záznamy: <!-- entry id="..." ts="..." --> + **[[Celé jméno|nickname]]**: text  |  **DM**:\n víceřádkový text
                           (soubor bez značky = starý formát, celé tělo jsou záznamy)
@@ -94,6 +94,11 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
 - Submit: `POST /scenes` nebo `PATCH /scenes/:id` (409 při duplicitním názvu) → `storeImage` → `PATCH` s cestou.
   `image: undefined` = beze změny, `null` = odebrat (stejný vzor jako u postav).
 - Hra bez scén → dialog s `required` (bez Zrušit, Esc nezavře). Smazat lze i poslední scénu → znovu povinný dialog.
+- **Postavy scény**: každá scéna má `characters` (celá jména). V pásu a v InputArea jsou jen postavy aktuální scény
+  (+ dočasní `tmp-` mluvčí, kteří v ní mluví). Checklist v `SceneModal` vybírá z postav hry; nová scéna předvyplní
+  postavy poslední scény (BE to dělá i bez `characters` v POST), první scéna všechny postavy hry. „+“ v pásu vytvoří
+  postavu a přidá ji do aktuální scény (`PATCH /scenes/:id {title, characters}`). BE při rename/delete postavy
+  přepíše seznamy ve scénách; soubor scény bez klíče `characters` = všechny postavy hry (zpětná kompatibilita).
 - Sdílené: `ImageDropField` (klik/drop/URL), `utils/forms.ts` (`selectAll`, `inputClass`).
 
 ### API (BE, port 3001; Vite proxy přesměrovává `/api` a `/vault` z 5173)
@@ -104,7 +109,7 @@ PUT  /api/games/:name/setup    (jen backgroundImage, brightBackground, dm)
 POST /api/games/:name/characters             PUT/DELETE /api/games/:name/characters/:id
 POST /api/games/:name/assets (multipart: kind portrait|dm|background|scene, ownerName?, file)
 POST /api/games/:name/assets/from-url ({ kind, url, ownerName? })
-GET/POST /api/games/:name/scenes ({title, description?, image?})
+GET/POST /api/games/:name/scenes ({title, description?, image?, characters?})
 GET(záznamy)/PUT(záznamy)/PATCH(meta)/DELETE /api/games/:name/scenes/:id
 GET  /vault/*  (statické soubory vaultu)
 ```

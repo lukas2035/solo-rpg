@@ -76,16 +76,19 @@ export const SceneMetaSchema = z.object({
   description: z.string(),
   /** Obrázek scény – pozadí při jejím přehrávání (`backgrounds/<Název scény>.<ext>`) */
   image: ImageRefSchema,
+  /** Celá jména postav přítomných ve scéně (frontmatter `characters` jako wikilinky) */
+  characters: z.array(z.string()),
   createdAt: z.number(),
   updatedAt: z.number(),
 })
 export type SceneMeta = z.infer<typeof SceneMetaSchema>
 
-/** Vstup pro vytvoření/úpravu scény */
+/** Vstup pro vytvoření/úpravu scény; `characters` undefined při vytvoření = převzít z poslední scény */
 export const SceneInputSchema = z.object({
   title: z.string().trim().min(1).max(100),
   description: z.string().optional(),
   image: ImageRefSchema.optional(),
+  characters: z.array(z.string().trim().min(1)).optional(),
 })
 export type SceneInput = z.infer<typeof SceneInputSchema>
 
