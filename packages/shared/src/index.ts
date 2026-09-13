@@ -9,12 +9,38 @@ import { z } from 'zod'
 export const ImageRefSchema = z.string().min(1).nullable()
 export type ImageRef = z.infer<typeof ImageRefSchema>
 
+/**
+ * Postava (PC i NPC – zatím nerozlišujeme). Soubor ve vaultu: `characters/<Celé jméno>.md`,
+ * portrét `portraits/<Celé jméno>.<ext>`. Ve scénách se používá `**[[Celé jméno|nickname]]**:`.
+ */
 export const CharacterSchema = z.object({
   id: z.string().min(1),
+  /** Celé jméno = `firstName lastName` (identita postavy, název souboru) */
   name: z.string().min(1),
+  firstName: z.string().min(1),
+  lastName: z.string(),
+  /** Zobrazované jméno (v pásu postav, u replik) */
+  nickname: z.string().min(1),
   image: ImageRefSchema,
+  /** Volný markdown – tělo souboru postavy */
+  notes: z.string(),
 })
 export type Character = z.infer<typeof CharacterSchema>
+
+/** Vstup pro vytvoření/úpravu postavy */
+export const CharacterInputSchema = z.object({
+  firstName: z.string().trim().min(1).max(100),
+  lastName: z.string().trim().max(100),
+  nickname: z.string().trim().min(1).max(100),
+  image: ImageRefSchema.optional(),
+  notes: z.string().optional(),
+})
+export type CharacterInput = z.infer<typeof CharacterInputSchema>
+
+/** Celé jméno postavy z křestního jména a příjmení */
+export function fullName(firstName: string, lastName: string): string {
+  return `${firstName.trim()} ${lastName.trim()}`.trim()
+}
 
 export const DmSchema = z.object({
   name: z.string().min(1),
@@ -22,11 +48,16 @@ export const DmSchema = z.object({
 })
 export type Dm = z.infer<typeof DmSchema>
 
-export const GameSetupSchema = z.object({
-  characters: z.array(CharacterSchema),
+/** Nastavení hry bez postav (postavy mají vlastní CRUD endpointy) */
+export const GameSettingsSchema = z.object({
   backgroundImage: ImageRefSchema,
   brightBackground: z.boolean(),
   dm: DmSchema,
+})
+export type GameSettings = z.infer<typeof GameSettingsSchema>
+
+export const GameSetupSchema = GameSettingsSchema.extend({
+  characters: z.array(CharacterSchema),
 })
 export type GameSetup = z.infer<typeof GameSetupSchema>
 

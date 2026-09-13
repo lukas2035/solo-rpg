@@ -1,11 +1,12 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Character, GameSetup, ImageRef, SceneMeta, StoryEntry as ApiStoryEntry } from '@solo-rpg/shared'
+import type { Character, CharacterInput, GameSettings, GameSetup, ImageRef, SceneMeta, StoryEntry as ApiStoryEntry } from '@solo-rpg/shared'
 import CharacterBar from '../components/CharacterBar'
 import StoryPanel from '../components/StoryPanel'
 import InputArea from '../components/InputArea'
 import PortraitModal from '../components/PortraitModal'
 import DmSettingsModal from '../components/DmSettingsModal'
+import CharacterModal, { type CharacterFormValues } from '../components/CharacterModal'
 import SceneBar from '../components/SceneBar'
 import * as api from '../utils/api'
 import { assetUrl } from '../utils/api'
@@ -14,6 +15,7 @@ import { assetUrl } from '../utils/api'
 interface DisplayCharacter {
   id: string
   name: string
+  nickname: string
   image: string | null
 }
 
@@ -26,7 +28,12 @@ interface StoryEntry {
   markdown?: boolean
 }
 
+type CharacterModalState = { mode: 'create' } | { mode: 'edit'; id: string }
+
 const SETUP_AUTOSAVE_MS = 600
+
+/** Mluvčí dopsaný ručně ve scéně, který zatím nemá soubor postavy (není uložen, dokud ho uživatel nevytvoří) */
+const isEphemeral = (character: Character) => character.id.startsWith('tmp-')
 
 export default function StoryEditor() {
   const { storyId } = useParams()
@@ -45,6 +52,7 @@ export default function StoryEditor() {
   const [dmName, setDmName] = useState('DM')
   const [dmImage, setDmImage] = useState<ImageRef>(null)
   const [showDmSettings, setShowDmSettings] = useState(false)
+  const [characterModal, setCharacterModal] = useState<CharacterModalState | null>(null)
   const [showShortcutNumbers, setShowShortcutNumbers] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -53,7 +61,7 @@ export default function StoryEditor() {
   const lastSavedSetupRef = useRef<string>('')
 
   const toDisplay = useCallback(
-    (c: Character): DisplayCharacter => ({ id: c.id, name: c.name, image: assetUrl(gameName, c.image) }),
+    (c: Character): DisplayCharacter => ({ id: c.id, name: c.name, nickname: c.nickname, image: assetUrl(gameName, c.image) }),
     [gameName]
   )
   const displayCharacters = useMemo(() => characters.map(toDisplay), [characters, toDisplay])
@@ -79,16 +87,16 @@ export default function StoryEditor() {
     }
   }, [])
 
-  /** Položky scény z API → položky s odkazem na postavu (chybějící postavy vytvoří bez obrázku) */
+  /** Položky scény z API → položky s odkazem na postavu (neznámí mluvčí dostanou dočasnou postavu bez souboru) */
   const resolveEntries = useCallback((stored: ApiStoryEntry[], knownCharacters: Character[]) => {
     const updated = [...knownCharacters]
-    let nextId = Math.max(0, ...updated.map(c => parseInt(c.id) || 0)) + 1
     const entries: StoryEntry[] = stored.map(e => {
       let character: Character | null = null
       if (e.characterName !== null) {
-        character = updated.find(c => c.name === e.characterName) ?? null
+        const speaker = e.characterName
+        character = updated.find(c => c.name === speaker) ?? updated.find(c => c.nickname === speaker) ?? null
         if (!character) {
-          character = { id: (nextId++).toString(), name: e.characterName, image: null }
+          character = { id: `tmp-${speaker}`, name: speaker, firstName: speaker, lastName: '', nickname: speaker, image: null, notes: '' }
           updated.push(character)
         }
       }
@@ -102,7 +110,8 @@ export default function StoryEditor() {
     setBrightBackground(setup.brightBackground)
     setDmName(setup.dm.name)
     setDmImage(setup.dm.image)
-    lastSavedSetupRef.current = JSON.stringify(setup)
+    const settings: GameSettings = { backgroundImage: setup.backgroundImage, brightBackground: setup.brightBackground, dm: setup.dm }
+    lastSavedSetupRef.current = JSON.stringify(settings)
   }, [])
 
   // Při otevření hry načíst nastavení, scény a poslední scénu
@@ -133,23 +142,23 @@ export default function StoryEditor() {
     return () => { cancelled = true }
   }, [gameName, resolveEntries, applySetup])
 
-  const currentSetup = useMemo<GameSetup>(
-    () => ({ characters, backgroundImage, brightBackground, dm: { name: dmName, image: dmImage } }),
-    [characters, backgroundImage, brightBackground, dmName, dmImage]
+  const currentSettings = useMemo<GameSettings>(
+    () => ({ backgroundImage, brightBackground, dm: { name: dmName, image: dmImage } }),
+    [backgroundImage, brightBackground, dmName, dmImage]
   )
 
-  // Automatické ukládání nastavení (postavy, pozadí, DM) do vaultu
+  // Automatické ukládání nastavení (pozadí, DM) do vaultu – postavy mají vlastní endpointy
   useEffect(() => {
     if (!setupLoadedRef.current) return
-    const serialized = JSON.stringify(currentSetup)
+    const serialized = JSON.stringify(currentSettings)
     if (serialized === lastSavedSetupRef.current) return
     const timer = setTimeout(() => {
-      api.saveSetup(gameName, currentSetup)
+      api.saveSetup(gameName, currentSettings)
         .then(() => { lastSavedSetupRef.current = serialized })
         .catch(error => console.error('Automatické uložení nastavení selhalo:', error))
     }, SETUP_AUTOSAVE_MS)
     return () => clearTimeout(timer)
-  }, [currentSetup, gameName])
+  }, [currentSettings, gameName])
 
   const toApiEntries = (entries: StoryEntry[]): ApiStoryEntry[] =>
     entries.map(e => ({
@@ -166,17 +175,70 @@ export default function StoryEditor() {
       .catch(error => console.error('Uložení scény selhalo:', error))
   }
 
-  const handleAddCharacter = () => {
-    const newId = (Math.max(0, ...characters.map(c => parseInt(c.id) || 0)) + 1).toString()
-    setCharacters([...characters, { id: newId, name: 'Nová postava', image: null }])
+  const handleAddCharacter = () => setCharacterModal({ mode: 'create' })
+
+  const editingCharacter = useMemo(
+    () => (characterModal?.mode === 'edit' ? characters.find(c => c.id === characterModal.id) ?? null : null),
+    [characterModal, characters]
+  )
+
+  /** Nahradí postavu ve stavu i v položkách příběhu (po úpravě / vytvoření z dočasné postavy) */
+  const replaceCharacter = (oldId: string, saved: Character): StoryEntry[] => {
+    setCharacters(prev => prev.map(c => (c.id === oldId ? saved : c)))
+    const updatedEntries = storyEntries.map(e => (e.character?.id === oldId ? { ...e, character: saved } : e))
+    setStoryEntries(updatedEntries)
+    return updatedEntries
+  }
+
+  /** Submit dialogu postavy: vytvoří/aktualizuje soubor postavy a uloží portrét */
+  const handleCharacterSubmit = async (values: CharacterFormValues) => {
+    const editing = editingCharacter
+    const persisted = editing !== null && !isEphemeral(editing)
+    const base: CharacterInput = { firstName: values.firstName, lastName: values.lastName, nickname: values.nickname, notes: values.notes }
+
+    // Nejdřív postava (kontrola duplicitního jména), teprve pak portrét pod jejím celým jménem
+    let saved = persisted
+      ? await api.updateCharacter(gameName, editing.id, { ...base, image: values.image === null ? null : undefined })
+      : await api.createCharacter(gameName, base)
+
+    if (values.image) {
+      const ref = await api.storeImage(gameName, 'portrait', values.image, saved.name)
+      saved = await api.updateCharacter(gameName, saved.id, { ...base, image: ref })
+    }
+
+    if (editing) {
+      const updatedEntries = replaceCharacter(editing.id, saved)
+      // Dočasná postava vznikla z ručně dopsané repliky – scénu přepsat na odkaz na nový soubor
+      if (!persisted) persistStory(updatedEntries)
+    } else {
+      setCharacters(prev => [...prev, saved])
+    }
+  }
+
+  const deleteCharacter = async (characterId: string) => {
+    const character = characters.find(c => c.id === characterId)
+    if (!character) return
+    if (!isEphemeral(character)) await api.deleteCharacter(gameName, characterId)
+    setCharacters(prev => prev.filter(c => c.id !== characterId))
   }
 
   const handleCharacterImageDrop = async (characterId: string, file: File) => {
     const character = characters.find(c => c.id === characterId)
     if (!character) return
+    if (isEphemeral(character)) {
+      setCharacterModal({ mode: 'edit', id: characterId })
+      return
+    }
     try {
       const ref = await api.storeImage(gameName, 'portrait', file, character.name)
-      setCharacters(prev => prev.map(c => (c.id === characterId ? { ...c, image: ref } : c)))
+      const saved = await api.updateCharacter(gameName, characterId, {
+        firstName: character.firstName,
+        lastName: character.lastName,
+        nickname: character.nickname,
+        notes: character.notes,
+        image: ref,
+      })
+      replaceCharacter(characterId, saved)
     } catch (error) {
       console.error('Nahrání portrétu selhalo:', error)
     }
@@ -200,30 +262,8 @@ export default function StoryEditor() {
     persistStory(newEntries)
   }
 
-  const handleCharacterNameChange = (characterId: string, newName: string) => {
-    setCharacters(prev => prev.map(char => (char.id === characterId ? { ...char, name: newName } : char)))
-    // Položky příběhu odkazují na postavu objektem – aktualizovat i tam
-    setStoryEntries(prev =>
-      prev.map(entry =>
-        entry.character?.id === characterId ? { ...entry, character: { ...entry.character, name: newName } } : entry
-      )
-    )
-  }
-
-  // Po přejmenování postavy uložit scénu (jméno mluvčího je součástí markdownu)
-  const charactersRef = useRef(characters)
-  useEffect(() => {
-    const renamed = charactersRef.current.some(prev => {
-      const next = characters.find(c => c.id === prev.id)
-      return next && next.name !== prev.name
-    })
-    charactersRef.current = characters
-    if (renamed) persistStory(storyEntries)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [characters])
-
   const handleCharacterDelete = (characterId: string) => {
-    setCharacters(characters.filter(char => char.id !== characterId))
+    deleteCharacter(characterId).catch(error => console.error('Smazání postavy selhalo:', error))
   }
 
   const handleEntryDelete = (entryId: string) => {
@@ -269,13 +309,13 @@ export default function StoryEditor() {
   const handleExportMarkdown = () =>
     storyEntries
       // U víceřádkového markdownu začíná text na novém řádku pod jménem mluvčího
-      .map(entry => `**${entry.character ? entry.character.name : dmName}**:${entry.markdown ? '\n' : ' '}${entry.text}`)
+      .map(entry => `**${entry.character ? entry.character.nickname : dmName}**:${entry.markdown ? '\n' : ' '}${entry.text}`)
       .join('\n\n')
 
   const handleSaveSetup = async (): Promise<boolean> => {
     try {
-      const saved = await api.saveSetup(gameName, currentSetup)
-      lastSavedSetupRef.current = JSON.stringify(saved)
+      const saved = await api.saveSetup(gameName, currentSettings)
+      applySetup(saved)
       return true
     } catch (error) {
       console.error('Uložení nastavení selhalo:', error)
@@ -405,9 +445,8 @@ export default function StoryEditor() {
         characters={displayCharacters}
         showShortcutNumbers={showShortcutNumbers}
         onAddCharacter={handleAddCharacter}
+        onCharacterClick={(id) => setCharacterModal({ mode: 'edit', id })}
         onCharacterImageDrop={handleCharacterImageDrop}
-        onPortraitClick={handlePortraitClick}
-        onCharacterNameChange={handleCharacterNameChange}
         onCharacterDelete={handleCharacterDelete}
         onBackgroundImageDrop={handleBackgroundImageDrop}
         onExportMarkdown={handleExportMarkdown}
@@ -471,6 +510,18 @@ export default function StoryEditor() {
           image={displayDmImage}
           onSave={handleDmSave}
           onClose={() => setShowDmSettings(false)}
+        />
+      )}
+
+      {/* Vytvoření / úprava postavy */}
+      {characterModal && (
+        <CharacterModal
+          key={characterModal.mode === 'edit' ? characterModal.id : 'new'}
+          character={editingCharacter}
+          image={editingCharacter ? assetUrl(gameName, editingCharacter.image) : null}
+          onSubmit={handleCharacterSubmit}
+          onDelete={editingCharacter ? () => deleteCharacter(editingCharacter.id) : undefined}
+          onClose={() => setCharacterModal(null)}
         />
       )}
     </div>

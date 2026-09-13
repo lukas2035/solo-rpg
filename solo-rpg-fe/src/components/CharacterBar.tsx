@@ -3,7 +3,10 @@ import { useNavigate } from 'react-router-dom'
 
 interface Character {
   id: string
+  /** Celé jméno */
   name: string
+  /** Zobrazované jméno */
+  nickname: string
   image: string | null
 }
 
@@ -12,9 +15,9 @@ interface CharacterBarProps {
   /** Zobrazit u jmen pořadové číslo pro přepínání klávesnicí (drženo Ctrl/Alt) */
   showShortcutNumbers?: boolean
   onAddCharacter: () => void
+  /** Klik na postavu → otevřít editaci */
+  onCharacterClick: (characterId: string) => void
   onCharacterImageDrop: (characterId: string, file: File) => void
-  onPortraitClick: (image: string, characterName: string) => void
-  onCharacterNameChange: (characterId: string, newName: string) => void
   onCharacterDelete?: (characterId: string) => void
   onBackgroundImageDrop?: (image: File | string) => void
   onExportMarkdown?: () => string
@@ -32,9 +35,8 @@ export default function CharacterBar({
   characters,
   showShortcutNumbers,
   onAddCharacter,
+  onCharacterClick,
   onCharacterImageDrop,
-  onPortraitClick,
-  onCharacterNameChange,
   onCharacterDelete,
   onBackgroundImageDrop,
   onExportMarkdown,
@@ -49,8 +51,6 @@ export default function CharacterBar({
 }: CharacterBarProps) {
   const navigate = useNavigate()
   const [aspectRatios, setAspectRatios] = useState<Record<string, number>>({})
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editName, setEditName] = useState('')
   const [copied, setCopied] = useState(false)
   const [feedback, setFeedback] = useState<'saved' | 'save-failed' | 'loaded' | 'load-failed' | 'story-loaded' | 'story-load-failed' | 'story-cleared' | 'story-clear-failed' | 'renamed' | 'rename-failed' | null>(null)
 
@@ -85,8 +85,6 @@ export default function CharacterBar({
     showFeedback((await onClearStory()) ? 'story-cleared' : 'story-clear-failed')
   }
   const backgroundInputRef = useRef<HTMLInputElement | null>(null)
-  const portraitInputRef = useRef<HTMLInputElement | null>(null)
-  const pendingCharacterIdRef = useRef<string | null>(null)
 
   const isImageFile = (f: File) =>
     f.type.startsWith('image/') ||
@@ -111,19 +109,6 @@ export default function CharacterBar({
     if (!onCharacterDelete) return
     if (window.confirm(`Opravdu chceš smazat postavu „${character.name}“?`)) {
       onCharacterDelete(character.id)
-    }
-  }
-
-  const handlePortraitPickerOpen = (characterId: string) => {
-    pendingCharacterIdRef.current = characterId
-    portraitInputRef.current?.click()
-  }
-
-  const handlePortraitPicker = (file: File | null | undefined) => {
-    const characterId = pendingCharacterIdRef.current
-    pendingCharacterIdRef.current = null
-    if (file && isImageFile(file) && characterId) {
-      onCharacterImageDrop(characterId, file)
     }
   }
 
@@ -171,26 +156,6 @@ export default function CharacterBar({
     setAspectRatios(prev => ({ ...prev, [characterId]: ratio }))
   }
 
-  const handleNameClick = (character: Character) => {
-    setEditingId(character.id)
-    setEditName(character.name)
-  }
-
-  const handleNameSave = (characterId: string) => {
-    if (editName.trim()) {
-      onCharacterNameChange(characterId, editName)
-    }
-    setEditingId(null)
-  }
-
-  const handleNameKeyDown = (e: React.KeyboardEvent, characterId: string) => {
-    if (e.key === 'Enter') {
-      handleNameSave(characterId)
-    } else if (e.key === 'Escape') {
-      setEditingId(null)
-    }
-  }
-
   const CHARACTER_HEIGHT = 112 // h-28 = 7rem = 112px
 
   return (
@@ -207,18 +172,6 @@ export default function CharacterBar({
         }}
       />
 
-      <input
-        ref={portraitInputRef}
-        type="file"
-        accept="image/*"
-        hidden
-        onChange={(e) => {
-          const file = e.target.files?.[0]
-          handlePortraitPicker(file)
-          e.target.value = ''
-        }}
-      />
-
       <div className="flex gap-3 overflow-x-auto items-center w-full">
         {characters.map((character, index) => {
           const ratio = aspectRatios[character.id] || 1
@@ -227,22 +180,19 @@ export default function CharacterBar({
           return (
             <div
               key={character.id}
-              className="flex-shrink-0 flex flex-col items-center gap-2"
+              className="flex-shrink-0 flex flex-col items-center gap-2 cursor-pointer"
+              title={`${character.name} – klikni pro úpravu`}
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, character.id)}
+              onClick={() => onCharacterClick(character.id)}
+              onContextMenu={(e) => handleCharacterContextMenu(e, character)}
             >
               <div
-                className="rounded-lg border-2 border-[var(--accent)] overflow-hidden bg-gradient-to-b from-gray-700 to-gray-900 flex items-center justify-center cursor-pointer hover:border-[var(--accent)] hover:shadow-lg hover:shadow-[var(--accent)]/50 transition-all"
+                className="rounded-lg border-2 border-[var(--accent)] overflow-hidden bg-gradient-to-b from-gray-700 to-gray-900 flex items-center justify-center hover:border-[var(--accent)] hover:shadow-lg hover:shadow-[var(--accent)]/50 transition-all"
                 style={{
                   height: `${CHARACTER_HEIGHT}px`,
                   width: character.image ? `${width}px` : `${CHARACTER_HEIGHT}px`,
                 }}
-                onClick={() =>
-                  character.image
-                    ? onPortraitClick(character.image, character.name)
-                    : handlePortraitPickerOpen(character.id)
-                }
-                onContextMenu={(e) => handleCharacterContextMenu(e, character)}
               >
                 {character.image ? (
                   <img
@@ -257,25 +207,9 @@ export default function CharacterBar({
                   </div>
                 )}
               </div>
-              {editingId === character.id ? (
-                <input
-                  autoFocus
-                  type="text"
-                  value={editName}
-                  onFocus={(e) => e.target.select()}
-                  onChange={(e) => setEditName(e.target.value)}
-                  onBlur={() => handleNameSave(character.id)}
-                  onKeyDown={(e) => handleNameKeyDown(e, character.id)}
-                  className="text-xs text-[var(--accent)] font-semibold text-center max-w-[120px] bg-black/50 border border-[var(--accent)] rounded px-2 py-1"
-                />
-              ) : (
-                <span
-                  className="text-xs text-[var(--accent)] font-semibold text-center max-w-[120px] truncate cursor-pointer hover:opacity-80 transition-opacity"
-                  onClick={() => handleNameClick(character)}
-                >
-                  {showShortcutNumbers ? `${character.name} ${index + 1}` : character.name}
-                </span>
-              )}
+              <span className="text-xs text-[var(--accent)] font-semibold text-center max-w-[120px] truncate hover:opacity-80 transition-opacity">
+                {showShortcutNumbers ? `${character.nickname} ${index + 1}` : character.nickname}
+              </span>
             </div>
           )
         })}

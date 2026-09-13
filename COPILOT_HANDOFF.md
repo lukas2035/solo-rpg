@@ -45,38 +45,50 @@ solo-rpg/
 │       ├── server.ts, config.ts
 │       ├── routes/games.ts
 │       └── vault/StorageProvider.ts (interface + NotFound/Conflict/ValidationError)
-│                 ObsidianVaultProvider.ts (fs + gray-matter)
-│                 sceneMarkdown.ts (parseEntries / serializeEntries)
+│                 ObsidianVaultProvider.ts (fs + gray-matter; CRUD postav, migrace npcs/ → characters/)
+│                 sceneMarkdown.ts (parseEntries / serializeEntries / renameSpeaker)
 │                 fsUtils.ts (assertInside, writeFileAtomic, safeFileName…)
 ├── solo-rpg-fe/            Vite + React 19 + react-router + Tailwind, lint = oxlint
 │   └── src/
 │       ├── pages/Home.tsx (seznam her přes API + tlačítko „Přenést hry z prohlížeče do vaultu“)
-│       ├── pages/StoryEditor.tsx (přepnuto na API, scény, autosave s debounce)
-│       ├── components/ CharacterBar, SceneBar (nový), DmSettingsModal, InputArea, PortraitModal, StoryPanel
+│       ├── pages/StoryEditor.tsx (přepnuto na API, scény, autosave nastavení s debounce)
+│       ├── components/ CharacterBar, CharacterModal (nový), SceneBar, DmSettingsModal, InputArea, PortraitModal, StoryPanel
 │       └── utils/ api.ts (API klient, ApiError), importLegacyGames.ts,
 │                  legacyBrowserStorage.ts (bývalé setupStorage.ts – IndexedDB, jen pro jednorázový import)
-└── vault/                  výchozí VAULT_PATH (gitignored) – otevřít v Obsidianu „Open folder as vault“
+└── vault/                  výchozí VAULT_PATH (gitignored jako `/vault/` – POZOR, ne `vault/`, to by ignorovalo i src/vault) – otevřít v Obsidianu „Open folder as vault“
 ```
 
 ### Layout vaultu (na hru)
 ```
 vault/<Název hry>/
   game.md                 frontmatter: name, createdAt, updatedAt, background, brightBackground, dm{name,portrait}
-  npcs/<Jméno>.md         frontmatter: id, name, portrait; tělo = volné poznámky uživatele (zachovávají se)
-  portraits/<Jméno>.png   (_dm.png pro vypravěče)
+  characters/<Celé jméno>.md  frontmatter: id, name (celé), firstName, lastName, nickname, portrait, order;
+                          tělo = markdown poznámky (editovatelné v modalu i v Obsidianu). PC i NPC bez rozlišení.
+                          (stará složka npcs/ se při prvním čtení automaticky přejmenuje, `name` se rozdělí na jméno/příjmení)
+  portraits/<Celé jméno>.png   (_dm.png pro vypravěče)
   backgrounds/<soubor>
   scenes/001 - Název.md   frontmatter: id, title, createdAt, updatedAt
-                          záznamy: <!-- entry id="..." ts="..." --> + **[[Jméno]]**: text  |  **DM**:\n víceřádkový text
+                          záznamy: <!-- entry id="..." ts="..." --> + **[[Celé jméno|nickname]]**: text  |  **DM**:\n víceřádkový text
 ```
 Parser scén dělí i ručně dopsané záznamy bez markeru podle řádků `**Jméno**:` – wikilink `[[..]]` vždy,
-plain jméno jen pokud je to známý mluvčí (aby `**Důležité**:` v DM odstavci nebyl nový mluvčí).
-Víceřádkový text → `markdown: true`.
+plain jméno jen pokud je to známý mluvčí (celé jméno nebo nickname), aby `**Důležité**:` v DM odstavci nebyl nový mluvčí.
+Víceřádkový text → `markdown: true`. `StoryEntry.characterName` = celé jméno; alias v odkazu je nickname.
+Přejmenování postavy / změna nicku na BE přepíše hlavičky mluvčího ve všech scénách a přejmenuje portrét.
+
+### Postavy (FE)
+- „+“ v pásu i klik na postavu otevře `CharacterModal`: Jméno, Příjmení, Nickname (sleduje křestní jméno, dokud ho
+  uživatel nepřepíše), portrét (klik/drop/URL), markdown poznámky. Fokus/Tab označí celý text. Enter odešle, Esc zavře.
+- Submit: `POST/PUT /characters` (409 při duplicitním celém jménu → hláška v dialogu) → `storeImage(kind portrait, celé jméno)`
+  → `PUT` s cestou portrétu. Postavy se **neukládají přes setup autosave** (ten jen pozadí + DM).
+- Mluvčí dopsaný v Obsidianu bez souboru postavy = dočasná postava (`id: tmp-…`); klik na ni otevře dialog a vytvoří soubor.
+- V UI (pás, taby, repliky) se zobrazuje nickname.
 
 ### API (BE, port 3001; Vite proxy přesměrovává `/api` a `/vault` z 5173)
 ```
 GET  /api/health
 GET/POST /api/games            GET/PATCH(rename)/DELETE /api/games/:name
-PUT  /api/games/:name/setup
+PUT  /api/games/:name/setup    (jen backgroundImage, brightBackground, dm)
+POST /api/games/:name/characters             PUT/DELETE /api/games/:name/characters/:id
 POST /api/games/:name/assets (multipart)     POST /api/games/:name/assets/from-url
 GET/POST /api/games/:name/scenes             GET/PUT/DELETE /api/games/:name/scenes/:id
 GET  /vault/*  (statické soubory vaultu)
@@ -88,6 +100,8 @@ GET  /vault/*  (statické soubory vaultu)
 - Roundtrip s ručními úpravami „z Obsidianu“ (frontmatter i poznámky zůstaly, ruční repliky se načetly).
 - Headless Edge render FE: hra, scény, postavy i portrét z `/vault/...` se zobrazí.
 - Ve vaultu existují testovací hry („Testovací hra“, „Testovací hra 2“) – lze smazat.
+- Postavy: API smoke test (create/409/portrét/alias ve scéně/rename vč. portrétu a wikilinků/migrace npcs/delete)
+  + CDP test dialogu v headless Edge (předvyplnění nicku, Enter, 409 hláška, editace) – vše prošlo.
 
 ## 4. Spuštění
 ```
@@ -97,7 +111,8 @@ npm.cmd run dev          # BE http://127.0.0.1:3001 + FE http://localhost:5173
 
 ## 5. Co je DALŠÍ na řadě (Lukáš ještě nevybral, zeptej se)
 1. **OpenRouter endpoint** `POST /api/generate` (+ `ModelRouter`, SSE streaming, klíč v `.env`, mature flag).
-2. **Další typy poznámek ve vaultu:** lokace (`locations/*.md`), questy (`quests/*.md`), rozšířené NPC.
+2. **Další typy poznámek ve vaultu:** lokace (`locations/*.md`), questy (`quests/*.md`), rozšíření postav
+   (např. typ PC/NPC, vztahy) – postavy už mají vlastní dialog a CRUD.
 3. Případně `chokidar` sledování vaultu (live reload při editaci v Obsidianu) – zatím se načítá tlačítky 💬 / 📂.
 4. ~~Git init monorepa~~ – hotovo, repo je na GitHubu.
 

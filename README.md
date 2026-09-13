@@ -39,8 +39,8 @@ Další příkazy: `npm run build` (typecheck + build všech workspaces), `npm r
 vault/
 └── <Název hry>/
     ├── game.md              # nastavení hry (frontmatter) + volné poznámky
-    ├── npcs/<Jméno>.md      # jedna postava = jeden soubor (frontmatter + poznámky)
-    ├── portraits/           # portréty postav (_dm.* = vypravěč)
+    ├── characters/<Celé jméno>.md  # jedna postava (PC i NPC) = jeden soubor (frontmatter + markdown poznámky)
+    ├── portraits/           # portréty postav podle celého jména (_dm.* = vypravěč)
     ├── backgrounds/         # obrázky pozadí
     └── scenes/001 - Název.md  # scény = záznamy příběhu
 ```
@@ -49,16 +49,17 @@ Formát scény:
 
 ```markdown
 <!-- entry id="1700000000000" ts="1700000000000" -->
-**[[Aria]]**: Jednořádková replika postavy.
+**[[Aria Stormwind|Aria]]**: Jednořádková replika postavy.
 
 <!-- entry id="1700000000001" ts="1700000000001" -->
 **DM**:
 Víceřádkový markdown vypravěče.
 ```
 
-Postavy jsou wikilinky na soubory v `npcs/`. Můžeš dopisovat záznamy i ručně v Obsidianu
-(`**[[Jméno]]**: text`) – aplikace je načte tlačítkem 💬. Aplikace při zápisu zachovává
-vlastní frontmatter klíče a tělo poznámek u postav i hry.
+Postavy jsou wikilinky na soubory v `characters/` (celé jméno) s aliasem = nickname. Můžeš dopisovat záznamy
+i ručně v Obsidianu (`**[[Celé jméno]]**: text` nebo `**Nickname**: text`) – aplikace je načte tlačítkem 💬.
+Aplikace při zápisu zachovává vlastní frontmatter klíče a tělo poznámek u postav i hry.
+Přejmenování postavy v aplikaci přejmenuje soubor, portrét i odkazy ve scénách.
 
 ## API (výběr)
 

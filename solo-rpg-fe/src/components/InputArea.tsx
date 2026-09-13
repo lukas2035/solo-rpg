@@ -3,6 +3,8 @@
 interface Character {
   id: string
   name: string
+  /** Zobrazované jméno */
+  nickname: string
   image: string | null
 }
 
@@ -161,7 +163,7 @@ export default function InputArea({ characters, showShortcutNumbers, onAddEntry,
             onClick={() => selectCharacter(char.id)}
             className={tabClass(selectedCharacterId === char.id)}
           >
-            {showShortcutNumbers ? `${char.name} ${index + 1}` : char.name}
+            {showShortcutNumbers ? `${char.nickname} ${index + 1}` : char.nickname}
           </button>
         ))}
         <button

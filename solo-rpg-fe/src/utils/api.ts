@@ -1,8 +1,11 @@
 import type {
   AssetKind,
   AssetResponse,
+  Character,
+  CharacterInput,
   GameDetail,
   GameMeta,
+  GameSettings,
   GameSetup,
   ImageRef,
   SceneMeta,
@@ -55,9 +58,18 @@ export const getGame = (game: string) => request<GameDetail>('GET', gamePath(gam
 export const renameGame = (game: string, name: string) => request<GameMeta>('PATCH', gamePath(game), { name })
 export const deleteGame = (game: string) => request<void>('DELETE', gamePath(game))
 
-// ---------- setup ----------
+// ---------- setup (pozadí, DM) ----------
 
-export const saveSetup = (game: string, setup: GameSetup) => request<GameSetup>('PUT', `${gamePath(game)}/setup`, setup)
+export const saveSetup = (game: string, settings: GameSettings) => request<GameSetup>('PUT', `${gamePath(game)}/setup`, settings)
+
+// ---------- postavy ----------
+
+export const createCharacter = (game: string, input: CharacterInput) =>
+  request<Character>('POST', `${gamePath(game)}/characters`, input)
+export const updateCharacter = (game: string, characterId: string, input: CharacterInput) =>
+  request<Character>('PUT', `${gamePath(game)}/characters/${encodeURIComponent(characterId)}`, input)
+export const deleteCharacter = (game: string, characterId: string) =>
+  request<void>('DELETE', `${gamePath(game)}/characters/${encodeURIComponent(characterId)}`)
 
 // ---------- obrázky ----------
 

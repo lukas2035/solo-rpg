@@ -6,6 +6,8 @@ import remarkBreaks from 'remark-breaks'
 interface Character {
   id: string
   name: string
+  /** Zobrazované jméno */
+  nickname: string
   image: string | null
 }
 
@@ -132,7 +134,7 @@ export default function StoryPanel({ entries, onPortraitClick, onEntryDelete, on
                   }}
                 >
                   <span className="text-xs text-[var(--text)]">
-                    {entry.character.name.charAt(0)}
+                    {entry.character.nickname.charAt(0)}
                   </span>
                 </div>
               )}
@@ -141,8 +143,8 @@ export default function StoryPanel({ entries, onPortraitClick, onEntryDelete, on
             {/* Text vlevo */}
             <div className="flex-1 text-left">
               {entry.character && (
-                <div className="text-sm font-semibold text-[var(--accent)] mb-1">
-                  {entry.character.name}:
+                <div className="text-sm font-semibold text-[var(--accent)] mb-1" title={entry.character.name}>
+                  {entry.character.nickname}:
                 </div>
               )}
               <div

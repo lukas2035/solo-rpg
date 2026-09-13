@@ -3,9 +3,10 @@ import { z } from 'zod'
 import {
   AssetFromUrlRequestSchema,
   AssetKindSchema,
+  CharacterInputSchema,
   CreateGameRequestSchema,
   CreateSceneRequestSchema,
-  GameSetupSchema,
+  GameSettingsSchema,
   RenameGameRequestSchema,
   StoryEntrySchema,
   isValidGameName,
@@ -16,6 +17,7 @@ const MAX_IMAGE_BYTES = 25 * 1024 * 1024
 
 const GameParams = z.object({ game: z.string().min(1) })
 const SceneParams = GameParams.extend({ scene: z.string().min(1) })
+const CharacterParams = GameParams.extend({ character: z.string().min(1) })
 
 function sendError(reply: FastifyReply, error: unknown): FastifyReply {
   if (error instanceof z.ZodError) return reply.code(400).send({ error: z.prettifyError(error) })
@@ -59,12 +61,32 @@ export async function registerGameRoutes(app: FastifyInstance, storage: StorageP
     return reply.code(204).send()
   })
 
-  // ---------- setup ----------
+  // ---------- setup (pozadí, DM) ----------
 
   app.put('/api/games/:game/setup', async (request) => {
     const { game } = GameParams.parse(request.params)
-    const setup = GameSetupSchema.parse(request.body)
-    return storage.saveSetup(game, setup)
+    const settings = GameSettingsSchema.parse(request.body)
+    return storage.saveSetup(game, settings)
+  })
+
+  // ---------- postavy ----------
+
+  app.post('/api/games/:game/characters', async (request, reply) => {
+    const { game } = GameParams.parse(request.params)
+    const input = CharacterInputSchema.parse(request.body)
+    return reply.code(201).send(await storage.createCharacter(game, input))
+  })
+
+  app.put('/api/games/:game/characters/:character', async (request) => {
+    const { game, character } = CharacterParams.parse(request.params)
+    const input = CharacterInputSchema.parse(request.body)
+    return storage.updateCharacter(game, character, input)
+  })
+
+  app.delete('/api/games/:game/characters/:character', async (request, reply) => {
+    const { game, character } = CharacterParams.parse(request.params)
+    await storage.deleteCharacter(game, character)
+    return reply.code(204).send()
   })
 
   // ---------- obrázky ----------

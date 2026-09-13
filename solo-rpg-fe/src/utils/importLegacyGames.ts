@@ -1,5 +1,5 @@
 import { isValidGameName, INVALID_GAME_NAME_CHARS } from '@solo-rpg/shared'
-import type { Character, ImageRef } from '@solo-rpg/shared'
+import type { ImageRef } from '@solo-rpg/shared'
 import * as legacy from './legacyBrowserStorage'
 import * as api from './api'
 
@@ -52,20 +52,25 @@ export async function importLegacyGames(): Promise<LegacyImportResult> {
       const target = await freeGameName(meta.name, existing)
       const detail = await api.createGame(target)
 
-      const characters: Character[] = []
+      // Staré postavy měly jen jedno jméno → křestní jméno = nickname, příjmení prázdné
+      const created = new Set<string>()
+      const createCharacter = async (name: string, image: Blob | string | null) => {
+        const trimmed = name.trim()
+        if (!trimmed || created.has(trimmed)) return
+        created.add(trimmed)
+        const character = await api.createCharacter(target, { firstName: trimmed, lastName: '', nickname: trimmed, notes: '' })
+        const ref = await storeLegacyImage(target, 'portrait', image, character.name)
+        if (ref) await api.updateCharacter(target, character.id, { firstName: trimmed, lastName: '', nickname: trimmed, notes: '', image: ref })
+      }
       for (const c of setup?.characters ?? []) {
-        characters.push({ id: c.id, name: c.name, image: await storeLegacyImage(target, 'portrait', c.image, c.name) })
+        await createCharacter(c.name, c.image)
       }
       // Postavy zmíněné v příběhu, které v nastavení chybí
-      let nextId = Math.max(0, ...characters.map(c => parseInt(c.id) || 0)) + 1
       for (const entry of story ?? []) {
-        if (entry.characterName !== null && !characters.some(c => c.name === entry.characterName)) {
-          characters.push({ id: (nextId++).toString(), name: entry.characterName, image: null })
-        }
+        if (entry.characterName !== null) await createCharacter(entry.characterName, null)
       }
 
       await api.saveSetup(target, {
-        characters,
         backgroundImage: await storeLegacyImage(target, 'background', setup?.backgroundImage ?? null),
         brightBackground: setup?.brightBackground ?? false,
         dm: {
