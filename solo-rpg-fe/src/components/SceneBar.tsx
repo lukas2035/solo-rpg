@@ -51,9 +51,6 @@ export default function SceneBar({ scenes, currentSceneId, onSelect, onCreate, o
           {current.description.split('\n')[0]}
         </span>
       )}
-      <span className="ml-auto text-xs text-[var(--text)] opacity-60 truncate">
-        Ukládá se do Obsidian vaultu · úpravy z Obsidianu načteš tlačítky 📂 / 💬
-      </span>
     </div>
   )
 }
