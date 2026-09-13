@@ -360,17 +360,6 @@ export default function StoryEditor() {
       .map(entry => `**${entry.character ? entry.character.nickname : dmName}**:${entry.markdown ? '\n' : ' '}${entry.text}`)
       .join('\n\n')
 
-  const handleSaveSetup = async (): Promise<boolean> => {
-    try {
-      const saved = await api.saveSetup(gameName, currentSettings)
-      applySetup(saved)
-      return true
-    } catch (error) {
-      console.error('Uložení nastavení selhalo:', error)
-      return false
-    }
-  }
-
   /** Znovu načte celou hru z vaultu (nastavení, postavy, scény i záznamy aktuální scény) – po změnách v Obsidianu */
   const reloadFromVault = async (): Promise<boolean> => {
     try {
@@ -492,7 +481,6 @@ export default function StoryEditor() {
         onCharacterImageDrop={handleCharacterImageDrop}
         onCharacterDelete={handleCharacterDelete}
         onExportMarkdown={handleExportMarkdown}
-        onSaveSetup={handleSaveSetup}
         onRenameGame={handleRenameGame}
         onEditDm={() => setShowDmSettings(true)}
         onClearStory={handleClearStory}

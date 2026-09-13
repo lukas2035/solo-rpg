@@ -3,7 +3,6 @@ import { Link, useNavigate } from 'react-router-dom'
 import { isValidGameName } from '@solo-rpg/shared'
 import type { GameMeta } from '@solo-rpg/shared'
 import { listGames, deleteGame, createGame } from '../utils/api'
-import { hasLegacyGames, importLegacyGames } from '../utils/importLegacyGames'
 
 export default function Home() {
   const navigate = useNavigate()
@@ -13,9 +12,6 @@ export default function Home() {
   const [showLoadGame, setShowLoadGame] = useState(false)
   const [newGameName, setNewGameName] = useState('')
   const [nameError, setNameError] = useState<string | null>(null)
-  const [legacyAvailable, setLegacyAvailable] = useState(false)
-  const [importing, setImporting] = useState(false)
-  const [importMessage, setImportMessage] = useState<string | null>(null)
 
   const refreshGames = () =>
     listGames()
@@ -27,7 +23,6 @@ export default function Home() {
 
   useEffect(() => {
     refreshGames()
-    hasLegacyGames().then(setLegacyAvailable)
   }, [])
 
   const latestGame = games[0] ?? null
@@ -63,25 +58,6 @@ export default function Home() {
       setGames(games.filter(g => g.name !== name))
     } catch (error) {
       console.error('Smazání hry selhalo:', error)
-    }
-  }
-
-  const handleImportLegacy = async () => {
-    if (!window.confirm('Přenést hry uložené v prohlížeči do Obsidian vaultu? Po úspěšném přenosu budou z prohlížeče smazány.')) return
-    setImporting(true)
-    setImportMessage(null)
-    try {
-      const result = await importLegacyGames()
-      const parts: string[] = []
-      if (result.imported.length) parts.push(`Přeneseno: ${result.imported.map(i => i.to).join(', ')}.`)
-      if (result.failed.length) parts.push(`Selhalo: ${result.failed.map(f => `${f.name} (${f.error})`).join(', ')}.`)
-      setImportMessage(parts.join(' ') || 'Nebylo co přenášet.')
-      setLegacyAvailable(result.failed.length > 0)
-      await refreshGames()
-    } catch (error) {
-      setImportMessage(error instanceof Error ? error.message : 'Import selhal.')
-    } finally {
-      setImporting(false)
     }
   }
 
@@ -182,23 +158,6 @@ export default function Home() {
           <div className="text-sm text-red-400 max-w-md">{loadError}</div>
         )}
 
-        {legacyAvailable && !loadError && (
-          <div className="mt-8 flex flex-col items-center gap-2 max-w-md">
-            <p className="text-sm text-[var(--text)] opacity-80">
-              V prohlížeči jsou hry ze starší verze aplikace.
-            </p>
-            <button
-              onClick={handleImportLegacy}
-              disabled={importing}
-              className="px-4 py-2 border border-[var(--accent)] text-[var(--accent)] rounded-lg text-sm hover:bg-[var(--accent-bg)] transition-colors disabled:opacity-50"
-            >
-              {importing ? 'Přenáším…' : 'Přenést hry z prohlížeče do vaultu'}
-            </button>
-          </div>
-        )}
-        {importMessage && (
-          <div className="mt-2 text-sm text-[var(--text)] max-w-md">{importMessage}</div>
-        )}
       </section>
     </div>
   )

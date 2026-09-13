@@ -20,7 +20,6 @@ interface CharacterBarProps {
   onCharacterImageDrop: (characterId: string, file: File) => void
   onCharacterDelete?: (characterId: string) => void
   onExportMarkdown?: () => string
-  onSaveSetup?: () => Promise<boolean>
   onRenameGame?: () => Promise<boolean>
   onEditDm?: () => void
   onClearStory?: () => Promise<boolean>
@@ -35,7 +34,6 @@ export default function CharacterBar({
   onCharacterImageDrop,
   onCharacterDelete,
   onExportMarkdown,
-  onSaveSetup,
   onRenameGame,
   onEditDm,
   onClearStory,
@@ -44,16 +42,11 @@ export default function CharacterBar({
   const navigate = useNavigate()
   const [aspectRatios, setAspectRatios] = useState<Record<string, number>>({})
   const [copied, setCopied] = useState(false)
-  const [feedback, setFeedback] = useState<'saved' | 'save-failed' | 'story-cleared' | 'story-clear-failed' | 'renamed' | 'rename-failed' | null>(null)
+  const [feedback, setFeedback] = useState<'story-cleared' | 'story-clear-failed' | 'renamed' | 'rename-failed' | null>(null)
 
   const showFeedback = (value: NonNullable<typeof feedback>) => {
     setFeedback(value)
     setTimeout(() => setFeedback(null), 1500)
-  }
-
-  const handleSaveSetup = async () => {
-    if (!onSaveSetup) return
-    showFeedback((await onSaveSetup()) ? 'saved' : 'save-failed')
   }
 
   const handleRenameGame = async () => {
@@ -180,14 +173,6 @@ export default function CharacterBar({
             className="w-8 h-8 rounded-md border border-[var(--accent)]/60 bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all"
           >
             {copied ? '✓' : '📋'}
-          </button>
-          <button
-            type="button"
-            onClick={handleSaveSetup}
-            title="Uložit postavy a pozadí do vaultu"
-            className="w-8 h-8 rounded-md border border-[var(--accent)]/60 bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all"
-          >
-            {feedback === 'saved' ? '✓' : feedback === 'save-failed' ? '✗' : '💾'}
           </button>
           <button
             type="button"

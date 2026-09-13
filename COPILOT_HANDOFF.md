@@ -51,12 +51,12 @@ solo-rpg/
 │                 fsUtils.ts (assertInside, writeFileAtomic, safeFileName…)
 ├── solo-rpg-fe/            Vite + React 19 + react-router + Tailwind, lint = oxlint
 │   └── src/
-│       ├── pages/Home.tsx (seznam her přes API + tlačítko „Přenést hry z prohlížeče do vaultu“)
+│       ├── pages/Home.tsx (seznam her přes API)
 │       ├── pages/StoryEditor.tsx (přepnuto na API, scény, autosave nastavení s debounce)
 │       ├── components/ CharacterBar, CharacterModal, SceneBar, SceneModal, ImageDropField (sdílené pole obrázku),
 │       │               DmSettingsModal, InputArea, PortraitModal, StoryPanel
-│       └── utils/ api.ts (API klient, ApiError), forms.ts (selectAll, inputClass), importLegacyGames.ts,
-│                  legacyBrowserStorage.ts (bývalé setupStorage.ts – IndexedDB, jen pro jednorázový import)
+│       └── utils/ api.ts (API klient, ApiError), forms.ts (selectAll, inputClass)
+│                  (bývalý import z IndexedDB – legacyBrowserStorage/importLegacyGames – byl odstraněn, data jsou jen ve vaultu)
 └── vault/                  výchozí VAULT_PATH (gitignored jako `/vault/` – POZOR, ne `vault/`, to by ignorovalo i src/vault) – otevřít v Obsidianu „Open folder as vault“
 ```
 
