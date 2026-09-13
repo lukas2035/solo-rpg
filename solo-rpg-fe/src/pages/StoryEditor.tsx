@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Character, CharacterInput, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, Narrator, NarratorInput, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
+import type { Character, CharacterInput, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, Narrator, NarratorInput, Quest, QuestInput, QuestStatus, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
 import CharacterBar from '../components/CharacterBar'
 import StoryPanel from '../components/StoryPanel'
 import InputArea from '../components/InputArea'
@@ -14,6 +14,8 @@ import ThreadsPanel from '../components/ThreadsPanel'
 import ThreadModal from '../components/ThreadModal'
 import FactionsPanel, { type DisplayFaction } from '../components/FactionsPanel'
 import FactionModal, { type FactionFormValues, type IncomingRelation } from '../components/FactionModal'
+import QuestsPanel, { type DisplayQuest } from '../components/QuestsPanel'
+import QuestModal from '../components/QuestModal'
 import SidePanel, { type SidePanelTab } from '../components/SidePanel'
 import type { EntityOption } from '../components/EntityChecklist'
 import * as api from '../utils/api'
@@ -44,6 +46,7 @@ type SceneModalState = { mode: 'create' } | { mode: 'edit'; id: string }
 type NarratorModalState = { mode: 'create' } | { mode: 'edit'; id: string }
 type ThreadModalState = { mode: 'create' } | { mode: 'edit'; id: string }
 type FactionModalState = { mode: 'create' } | { mode: 'edit'; id: string }
+type QuestModalState = { mode: 'create' } | { mode: 'edit'; id: string }
 
 const SETUP_AUTOSAVE_MS = 600
 
@@ -76,6 +79,8 @@ export default function StoryEditor() {
   const [threadModal, setThreadModal] = useState<ThreadModalState | null>(null)
   const [factions, setFactions] = useState<Faction[]>([])
   const [factionModal, setFactionModal] = useState<FactionModalState | null>(null)
+  const [quests, setQuests] = useState<Quest[]>([])
+  const [questModal, setQuestModal] = useState<QuestModalState | null>(null)
   const [showShortcutNumbers, setShowShortcutNumbers] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   /** Cesty souborů změněných mimo aplikaci; null = žádné nevyřízené změny */
@@ -162,6 +167,18 @@ export default function StoryEditor() {
     [factions, editingFaction]
   )
   const factionThreads = useMemo(() => (editingFaction ? threads.filter(t => t.factions.includes(editingFaction.title)) : []), [threads, editingFaction])
+  const displayQuests = useMemo<DisplayQuest[]>(
+    () => quests.map(q => ({ ...q, questGiverLabel: q.questGiver ? characters.find(c => c.name === q.questGiver)?.nickname ?? q.questGiver : null })),
+    [quests, characters]
+  )
+  const activeQuestCount = useMemo(() => quests.filter(q => q.status === 'active').length, [quests])
+  const editingQuest = useMemo(
+    () => (questModal?.mode === 'edit' ? quests.find(q => q.id === questModal.id) ?? null : null),
+    [questModal, quests]
+  )
+  // Dopočítané vazby pro detail questu / nitě (nikam se neukládají)
+  const questChildren = useMemo(() => (editingQuest ? quests.filter(q => q.parentQuest === editingQuest.title) : []), [quests, editingQuest])
+  const threadQuests = useMemo(() => (editingThread ? quests.filter(q => q.threads.includes(editingThread.title)) : []), [quests, editingThread])
   const editingScene = useMemo(
     () => (sceneModal?.mode === 'edit' ? scenes.find(s => s.id === sceneModal.id) ?? null : null),
     [sceneModal, scenes]
@@ -232,6 +249,7 @@ export default function StoryEditor() {
         setScenes(detail.scenes)
         setThreads(detail.threads)
         setFactions(detail.factions)
+        setQuests(detail.quests)
         setCurrentSceneId(scene?.id ?? null)
         // Hra bez scén → nejdřív vytvořit první scénu
         if (!scene) setSceneModal({ mode: 'create' })
@@ -332,6 +350,11 @@ export default function StoryEditor() {
           leader: f.leader === editing.name ? saved.name : f.leader,
           characters: f.characters.map(n => (n === editing.name ? saved.name : n)),
         })))
+        setQuests(prev => prev.map(q => ({
+          ...q,
+          questGiver: q.questGiver === editing.name ? saved.name : q.questGiver,
+          characters: q.characters.map(n => (n === editing.name ? saved.name : n)),
+        })))
       }
     } else {
       setCharacters(prev => [...prev, saved])
@@ -363,6 +386,11 @@ export default function StoryEditor() {
       ...f,
       leader: f.leader === character.name ? null : f.leader,
       characters: f.characters.filter(n => n !== character.name),
+    })))
+    setQuests(prev => prev.map(q => ({
+      ...q,
+      questGiver: q.questGiver === character.name ? null : q.questGiver,
+      characters: q.characters.filter(n => n !== character.name),
     })))
   }
 
@@ -497,6 +525,7 @@ export default function StoryEditor() {
       setScenes(detail.scenes)
       setThreads(detail.threads)
       setFactions(detail.factions)
+      setQuests(detail.quests)
       setCurrentSceneId(scene?.id ?? null)
       applySetup({ ...detail.setup, characters: resolved.characters })
       setVaultChanges(null)
@@ -601,15 +630,22 @@ export default function StoryEditor() {
     setThreads(prev => (prev.some(t => t.id === saved.id) ? prev.map(t => (t.id === saved.id ? saved : t)) : [saved, ...prev]))
 
   const handleThreadSubmit = async (input: ThreadInput) => {
-    const saved = editingThread
-      ? await api.updateThread(gameName, editingThread.id, input)
+    const editing = editingThread
+    const saved = editing
+      ? await api.updateThread(gameName, editing.id, input)
       : await api.createThread(gameName, input)
     upsertThread(saved)
+    // BE přepsal název nitě v questech → promítnout do stavu
+    if (editing && editing.title !== saved.title) {
+      setQuests(prev => prev.map(q => ({ ...q, threads: q.threads.map(n => (n === editing.title ? saved.title : n)) })))
+    }
   }
 
   const deleteThread = async (threadId: string) => {
+    const thread = threads.find(t => t.id === threadId)
     await api.deleteThread(gameName, threadId)
     setThreads(prev => prev.filter(t => t.id !== threadId))
+    if (thread) setQuests(prev => prev.map(q => ({ ...q, threads: q.threads.filter(n => n !== thread.title) })))
   }
 
   /** Částečná úprava nitě přímo ze seznamu (stav, hodiny) – posílá se celá nit, BE ukládá soubor jako celek */
@@ -644,6 +680,7 @@ export default function StoryEditor() {
       relations: f.relations.map(r => (r.faction === oldTitle ? { ...r, faction: newTitle } : r)),
     })))
     setThreads(prev => prev.map(t => ({ ...t, factions: t.factions.map(n => (n === oldTitle ? newTitle : n)) })))
+    setQuests(prev => prev.map(q => ({ ...q, factions: q.factions.map(n => (n === oldTitle ? newTitle : n)) })))
   }
 
   const handleFactionSubmit = async (values: FactionFormValues) => {
@@ -684,6 +721,7 @@ export default function StoryEditor() {
         relations: f.relations.filter(r => r.faction !== faction.title),
       } : f)))
     if (faction) setThreads(prev => prev.map(t => ({ ...t, factions: t.factions.filter(n => n !== faction.title) })))
+    if (faction) setQuests(prev => prev.map(q => ({ ...q, factions: q.factions.filter(n => n !== faction.title) })))
   }
 
   const handleFactionStanceChange = async (faction: Faction, stance: FactionStance) => {
@@ -695,9 +733,45 @@ export default function StoryEditor() {
     }
   }
 
-  /** Z detailu frakce přeskočit na jinou frakci / nit (zavře aktuální dialog) */
-  const openFaction = (faction: Faction) => { setThreadModal(null); setFactionModal({ mode: 'edit', id: faction.id }) }
-  const openThread = (thread: StoryThread) => { setFactionModal(null); setThreadModal({ mode: 'edit', id: thread.id }) }
+  /** Z detailu frakce / questu přeskočit na jinou entitu (zavře aktuální dialog) */
+  const openFaction = (faction: Faction) => { setThreadModal(null); setQuestModal(null); setFactionModal({ mode: 'edit', id: faction.id }) }
+  const openThread = (thread: StoryThread) => { setFactionModal(null); setQuestModal(null); setThreadModal({ mode: 'edit', id: thread.id }) }
+  const openQuest = (quest: Quest) => { setFactionModal(null); setThreadModal(null); setQuestModal({ mode: 'edit', id: quest.id }) }
+
+  // ---------- questy ----------
+
+  const upsertQuest = (saved: Quest) =>
+    setQuests(prev => (prev.some(q => q.id === saved.id) ? prev.map(q => (q.id === saved.id ? saved : q)) : [saved, ...prev]))
+
+  const handleQuestSubmit = async (input: QuestInput) => {
+    const editing = editingQuest
+    const saved = editing
+      ? await api.updateQuest(gameName, editing.id, input)
+      : await api.createQuest(gameName, input)
+    upsertQuest(saved)
+    // BE přepsal název v nadřazených vazbách ostatních questů → promítnout do stavu
+    if (editing && editing.title !== saved.title) {
+      setQuests(prev => prev.map(q => (q.parentQuest === editing.title ? { ...q, parentQuest: saved.title } : q)))
+    }
+  }
+
+  const deleteQuest = async (questId: string) => {
+    const quest = quests.find(q => q.id === questId)
+    await api.deleteQuest(gameName, questId)
+    setQuests(prev => prev
+      .filter(q => q.id !== questId)
+      .map(q => (quest && q.parentQuest === quest.title ? { ...q, parentQuest: null } : q)))
+  }
+
+  /** Rychlá změna stavu ze seznamu – posílá se celý quest, BE ukládá soubor jako celek */
+  const handleQuestStatusChange = async (quest: Quest, status: QuestStatus) => {
+    const { id: _id, createdAt: _c, updatedAt: _u, ...rest } = quest
+    try {
+      upsertQuest(await api.updateQuest(gameName, quest.id, { ...rest, status }))
+    } catch (error) {
+      console.error('Úprava questu selhala:', error)
+    }
+  }
 
   return (
     <div className="flex flex-col h-screen bg-black relative">
@@ -724,10 +798,13 @@ export default function StoryEditor() {
         onSelectNarrator={() => setShowNarratorPicker(true)}
         onToggleThreads={() => setSidePanel(p => (p === 'threads' ? null : 'threads'))}
         onToggleFactions={() => setSidePanel(p => (p === 'factions' ? null : 'factions'))}
+        onToggleQuests={() => setSidePanel(p => (p === 'quests' ? null : 'quests'))}
         threadsOpen={sidePanel === 'threads'}
         factionsOpen={sidePanel === 'factions'}
+        questsOpen={sidePanel === 'quests'}
         openThreadCount={openThreadCount}
         activeFactionCount={activeFactionCount}
+        activeQuestCount={activeQuestCount}
         onClearStory={handleClearStory}
         onShowBackground={() => {
           if (displayBackground) {
@@ -794,9 +871,9 @@ export default function StoryEditor() {
           />
         </div>
 
-        {/* Postranní panel kampaně: dějové nitě | frakce */}
+        {/* Postranní panel kampaně: dějové nitě | frakce | questy */}
         {sidePanel && (
-          <SidePanel tab={sidePanel} onTabChange={setSidePanel} counts={{ threads: openThreadCount, factions: activeFactionCount }} onClose={() => setSidePanel(null)}>
+          <SidePanel tab={sidePanel} onTabChange={setSidePanel} counts={{ threads: openThreadCount, factions: activeFactionCount, quests: activeQuestCount }} onClose={() => setSidePanel(null)}>
             {sidePanel === 'threads' ? (
               <ThreadsPanel
                 threads={threads}
@@ -805,12 +882,20 @@ export default function StoryEditor() {
                 onStatusChange={handleThreadStatusChange}
                 onClockStep={handleThreadClockStep}
               />
-            ) : (
+            ) : sidePanel === 'factions' ? (
               <FactionsPanel
                 factions={displayFactions}
                 onCreate={() => setFactionModal({ mode: 'create' })}
                 onEdit={(f) => setFactionModal({ mode: 'edit', id: f.id })}
                 onStanceChange={handleFactionStanceChange}
+              />
+            ) : (
+              <QuestsPanel
+                quests={displayQuests}
+                characterOptions={characterOptions}
+                onCreate={() => setQuestModal({ mode: 'create' })}
+                onEdit={(q) => setQuestModal({ mode: 'edit', id: q.id })}
+                onStatusChange={handleQuestStatusChange}
               />
             )}
           </SidePanel>
@@ -870,9 +955,28 @@ export default function StoryEditor() {
           allFactions={factionOptions}
           sceneTitles={scenes.map(s => s.title)}
           defaultScene={currentScene?.title ?? null}
+          relatedQuests={threadQuests}
+          onOpenQuest={openQuest}
           onSubmit={handleThreadSubmit}
           onDelete={editingThread ? () => deleteThread(editingThread.id) : undefined}
           onClose={() => setThreadModal(null)}
+        />
+      )}
+      {/* Vytvoření / úprava questu */}
+      {questModal && (
+        <QuestModal
+          key={questModal.mode === 'edit' ? questModal.id : 'new'}
+          quest={editingQuest}
+          allCharacters={characterOptions}
+          allFactions={factionOptions}
+          allThreads={threads}
+          otherQuests={quests.filter(q => q.id !== editingQuest?.id)}
+          childQuests={questChildren}
+          onSubmit={handleQuestSubmit}
+          onDelete={editingQuest ? () => deleteQuest(editingQuest.id) : undefined}
+          onOpenQuest={openQuest}
+          onOpenThread={openThread}
+          onClose={() => setQuestModal(null)}
         />
       )}
       {/* Vytvoření / úprava frakce */}

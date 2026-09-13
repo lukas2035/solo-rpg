@@ -1,9 +1,9 @@
-export type SidePanelTab = 'threads' | 'factions'
+export type SidePanelTab = 'threads' | 'factions' | 'quests'
 
 interface SidePanelProps {
   tab: SidePanelTab
   onTabChange: (tab: SidePanelTab) => void
-  /** Odznaky na záložkách (otevřené nitě, aktivní frakce) */
+  /** Odznaky na záložkách (otevřené nitě, aktivní frakce, aktivní questy) */
   counts: Record<SidePanelTab, number>
   onClose: () => void
   children: React.ReactNode
@@ -12,9 +12,10 @@ interface SidePanelProps {
 const TABS: { id: SidePanelTab; icon: string; label: string }[] = [
   { id: 'threads', icon: '🧵', label: 'Dějové nitě' },
   { id: 'factions', icon: '🏴', label: 'Frakce' },
+  { id: 'quests', icon: '📜', label: 'Questy' },
 ]
 
-/** Postranní panel kampaně vpravo od příběhu – záložky Dějové nitě | Frakce */
+/** Postranní panel kampaně vpravo od příběhu – záložky Dějové nitě | Frakce | Questy */
 export default function SidePanel({ tab, onTabChange, counts, onClose, children }: SidePanelProps) {
   return (
     <aside className="w-[400px] max-w-full flex-shrink-0 h-full flex flex-col bg-[#0c0c0c]/95 border-l-2 border-[var(--accent)]/40 text-[var(--text)]">

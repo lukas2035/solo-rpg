@@ -83,6 +83,10 @@ vault/<Název hry>/
   factions/<Název>.md     frontmatter: id (faction-<ts>), title, type, status, stance, leader (wikilink|null), parentFaction (wikilink|null),
                           goals (string[]), characters (wikilinky), relations ([{faction: wikilink, stance, note}]), emblem, createdAt, updatedAt;
                           tělo = veřejný popis, za značkou `<!-- secrets -->` tajemství (značka chybí, když jsou prázdná).
+  quests/<Název>.md       frontmatter: id (quest-<ts>), title, type, status, questGiver (wikilink|null), parentQuest (wikilink|null),
+                          objectives ([{id, title, status, optional?}] – `optional` jen když true), rewards (string[]),
+                          characters/threads/factions (wikilinky), createdAt, updatedAt;
+                          tělo = popis, pak `<!-- outcome -->` výsledek, pak `<!-- notes -->` poznámky (značky chybí, když prázdné).
   backgrounds/<soubor>    obrázky scén jako backgrounds/<Název scény>.ext (+ případné staré pozadí hry `background` v game.md;
                           v UI se už nenastavuje ani nemaže, slouží jen jako fallback pro scény bez obrázku)
   scenes/001 - Název.md   frontmatter: id, title, order, image, characters (wikilinky `[[Celé jméno]]` postav ve scéně), createdAt, updatedAt
@@ -170,6 +174,28 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
   select vůdce a nadřazené frakce, cíle CRUD + pořadí, checklist postav, editor vztahů + příchozí vztahy, dopočítané
   podfrakce a nitě (klik otevře příslušný modal), popis, sbalitelná tajemství. Vytvoření s emblémem = create → asset → update.
 
+### Questy / Quests (FE + BE)
+- Zadání od ChatGPT (počítalo s `links.{characters,locations,quests,threads,factions}` podle ID, `entityType`, `## Description`
+  sekcemi, PascalCase výčty); **odchylky odsouhlasené s Lukášem**: wikilinky podle názvu jako u nití/frakcí, složka `quests/`,
+  žádné `links`/`entityType`/Locations, lowercase výčty + české popisky (`utils/quests.ts`), popis volitelný, `optional`
+  se zapisuje jen pokud true, Výsledek/Poznámky za značkami `<!-- outcome -->`/`<!-- notes -->`. Frakce už existují →
+  vazba quest → frakce je funkční. Progress se nikam neukládá (`questProgress()` ve shared počítá jen povinné cíle).
+- Typy: main/side/personal/investigation/faction/exploration/survival (povinné). Stavy: available/active/paused
+  (= otevřené, `OPEN_QUEST_STATUSES`) + completed/failed/abandoned; `QUEST_STATUS_ORDER` = výchozí řazení.
+  Cíle: pending/active/completed/failed/skipped. Změna stavu questu nic nedělá s nitěmi ani cíli (ručně, záměrně).
+- Směr vazeb: quest → characters/threads/factions, questGiver, parentQuest. Backlinky (podřízené questy, „Součást questů“
+  v `ThreadModal`) se dopočítávají ve FE (`questChildren`, `threadQuests` ve `StoryEditor`).
+- BE `ObsidianVaultProvider`: `listQuests/createQuest/updateQuest/deleteQuest`; `normalizeObjectives(input, previous)`
+  zachová id existujících cílů (nové `objective-<ts>-<n>`), `parseObjectives` snese ruční soubor (string = title, chybějící id
+  → `objective-<index>`); `resolveParentQuest` → 400 na sebe/cyklus; `normalizeCharacterRef` (dřív `normalizeFactionLeader`)
+  pro questGiver i leader; neznámé výčty → side/available/pending. Hooky: `renameCharacterInQuests`, `renameThreadInQuests`,
+  `renameFactionInQuests`, `renameQuestInQuests` (parentQuest); delete questu → child questy parentQuest=null.
+- FE: 📜 v pásu (odznak = počet aktivních) → `SidePanel` záložka Questy; `QuestsPanel` – hledání, filtry typ/stav/postava,
+  řazení dle stavu pak updatedAt, řádek = typ·stav·progress bar, další cíl, zadavatel, rychlý select stavu; ukončené sbalené.
+  `QuestModal` – chipy typ/stav, popis, editor cílů (klik na značku cykluje pending→active→completed, select stavu, „volit.“,
+  ↑↓✕, Enter přidá), zadavatel, nadřazený quest (+ ↗), odměny CRUD + pořadí, checklisty postav/nití/frakcí, dopočítané
+  navazující questy, Výsledek, sbalitelné Poznámky, Smazat s confirm.
+
 ### Změny ve vaultu zvenčí (Obsidian)
 - Tlačítka „znovu načíst“ (📂/💬) jsou pryč. FE se při otevření hry připojí na `GET /api/games/:name/events` (SSE,
   `api.subscribeVaultChanges`). BE `GameWatcher` sleduje složku hry přes `fs.watch({recursive})` – jen dokud je někdo
@@ -188,6 +214,7 @@ POST /api/games/:name/characters             PUT/DELETE /api/games/:name/charact
 POST /api/games/:name/narrators              PUT/DELETE /api/games/:name/narrators/:id   ({ name, description?, image? })
 GET/POST /api/games/:name/threads            PUT/DELETE /api/games/:name/threads/:id     (ThreadInput; title+type povinné)
 GET/POST /api/games/:name/factions           PUT/DELETE /api/games/:name/factions/:id    (FactionInput; title+type povinné)
+GET/POST /api/games/:name/quests             PUT/DELETE /api/games/:name/quests/:id      (QuestInput; title+type povinné)
 POST /api/games/:name/assets (multipart: kind portrait|narrator|faction|background|scene, ownerName?, file)
 POST /api/games/:name/assets/from-url ({ kind, url, ownerName? })
 GET/POST /api/games/:name/scenes ({title, description?, image?, characters?})
@@ -216,6 +243,11 @@ GET  /vault/*  (statické soubory vaultu)
   v souboru/409/400 bez type/400 self-parent i cyklus/normalizace relations a thread.factions/rename souboru + propagace do
   relations, parentFaction, nití/rename+delete postavy → leader+characters/vymazání tajemství odstraní značku/delete vyčistí
   vazby/404/ruční soubor z Obsidianu) – prošlo. FE jen build + lint, klikací test neproběhl.
+- Questy: API smoke test (~75 kontrol: defaulty/markdown s outcome+notes značkami/objectives id stabilní při update/
+  409/400 bez type/400 prázdný cíl/400 self-parent i cyklus/rename souboru + propagace do parentQuest/rename+delete postavy,
+  nitě, frakce/delete → child parent null/ruční soubor s cíli jako stringy/404) – prošlo. **CDP klikací test v headless Edge**
+  (tab Questy, validace typu, cíle přes Enter, cyklování stavu, progress, řádek v panelu, rychlá změna stavu, editace,
+  backlink v ThreadModal, bez chyb v konzoli) – prošlo.
 
 ## 4. Spuštění
 ```
@@ -226,8 +258,9 @@ npm.cmd run dev          # BE http://127.0.0.1:3001 + FE http://localhost:5173
 ## 5. Co je DALŠÍ na řadě (Lukáš ještě nevybral, zeptej se)
 1. **OpenRouter endpoint** `POST /api/generate` (+ `ModelRouter`, SSE streaming, klíč v `.env`, mature flag) – napojit na
    vypravěče (`narrators/*.md`, description = systémový prompt / styl), aby AI vypravěč mohl řídit hru.
-2. **Další typy poznámek ve vaultu:** lokace (`locations/*.md`), questy (`quests/*.md`) – a jejich vazby na
-   dějové nitě a frakce (sídlo `headquarters`, území; přidat pole + hooky rename/delete jako u postav/scén). Rozšíření postav (typ PC/NPC, vztahy, backlink „frakce postavy“).
+2. **Další typy poznámek ve vaultu:** lokace (`locations/*.md`) – vazby na nitě, frakce (sídlo `headquarters`, území) a questy
+   (přidat pole + hooky rename/delete jako u postav/scén). Rozšíření postav (typ PC/NPC, vztahy, backlinky „frakce/questy postavy“).
+   **Quests – další krok:** vazba scéna → quest (Related Scenes), AI návrhy změn cílů/stavu po scéně (strukturované akce).
 3. **Threads – další krok:** návrhy nití z AI shrnutí scén, automatika hodin (zatím záměrně ručně), backlinky
    „nitě této postavy“ v `CharacterModal`. **Factions:** AI context builder musí oddělovat `description` (veřejné) a `secrets` (jen AI vypravěč).
 4. Případně `chokidar` sledování vaultu – nyní řeší `GameWatcher` + SSE.

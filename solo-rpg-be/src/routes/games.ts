@@ -12,6 +12,7 @@ import {
   StoryEntrySchema,
   ThreadInputSchema,
   FactionInputSchema,
+  QuestInputSchema,
   isValidGameName,
 } from '@solo-rpg/shared'
 import { ConflictError, NotFoundError, ValidationError, type StorageProvider } from '../vault/StorageProvider.js'
@@ -27,6 +28,7 @@ const CharacterParams = GameParams.extend({ character: z.string().min(1) })
 const NarratorParams = GameParams.extend({ narrator: z.string().min(1) })
 const ThreadParams = GameParams.extend({ thread: z.string().min(1) })
 const FactionParams = GameParams.extend({ faction: z.string().min(1) })
+const QuestParams = GameParams.extend({ quest: z.string().min(1) })
 
 function sendError(reply: FastifyReply, error: unknown): FastifyReply {
   if (error instanceof z.ZodError) return reply.code(400).send({ error: z.prettifyError(error) })
@@ -290,6 +292,31 @@ export async function registerGameRoutes(app: FastifyInstance, storage: StorageP
   app.delete('/api/games/:game/factions/:faction', async (request, reply) => {
     const { game, faction } = FactionParams.parse(request.params)
     await storage.deleteFaction(game, faction)
+    return reply.code(204).send()
+  })
+
+  // ---------- questy (quests) ----------
+
+  app.get('/api/games/:game/quests', async (request) => {
+    const { game } = GameParams.parse(request.params)
+    return storage.listQuests(game)
+  })
+
+  app.post('/api/games/:game/quests', async (request, reply) => {
+    const { game } = GameParams.parse(request.params)
+    const input = QuestInputSchema.parse(request.body)
+    return reply.code(201).send(await storage.createQuest(game, input))
+  })
+
+  app.put('/api/games/:game/quests/:quest', async (request) => {
+    const { game, quest } = QuestParams.parse(request.params)
+    const input = QuestInputSchema.parse(request.body)
+    return storage.updateQuest(game, quest, input)
+  })
+
+  app.delete('/api/games/:game/quests/:quest', async (request, reply) => {
+    const { game, quest } = QuestParams.parse(request.params)
+    await storage.deleteQuest(game, quest)
     return reply.code(204).send()
   })
 }

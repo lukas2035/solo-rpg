@@ -1,4 +1,4 @@
-import type { Character, CharacterInput, Faction, FactionInput, GameDetail, GameMeta, GameSettings, GameSetup, Narrator, NarratorInput, SceneInput, SceneMeta, StoryEntry, StoryThread, ThreadInput, AssetKind } from '@solo-rpg/shared'
+import type { Character, CharacterInput, Faction, FactionInput, GameDetail, GameMeta, GameSettings, GameSetup, Narrator, NarratorInput, Quest, QuestInput, SceneInput, SceneMeta, StoryEntry, StoryThread, ThreadInput, AssetKind } from '@solo-rpg/shared'
 
 export interface AssetInput {
   kind: AssetKind
@@ -49,6 +49,11 @@ export interface StorageProvider {
   createFaction(name: string, input: FactionInput): Promise<Faction>
   updateFaction(name: string, factionId: string, input: FactionInput): Promise<Faction>
   deleteFaction(name: string, factionId: string): Promise<void>
+
+  listQuests(name: string): Promise<Quest[]>
+  createQuest(name: string, input: QuestInput): Promise<Quest>
+  updateQuest(name: string, questId: string, input: QuestInput): Promise<Quest>
+  deleteQuest(name: string, questId: string): Promise<void>
 }
 
 export class NotFoundError extends Error {}

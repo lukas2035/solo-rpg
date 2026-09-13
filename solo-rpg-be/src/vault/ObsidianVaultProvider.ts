@@ -16,6 +16,9 @@ import {
   type GameSetup,
   type Narrator,
   type NarratorInput,
+  type Quest,
+  type QuestInput,
+  type QuestObjective,
   type SceneInput,
   type SceneMeta,
   type StoryEntry,
@@ -25,6 +28,9 @@ import {
   FactionStanceSchema,
   FactionStatusSchema,
   FactionTypeSchema,
+  ObjectiveStatusSchema,
+  QuestStatusSchema,
+  QuestTypeSchema,
   ThreadCertaintySchema,
   ThreadHorizonSchema,
   ThreadStatusSchema,
@@ -64,10 +70,14 @@ const THREAD_DIR = 'threads'
 const FACTION_DIR = 'factions'
 /** Emblémy frakcí odděleně od portrétů postav */
 const FACTION_EMBLEM_DIR = `${PORTRAIT_DIR}/factions`
+const QUEST_DIR = 'quests'
 /** Odděluje markdown popis scény (před) od záznamů příběhu (za) */
 const ENTRIES_MARKER = /<!--\s*entries\s*-->/
 /** Odděluje veřejný popis frakce (před) od jejích tajemství (za) */
 const SECRETS_MARKER = /<!--\s*secrets\s*-->/
+/** Tělo questu: popis, pak `<!-- outcome -->` výsledek, pak `<!-- notes -->` poznámky (značky chybí, když je sekce prázdná) */
+const OUTCOME_MARKER = /<!--\s*outcome\s*-->/
+const NOTES_MARKER = /<!--\s*notes\s*-->/
 
 type Frontmatter = Record<string, unknown>
 
@@ -109,6 +119,12 @@ interface FactionFile {
   fileName: string
   data: Frontmatter
   faction: Faction
+}
+
+interface QuestFile {
+  fileName: string
+  data: Frontmatter
+  quest: Quest
 }
 
 function toTimestamp(value: unknown, fallback: number): number {
@@ -162,6 +178,42 @@ function splitFactionBody(body: string): { description: string; secrets: string 
   const clean = (s: string) => s.replace(/^\n+/, '').trimEnd()
   if (!match || match.index === undefined) return { description: clean(body), secrets: '' }
   return { description: clean(body.slice(0, match.index)), secrets: clean(body.slice(match.index + match[0].length)) }
+}
+
+/** Tělo questu = popis + volitelně `<!-- outcome -->` výsledek + volitelně `<!-- notes -->` poznámky (v tomto pořadí) */
+function splitQuestBody(body: string): { description: string; outcome: string; notes: string } {
+  const clean = (s: string) => s.replace(/^\n+/, '').trimEnd()
+  let rest = body
+  let notes = ''
+  const notesMatch = rest.match(NOTES_MARKER)
+  if (notesMatch && notesMatch.index !== undefined) {
+    notes = clean(rest.slice(notesMatch.index + notesMatch[0].length))
+    rest = rest.slice(0, notesMatch.index)
+  }
+  let outcome = ''
+  const outcomeMatch = rest.match(OUTCOME_MARKER)
+  if (outcomeMatch && outcomeMatch.index !== undefined) {
+    outcome = clean(rest.slice(outcomeMatch.index + outcomeMatch[0].length))
+    rest = rest.slice(0, outcomeMatch.index)
+  }
+  return { description: clean(rest), outcome, notes }
+}
+
+/** Frontmatter `objectives` questu: `{ id?, title, status?, optional? }`; chybějící id (ruční zápis v Obsidianu) se doplní */
+function parseObjectives(value: unknown): QuestObjective[] {
+  if (!Array.isArray(value)) return []
+  const objectives: QuestObjective[] = []
+  value.forEach((item, index) => {
+    // Prostý řetězec v seznamu = název nesplněného cíle
+    const rec: Record<string, unknown> = typeof item === 'string' ? { title: item } : typeof item === 'object' && item !== null ? (item as Record<string, unknown>) : {}
+    const title = stringOrNull(rec.title)
+    if (!title) return
+    const status = ObjectiveStatusSchema.safeParse(rec.status)
+    let id = stringOrNull(rec.id) ?? `objective-${index + 1}`
+    while (objectives.some(o => o.id === id)) id = `${id}-x`
+    objectives.push({ id, title, status: status.success ? status.data : 'pending', optional: rec.optional === true })
+  })
+  return objectives
 }
 
 /** Frontmatter `relations` frakce: `{ faction: [[Název]], stance, note? }` */
@@ -302,7 +354,7 @@ export class ObsidianVaultProvider implements StorageProvider {
 
     const now = toIso(Date.now())
     await ensureDir(dir)
-    await Promise.all([CHARACTER_DIR, NARRATOR_DIR, THREAD_DIR, FACTION_DIR, PORTRAIT_DIR, BACKGROUND_DIR, SCENE_DIR].map(sub => ensureDir(path.join(dir, sub))))
+    await Promise.all([CHARACTER_DIR, NARRATOR_DIR, THREAD_DIR, FACTION_DIR, QUEST_DIR, PORTRAIT_DIR, BACKGROUND_DIR, SCENE_DIR].map(sub => ensureDir(path.join(dir, sub))))
     await this.writeGameFile(dir, {
       data: {
         name: trimmed,
@@ -335,12 +387,14 @@ export class ObsidianVaultProvider implements StorageProvider {
     const scenes = await this.listScenes(name)
     const threads = await this.readThreads(dir)
     const factions = await this.readFactions(dir)
+    const quests = await this.readQuests(dir)
     return {
       meta: this.metaFromGameFile(name.trim(), file, stat),
       setup: this.setupFromGameFile(file, characters.map(c => c.character), narrators.map(n => n.narrator)),
       scenes,
       threads: threads.map(t => t.thread),
       factions: factions.map(f => f.faction),
+      quests: quests.map(q => q.quest),
     }
   }
 
@@ -536,6 +590,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     }
     if (name !== previous.name) await this.renameCharacterInThreads(dir, previous.name, name)
     if (name !== previous.name) await this.renameCharacterInFactions(dir, previous.name, name)
+    if (name !== previous.name) await this.renameCharacterInQuests(dir, previous.name, name)
     await this.touchGame(dir)
     return character
   }
@@ -551,6 +606,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     await this.removeCharacterFromScenes(dir, current.character.name)
     await this.renameCharacterInThreads(dir, current.character.name, null)
     await this.renameCharacterInFactions(dir, current.character.name, null)
+    await this.renameCharacterInQuests(dir, current.character.name, null)
     await this.touchGame(dir)
   }
 
@@ -1193,6 +1249,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       updatedAt: Date.now(),
     }
     await this.writeThreadFile(dir, thread, current.data)
+    if (title !== previous.title) await this.renameThreadInQuests(dir, previous.title, title)
     await this.touchGame(dir)
     return thread
   }
@@ -1203,6 +1260,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     const current = existing.find(t => t.thread.id === threadId)
     if (!current) throw new NotFoundError(`Dějová nit „${threadId}“ neexistuje.`)
     await removeIfExists(path.join(dir, THREAD_DIR, current.fileName))
+    await this.renameThreadInQuests(dir, current.thread.title, null)
     await this.touchGame(dir)
   }
 
@@ -1288,7 +1346,7 @@ export class ObsidianVaultProvider implements StorageProvider {
   }
 
   /** Vůdce: jen existující postava (kanonické jméno), jinak null */
-  private async normalizeFactionLeader(dir: string, name: string | null): Promise<string | null> {
+  private async normalizeCharacterRef(dir: string, name: string | null): Promise<string | null> {
     if (!name) return null
     return (await this.normalizeSceneCharacters(dir, [name]))[0] ?? null
   }
@@ -1381,7 +1439,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       type: input.type,
       status: input.status ?? 'active',
       stance: input.stance ?? 'unknown',
-      leader: await this.normalizeFactionLeader(dir, input.leader ?? null),
+      leader: await this.normalizeCharacterRef(dir, input.leader ?? null),
       parentFaction: this.resolveParentFaction(existing, undefined, title, input.parentFaction ?? null),
       goals: (input.goals ?? []).map(g => g.trim()).filter(Boolean),
       characters: await this.normalizeSceneCharacters(dir, input.characters ?? []),
@@ -1431,7 +1489,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       type: input.type,
       status: input.status ?? previous.status,
       stance: input.stance ?? previous.stance,
-      leader: input.leader === undefined ? previous.leader : await this.normalizeFactionLeader(dir, input.leader),
+      leader: input.leader === undefined ? previous.leader : await this.normalizeCharacterRef(dir, input.leader),
       parentFaction: input.parentFaction === undefined
         ? previous.parentFaction
         : this.resolveParentFaction(existing, factionId, title, input.parentFaction),
@@ -1447,6 +1505,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     if (title !== previous.title) {
       await this.renameFactionInFactions(dir, previous.title, title)
       await this.renameFactionInThreads(dir, previous.title, title)
+      await this.renameFactionInQuests(dir, previous.title, title)
     }
     await this.touchGame(dir)
     return faction
@@ -1461,6 +1520,255 @@ export class ObsidianVaultProvider implements StorageProvider {
     if (current.faction.emblem) await this.removeEmblemIfUnused(dir, current.faction.emblem, existing, factionId)
     await this.renameFactionInFactions(dir, current.faction.title, null)
     await this.renameFactionInThreads(dir, current.faction.title, null)
+    await this.renameFactionInQuests(dir, current.faction.title, null)
+    await this.touchGame(dir)
+  }
+
+  // ---------- questy (quests) ----------
+
+  private questFromFrontmatter(data: Frontmatter, baseName: string, body: string, stat: { birthtimeMs: number; mtimeMs: number }): Quest {
+    const type = QuestTypeSchema.safeParse(data.type)
+    const status = QuestStatusSchema.safeParse(data.status)
+    const { description, outcome, notes } = splitQuestBody(body)
+    return {
+      id: stringOrNull(data.id) ?? baseName,
+      title: stringOrNull(data.title) ?? baseName,
+      // Neznámá hodnota ručně zapsaná v Obsidianu → rozumný výchozí stav, soubor se nepřepisuje, dokud ho uživatel neuloží
+      type: type.success ? type.data : 'side',
+      status: status.success ? status.data : 'available',
+      objectives: parseObjectives(data.objectives),
+      questGiver: parseLink(data.questGiver),
+      parentQuest: parseLink(data.parentQuest),
+      rewards: Array.isArray(data.rewards) ? data.rewards.filter((r): r is string => typeof r === 'string' && r.trim() !== '').map(r => r.trim()) : [],
+      characters: parseCharacterLinks(data.characters),
+      threads: parseCharacterLinks(data.threads),
+      factions: parseCharacterLinks(data.factions),
+      description,
+      outcome,
+      notes,
+      createdAt: toTimestamp(data.createdAt, stat.birthtimeMs),
+      updatedAt: toTimestamp(data.updatedAt, stat.mtimeMs),
+    }
+  }
+
+  private async readQuests(dir: string): Promise<QuestFile[]> {
+    const questDir = path.join(dir, QUEST_DIR)
+    const files = await listFiles(questDir, '.md')
+    const quests: QuestFile[] = []
+    for (const fileName of files) {
+      const raw = await readTextIfExists(path.join(questDir, fileName))
+      if (raw === null) continue
+      const parsed = matter(raw)
+      const stat = await fs.stat(path.join(questDir, fileName))
+      const baseName = fileName.replace(/\.md$/i, '')
+      quests.push({ fileName, data: parsed.data as Frontmatter, quest: this.questFromFrontmatter(parsed.data as Frontmatter, baseName, parsed.content, stat) })
+    }
+    // Nejnověji upravené nahoře; řazení podle stavu si dělá UI
+    return quests.sort((a, b) => b.quest.updatedAt - a.quest.updatedAt || a.quest.title.localeCompare(b.quest.title, 'cs'))
+  }
+
+  private assertQuestTitleFree(existing: QuestFile[], title: string, exceptId?: string): void {
+    const key = nameKey(title)
+    if (existing.some(q => q.quest.id !== exceptId && nameKey(q.quest.title) === key)) {
+      throw new ConflictError(`Quest „${title}“ už existuje. Zvol jiný název.`)
+    }
+  }
+
+  private async writeQuestFile(dir: string, quest: Quest, extra: Frontmatter): Promise<void> {
+    const data: Frontmatter = {
+      ...extra,
+      id: quest.id,
+      title: quest.title,
+      type: quest.type,
+      status: quest.status,
+      questGiver: quest.questGiver ? `[[${quest.questGiver}]]` : null,
+      parentQuest: quest.parentQuest ? `[[${quest.parentQuest}]]` : null,
+      // `optional` zapisujeme jen když platí, aby YAML zůstal čitelný
+      objectives: quest.objectives.map(o => ({ id: o.id, title: o.title, status: o.status, ...(o.optional ? { optional: true } : {}) })),
+      rewards: quest.rewards,
+      characters: toCharacterLinks(quest.characters),
+      threads: toCharacterLinks(quest.threads),
+      factions: toCharacterLinks(quest.factions),
+      createdAt: toIso(quest.createdAt),
+      updatedAt: toIso(quest.updatedAt),
+    }
+    const description = quest.description.trim() ? `\n${quest.description.trimEnd()}\n` : ''
+    const outcome = quest.outcome.trim() ? `\n<!-- outcome -->\n\n${quest.outcome.trimEnd()}\n` : ''
+    const notes = quest.notes.trim() ? `\n<!-- notes -->\n\n${quest.notes.trimEnd()}\n` : ''
+    await writeFileAtomic(path.join(dir, QUEST_DIR, `${safeFileName(quest.title)}.md`), matter.stringify(description + outcome + notes, data))
+  }
+
+  /** Názvy nití: jen existující (kanonický zápis), bez duplicit */
+  private async normalizeQuestThreads(dir: string, titles: string[]): Promise<string[]> {
+    const threads = await this.readThreads(dir)
+    const result: string[] = []
+    for (const title of titles) {
+      const found = threads.find(t => nameKey(t.thread.title) === nameKey(title))
+      if (found && !result.includes(found.thread.title)) result.push(found.thread.title)
+    }
+    return result
+  }
+
+  /**
+   * Cíle questu: zachovat id existujících, novým přidělit `objective-<ts>-<n>`; prázdné názvy vypustit.
+   * Pořadí vstupu = uložené pořadí.
+   */
+  private normalizeObjectives(input: QuestInput['objectives'], previous: QuestObjective[]): QuestObjective[] {
+    const now = Date.now()
+    const result: QuestObjective[] = []
+    let counter = 0
+    for (const item of input ?? []) {
+      const title = item.title.trim()
+      if (!title) continue
+      const prev = item.id ? previous.find(o => o.id === item.id) : undefined
+      let id = prev?.id ?? item.id ?? `objective-${now}-${++counter}`
+      while (result.some(o => o.id === id)) id = `objective-${now}-${++counter}`
+      result.push({ id, title, status: item.status ?? prev?.status ?? 'pending', optional: item.optional ?? prev?.optional ?? false })
+    }
+    return result
+  }
+
+  /** Nadřazený quest: musí existovat, nesmí být quest sám a nesmí vytvořit cyklus */
+  private resolveParentQuest(quests: QuestFile[], selfId: string | undefined, selfTitle: string, title: string | null): string | null {
+    if (!title) return null
+    const parent = quests.find(q => nameKey(q.quest.title) === nameKey(title))
+    if (!parent) return null
+    if (parent.quest.id === selfId || nameKey(parent.quest.title) === nameKey(selfTitle)) {
+      throw new ValidationError('Quest nemůže být nadřazený sám sobě.')
+    }
+    const seen = new Set<string>()
+    let cursor: QuestFile | undefined = parent
+    while (cursor?.quest.parentQuest) {
+      if (seen.has(cursor.quest.id)) break
+      seen.add(cursor.quest.id)
+      const next = quests.find(q => q.quest.title === cursor!.quest.parentQuest)
+      if (next && next.quest.id === selfId) {
+        throw new ValidationError(`Quest „${parent.quest.title}“ je podřízený tomuto questu – vznikl by cyklus.`)
+      }
+      cursor = next
+    }
+    return parent.quest.title
+  }
+
+  /** Po přejmenování (newName) / smazání (null) postavy upravit zadavatele a postavy ve všech questech. */
+  private async renameCharacterInQuests(dir: string, oldName: string, newName: string | null): Promise<void> {
+    for (const file of await this.readQuests(dir)) {
+      const q = file.quest
+      if (q.questGiver !== oldName && !q.characters.includes(oldName)) continue
+      await this.writeQuestFile(dir, {
+        ...q,
+        questGiver: q.questGiver === oldName ? newName : q.questGiver,
+        characters: q.characters.flatMap(n => (n === oldName ? (newName ? [newName] : []) : [n])),
+      }, file.data)
+    }
+  }
+
+  /** Po přejmenování (newTitle) / smazání (null) nitě upravit vazby ve všech questech. */
+  private async renameThreadInQuests(dir: string, oldTitle: string, newTitle: string | null): Promise<void> {
+    for (const file of await this.readQuests(dir)) {
+      if (!file.quest.threads.includes(oldTitle)) continue
+      const threads = file.quest.threads.flatMap(n => (n === oldTitle ? (newTitle ? [newTitle] : []) : [n]))
+      await this.writeQuestFile(dir, { ...file.quest, threads }, file.data)
+    }
+  }
+
+  /** Po přejmenování (newTitle) / smazání (null) frakce upravit vazby ve všech questech. */
+  private async renameFactionInQuests(dir: string, oldTitle: string, newTitle: string | null): Promise<void> {
+    for (const file of await this.readQuests(dir)) {
+      if (!file.quest.factions.includes(oldTitle)) continue
+      const factions = file.quest.factions.flatMap(n => (n === oldTitle ? (newTitle ? [newTitle] : []) : [n]))
+      await this.writeQuestFile(dir, { ...file.quest, factions }, file.data)
+    }
+  }
+
+  /** Po přejmenování (newTitle) / smazání (null) questu upravit nadřazený quest v ostatních questech. */
+  private async renameQuestInQuests(dir: string, oldTitle: string, newTitle: string | null): Promise<void> {
+    for (const file of await this.readQuests(dir)) {
+      if (file.quest.parentQuest !== oldTitle) continue
+      await this.writeQuestFile(dir, { ...file.quest, parentQuest: newTitle }, file.data)
+    }
+  }
+
+  async listQuests(name: string): Promise<Quest[]> {
+    const dir = await this.requireGameDir(name)
+    return (await this.readQuests(dir)).map(q => q.quest)
+  }
+
+  async createQuest(gameName: string, input: QuestInput): Promise<Quest> {
+    const dir = await this.requireGameDir(gameName)
+    await ensureDir(path.join(dir, QUEST_DIR))
+    const existing = await this.readQuests(dir)
+    const title = input.title.trim()
+    this.assertQuestTitleFree(existing, title)
+    const now = Date.now()
+    const quest: Quest = {
+      id: `quest-${now}`,
+      title,
+      type: input.type,
+      status: input.status ?? 'available',
+      objectives: this.normalizeObjectives(input.objectives, []),
+      questGiver: await this.normalizeCharacterRef(dir, input.questGiver ?? null),
+      parentQuest: this.resolveParentQuest(existing, undefined, title, input.parentQuest ?? null),
+      rewards: (input.rewards ?? []).map(r => r.trim()).filter(Boolean),
+      characters: await this.normalizeSceneCharacters(dir, input.characters ?? []),
+      threads: await this.normalizeQuestThreads(dir, input.threads ?? []),
+      factions: await this.normalizeThreadFactions(dir, input.factions ?? []),
+      description: input.description ?? '',
+      outcome: input.outcome ?? '',
+      notes: input.notes ?? '',
+      createdAt: now,
+      updatedAt: now,
+    }
+    await this.writeQuestFile(dir, quest, {})
+    await this.touchGame(dir)
+    return quest
+  }
+
+  async updateQuest(gameName: string, questId: string, input: QuestInput): Promise<Quest> {
+    const dir = await this.requireGameDir(gameName)
+    const existing = await this.readQuests(dir)
+    const current = existing.find(q => q.quest.id === questId)
+    if (!current) throw new NotFoundError(`Quest „${questId}“ neexistuje.`)
+    const previous = current.quest
+    const title = input.title.trim()
+    this.assertQuestTitleFree(existing, title, questId)
+
+    // Název = název souboru; id zůstává
+    if (title !== previous.title) await removeIfExists(path.join(dir, QUEST_DIR, current.fileName))
+
+    const quest: Quest = {
+      ...previous,
+      title,
+      type: input.type,
+      status: input.status ?? previous.status,
+      objectives: input.objectives ? this.normalizeObjectives(input.objectives, previous.objectives) : previous.objectives,
+      questGiver: input.questGiver === undefined ? previous.questGiver : await this.normalizeCharacterRef(dir, input.questGiver),
+      parentQuest: input.parentQuest === undefined
+        ? previous.parentQuest
+        : this.resolveParentQuest(existing, questId, title, input.parentQuest),
+      rewards: input.rewards ? input.rewards.map(r => r.trim()).filter(Boolean) : previous.rewards,
+      characters: input.characters ? await this.normalizeSceneCharacters(dir, input.characters) : previous.characters,
+      threads: input.threads ? await this.normalizeQuestThreads(dir, input.threads) : previous.threads,
+      factions: input.factions ? await this.normalizeThreadFactions(dir, input.factions) : previous.factions,
+      description: input.description ?? previous.description,
+      outcome: input.outcome ?? previous.outcome,
+      notes: input.notes ?? previous.notes,
+      updatedAt: Date.now(),
+    }
+    await this.writeQuestFile(dir, quest, current.data)
+    if (title !== previous.title) await this.renameQuestInQuests(dir, previous.title, title)
+    await this.touchGame(dir)
+    return quest
+  }
+
+  async deleteQuest(gameName: string, questId: string): Promise<void> {
+    const dir = await this.requireGameDir(gameName)
+    const existing = await this.readQuests(dir)
+    const current = existing.find(q => q.quest.id === questId)
+    if (!current) throw new NotFoundError(`Quest „${questId}“ neexistuje.`)
+    await removeIfExists(path.join(dir, QUEST_DIR, current.fileName))
+    // Podřízené questy zůstávají, jen ztratí rodiče; nitě a frakce se nemění
+    await this.renameQuestInQuests(dir, current.quest.title, null)
     await this.touchGame(dir)
   }
 }

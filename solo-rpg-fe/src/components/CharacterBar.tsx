@@ -25,12 +25,16 @@ interface CharacterBarProps {
   onSelectNarrator?: () => void
   onToggleThreads?: () => void
   onToggleFactions?: () => void
+  onToggleQuests?: () => void
   threadsOpen?: boolean
   factionsOpen?: boolean
+  questsOpen?: boolean
   /** Počet otevřených dějových nití (odznak na tlačítku) */
   openThreadCount?: number
   /** Počet aktivních frakcí (odznak na tlačítku) */
   activeFactionCount?: number
+  /** Počet aktivních questů (odznak na tlačítku) */
+  activeQuestCount?: number
   onClearStory?: () => Promise<boolean>
   onShowBackground?: () => void
 }
@@ -47,10 +51,13 @@ export default function CharacterBar({
   onSelectNarrator,
   onToggleThreads,
   onToggleFactions,
+  onToggleQuests,
   threadsOpen = false,
   factionsOpen = false,
+  questsOpen = false,
   openThreadCount = 0,
   activeFactionCount = 0,
+  activeQuestCount = 0,
   onClearStory,
   onShowBackground,
 }: CharacterBarProps) {
@@ -248,6 +255,21 @@ export default function CharacterBar({
             {activeFactionCount > 0 && (
               <span className="absolute top-0 right-0 min-w-[1rem] h-4 px-1 rounded-full bg-[var(--accent)] text-white text-[10px] font-bold flex items-center justify-center leading-none pointer-events-none">
                 {activeFactionCount}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => onToggleQuests?.()}
+            title={questsOpen ? 'Skrýt questy' : 'Zobrazit questy'}
+            className={`relative w-8 h-8 rounded-md border bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all ${
+              questsOpen ? 'border-[var(--accent)] bg-[var(--accent)]/20' : 'border-[var(--accent)]/60'
+            }`}
+          >
+            📜
+            {activeQuestCount > 0 && (
+              <span className="absolute top-0 right-0 min-w-[1rem] h-4 px-1 rounded-full bg-[var(--accent)] text-white text-[10px] font-bold flex items-center justify-center leading-none pointer-events-none">
+                {activeQuestCount}
               </span>
             )}
           </button>

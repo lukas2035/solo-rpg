@@ -254,6 +254,98 @@ export const FactionInputSchema = z.object({
 })
 export type FactionInput = z.infer<typeof FactionInputSchema>
 
+/**
+ * Quest = konkrétní úkol / cíl, který postavy plní („co se snažíme udělat“); nit říká „co visí nad kampaní“.
+ * Soubor `quests/<Název>.md`; vazby jsou wikilinky podle názvu, podřízené questy a zpětné vazby se dopočítávají.
+ * Tělo = popis, za značkou `<!-- outcome -->` výsledek, za `<!-- notes -->` poznámky.
+ */
+export const QuestTypeSchema = z.enum(['main', 'side', 'personal', 'investigation', 'faction', 'exploration', 'survival'])
+export type QuestType = z.infer<typeof QuestTypeSchema>
+
+export const QuestStatusSchema = z.enum(['available', 'active', 'paused', 'completed', 'failed', 'abandoned'])
+export type QuestStatus = z.infer<typeof QuestStatusSchema>
+/** Stavy, ve kterých quest ještě „běží“ (není ukončený) */
+export const OPEN_QUEST_STATUSES: readonly QuestStatus[] = ['available', 'active', 'paused']
+/** Výchozí pořadí questů v přehledu */
+export const QUEST_STATUS_ORDER: readonly QuestStatus[] = ['active', 'available', 'paused', 'completed', 'failed', 'abandoned']
+
+export const ObjectiveStatusSchema = z.enum(['pending', 'active', 'completed', 'failed', 'skipped'])
+export type ObjectiveStatus = z.infer<typeof ObjectiveStatusSchema>
+
+/** Dílčí cíl questu; pořadí = pořadí v poli (nemusí se plnit postupně) */
+export const QuestObjectiveSchema = z.object({
+  /** Stabilní interní id (pro budoucí strukturované AI operace); generuje BE */
+  id: z.string().min(1),
+  title: z.string().min(1),
+  status: ObjectiveStatusSchema,
+  /** Volitelný cíl se nepočítá do progressu a nebrání dokončení */
+  optional: z.boolean(),
+})
+export type QuestObjective = z.infer<typeof QuestObjectiveSchema>
+
+export const QuestSchema = z.object({
+  id: z.string().min(1),
+  /** Název = identita questu, název souboru */
+  title: z.string().min(1),
+  type: QuestTypeSchema,
+  status: QuestStatusSchema,
+  objectives: z.array(QuestObjectiveSchema),
+  /** Celé jméno zadavatele (wikilink), null = quest vznikl ze situace */
+  questGiver: z.string().nullable(),
+  /** Název nadřazeného questu (wikilink), null = samostatný */
+  parentQuest: z.string().nullable(),
+  /** Odměny – prosté texty nezávislé na pravidlech, v pořadí */
+  rewards: z.array(z.string()),
+  /** Celá jména souvisejících postav (wikilinky) */
+  characters: z.array(z.string()),
+  /** Názvy souvisejících dějových nití (wikilinky); nit může existovat i bez questu */
+  threads: z.array(z.string()),
+  /** Názvy souvisejících frakcí (wikilinky) */
+  factions: z.array(z.string()),
+  /** Markdown popis – cíl questu, proč vznikl, co o něm postavy vědí */
+  description: z.string(),
+  /** Jak quest skutečně dopadl (hlavně u ukončených) */
+  outcome: z.string(),
+  /** Volné poznámky hráče */
+  notes: z.string(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+})
+export type Quest = z.infer<typeof QuestSchema>
+
+/** Vstup pro dílčí cíl; bez `id` = nový cíl (id přidělí BE) */
+export const QuestObjectiveInputSchema = z.object({
+  id: z.string().min(1).optional(),
+  title: z.string().trim().min(1).max(300),
+  status: ObjectiveStatusSchema.optional(),
+  optional: z.boolean().optional(),
+})
+export type QuestObjectiveInput = z.infer<typeof QuestObjectiveInputSchema>
+
+/** Vstup pro vytvoření/úpravu questu; nevyplněná pole při úpravě zůstávají beze změny */
+export const QuestInputSchema = z.object({
+  title: z.string().trim().min(1).max(100),
+  type: QuestTypeSchema,
+  status: QuestStatusSchema.optional(),
+  objectives: z.array(QuestObjectiveInputSchema).max(100).optional(),
+  questGiver: z.string().trim().min(1).nullable().optional(),
+  parentQuest: z.string().trim().min(1).nullable().optional(),
+  rewards: z.array(z.string().max(300)).max(50).optional(),
+  characters: z.array(z.string().trim().min(1)).optional(),
+  threads: z.array(z.string().trim().min(1)).optional(),
+  factions: z.array(z.string().trim().min(1)).optional(),
+  description: z.string().optional(),
+  outcome: z.string().optional(),
+  notes: z.string().optional(),
+})
+export type QuestInput = z.infer<typeof QuestInputSchema>
+
+/** Postup questu odvozený z povinných cílů (nikam se neukládá) */
+export function questProgress(objectives: readonly QuestObjective[]): { done: number; total: number } {
+  const required = objectives.filter(o => !o.optional)
+  return { done: required.filter(o => o.status === 'completed').length, total: required.length }
+}
+
 export const StoryEntrySchema = z.object({
   id: z.string().min(1),
   /** null = vypravěč */
@@ -273,6 +365,7 @@ export const GameDetailSchema = z.object({
   scenes: z.array(SceneMetaSchema),
   threads: z.array(StoryThreadSchema),
   factions: z.array(FactionSchema),
+  quests: z.array(QuestSchema),
 })
 export type GameDetail = z.infer<typeof GameDetailSchema>
 

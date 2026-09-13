@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import type { StoryThread, ThreadCertainty, ThreadHorizon, ThreadInput, ThreadStatus, ThreadType } from '@solo-rpg/shared'
+import type { Quest, StoryThread, ThreadCertainty, ThreadHorizon, ThreadInput, ThreadStatus, ThreadType } from '@solo-rpg/shared'
 import ChipGroup from './ChipGroup'
 import EntityChecklist, { type EntityOption } from './EntityChecklist'
 import { inputClass, selectAll } from '../utils/forms'
+import { QUEST_STATUS_LABELS, QUEST_TYPE_ICONS } from '../utils/quests'
 import {
   THREAD_CERTAINTIES,
   THREAD_CERTAINTY_HINTS,
@@ -29,6 +30,9 @@ interface ThreadModalProps {
   sceneTitles: string[]
   /** Předvyplněná scéna pro novou nit (aktuální scéna) */
   defaultScene?: string | null
+  /** Dopočítané: questy, které na nit odkazují (vazba se edituje u questu) */
+  relatedQuests?: Quest[]
+  onOpenQuest?: (quest: Quest) => void
   /** Uloží nit; při chybě (např. duplicitní název) vyhodí výjimku s hláškou pro uživatele */
   onSubmit: (input: ThreadInput) => Promise<void>
   onDelete?: () => Promise<void>
@@ -38,7 +42,7 @@ interface ThreadModalProps {
 const DEFAULT_CLOCK_MAX = 6
 
 /** Dialog pro vytvoření a úpravu dějové nitě */
-export default function ThreadModal({ thread, allCharacters, allFactions, sceneTitles, defaultScene = null, onSubmit, onDelete, onClose }: ThreadModalProps) {
+export default function ThreadModal({ thread, allCharacters, allFactions, sceneTitles, defaultScene = null, relatedQuests = [], onOpenQuest, onSubmit, onDelete, onClose }: ThreadModalProps) {
   const isEdit = thread !== null
   const [title, setTitle] = useState(thread?.title ?? '')
   const [type, setType] = useState<ThreadType | null>(thread?.type ?? null)
@@ -242,6 +246,21 @@ export default function ThreadModal({ thread, allCharacters, allFactions, sceneT
 
         {allFactions.length > 0 && (
           <EntityChecklist legend="Týká se frakcí" options={allFactions} selected={factions} onToggle={toggleIn(setFactions)} emptyText="" />
+        )}
+
+        {isEdit && relatedQuests.length > 0 && (
+          <div className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">
+            <span className="opacity-70 text-xs uppercase tracking-wide">Součást questů <span className="normal-case">(vazba se upravuje u questu)</span></span>
+            {relatedQuests.map(q => (
+              <span key={q.id} title={QUEST_STATUS_LABELS[q.status]}>
+                {QUEST_TYPE_ICONS[q.type]}{' '}
+                <button type="button" onClick={onOpenQuest ? () => onOpenQuest(q) : undefined} disabled={!onOpenQuest} className="text-[var(--accent)] hover:underline disabled:no-underline disabled:opacity-70 text-left">
+                  {q.title}
+                </button>
+                <span className="opacity-50 text-xs"> · {QUEST_STATUS_LABELS[q.status]}</span>
+              </span>
+            ))}
+          </div>
         )}
 
         <label className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">

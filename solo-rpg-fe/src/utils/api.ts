@@ -17,6 +17,8 @@ import type {
   ThreadInput,
   Faction,
   FactionInput,
+  Quest,
+  QuestInput,
 } from '@solo-rpg/shared'
 import { isRemoteImage } from '@solo-rpg/shared'
 import { useSyncExternalStore } from 'react'
@@ -181,6 +183,15 @@ export const updateFaction = (game: string, factionId: string, input: FactionInp
   request<Faction>('PUT', `${gamePath(game)}/factions/${encodeURIComponent(factionId)}`, input)
 export const deleteFaction = (game: string, factionId: string) =>
   request<void>('DELETE', `${gamePath(game)}/factions/${encodeURIComponent(factionId)}`)
+
+// ---------- questy (quests) ----------
+
+export const listQuests = (game: string) => request<Quest[]>('GET', `${gamePath(game)}/quests`)
+export const createQuest = (game: string, input: QuestInput) => request<Quest>('POST', `${gamePath(game)}/quests`, input)
+export const updateQuest = (game: string, questId: string, input: QuestInput) =>
+  request<Quest>('PUT', `${gamePath(game)}/quests/${encodeURIComponent(questId)}`, input)
+export const deleteQuest = (game: string, questId: string) =>
+  request<void>('DELETE', `${gamePath(game)}/quests/${encodeURIComponent(questId)}`)
 
 // ---------- změny ve vaultu ----------
 
