@@ -184,7 +184,8 @@ export class ObsidianVaultProvider implements StorageProvider {
     return {
       characters,
       backgroundImage: stringOrNull(file.data.background),
-      brightBackground: file.data.brightBackground === true,
+      // výchozí hodnota je zapnuto; vypnuto jen při explicitním `false`
+      brightBackground: file.data.brightBackground !== false,
       dm: {
         name: stringOrNull(dm.name) ?? DEFAULT_DM_NAME,
         image: stringOrNull(dm.portrait),
@@ -230,7 +231,7 @@ export class ObsidianVaultProvider implements StorageProvider {
         createdAt: now,
         updatedAt: now,
         background: null,
-        brightBackground: false,
+        brightBackground: true,
         dm: { name: DEFAULT_DM_NAME, portrait: null },
       },
       body: `# ${trimmed}\n\nPoznámky ke hře (volný text, aplikace jej nemění).\n`,

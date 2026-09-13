@@ -182,7 +182,7 @@ export default function InputArea({ characters, showShortcutNumbers, onAddEntry,
             <span className="text-sm select-none">🔆</span>
             <input
               type="checkbox"
-              checked={brightBackground ?? false}
+              checked={brightBackground ?? true}
               onChange={(e) => onBrightBackgroundChange?.(e.target.checked)}
               className="w-4 h-4 accent-[#aa3bff] cursor-pointer"
             />

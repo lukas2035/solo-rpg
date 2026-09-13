@@ -50,7 +50,7 @@ export default function StoryEditor() {
 
   const [selectedPortrait, setSelectedPortrait] = useState<{ image: string; character: string } | null>(null)
   const [backgroundImage, setBackgroundImage] = useState<ImageRef>(null)
-  const [brightBackground, setBrightBackground] = useState(false)
+  const [brightBackground, setBrightBackground] = useState(true)
   const [dmName, setDmName] = useState('DM')
   const [dmImage, setDmImage] = useState<ImageRef>(null)
   const [showDmSettings, setShowDmSettings] = useState(false)
