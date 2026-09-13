@@ -499,7 +499,6 @@ export default function StoryEditor() {
         onRenameGame={handleRenameGame}
         onEditDm={() => setShowDmSettings(true)}
         onClearStory={handleClearStory}
-        onClearBackground={() => setBackgroundImage(null)}
         onShowBackground={() => {
           if (displayBackground) {
             setSelectedPortrait({ image: displayBackground, character: 'Pozadí' })
