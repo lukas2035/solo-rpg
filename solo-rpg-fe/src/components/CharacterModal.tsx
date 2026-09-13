@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Character } from '@solo-rpg/shared'
+import ImageDropField from './ImageDropField'
+import { inputClass, selectAll } from '../utils/forms'
 
 /** Hodnoty formuláře; `image` = undefined → portrét beze změny, null → odstranit, string → nový (data:/http URL) */
 export interface CharacterFormValues {
@@ -21,12 +23,6 @@ interface CharacterModalProps {
   onClose: () => void
 }
 
-const inputClass =
-  'px-3 py-2 rounded-lg border border-[var(--accent)]/40 bg-black/50 text-[var(--text)] focus:outline-none focus:border-[var(--accent)]'
-
-/** Označí celý text při kliknutí do políčka i při příchodu Tabem */
-const selectAll = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => e.currentTarget.select()
-
 /** Dialog pro vytvoření a úpravu postavy (jméno, příjmení, nickname, portrét, markdown poznámky) */
 export default function CharacterModal({ character, image, onSubmit, onDelete, onClose }: CharacterModalProps) {
   const isEdit = character !== null
@@ -38,7 +34,6 @@ export default function CharacterModal({ character, image, onSubmit, onDelete, o
   const [notes, setNotes] = useState(character?.notes ?? '')
   const [editImage, setEditImage] = useState<string | null>(image)
   const [imageChanged, setImageChanged] = useState(false)
-  const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const firstNameRef = useRef<HTMLInputElement | null>(null)
@@ -59,36 +54,8 @@ export default function CharacterModal({ character, image, onSubmit, onDelete, o
     setNicknameAuto(value === '' || value === firstName)
   }
 
-  const readImageFile = (file: File) => {
-    if (!file.type.startsWith('image/') && !/\.(png|jpe?g|jfif|gif|webp|avif|bmp|svg)$/i.test(file.name)) return
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      setEditImage(e.target?.result as string)
-      setImageChanged(true)
-    }
-    reader.readAsDataURL(file)
-  }
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    setDragOver(false)
-    const file = e.dataTransfer.files[0]
-    if (file) {
-      readImageFile(file)
-      return
-    }
-    // Obrázek přetažený z webu (URL)
-    const html = e.dataTransfer.getData('text/html')
-    const srcMatch = html.match(/<img[^>]+src="([^"]+)"/i)
-    const url = srcMatch?.[1] || e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain')
-    if (url && /^(https?:|data:image\/)/i.test(url.trim())) {
-      setEditImage(url.trim())
-      setImageChanged(true)
-    }
-  }
-
-  const handleRemoveImage = () => {
-    setEditImage(null)
+  const handleImageChange = (next: string | null) => {
+    setEditImage(next)
     setImageChanged(true)
   }
 
@@ -190,37 +157,7 @@ export default function CharacterModal({ character, image, onSubmit, onDelete, o
             </label>
           </div>
 
-          <div className="flex flex-col gap-1 text-left text-sm text-[var(--text)] sm:w-56">
-            Portrét
-            <label
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={handleDrop}
-              className={`flex-1 min-h-40 flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-3 cursor-pointer transition-colors ${dragOver ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--accent)]/40 hover:border-[var(--accent)]'}`}
-            >
-              {editImage ? (
-                <img src={editImage} alt="Portrét postavy" className="max-h-40 rounded-md object-contain" />
-              ) : (
-                <span className="text-3xl opacity-50">+</span>
-              )}
-              <span className="text-xs opacity-70 text-center">Klikni nebo přetáhni obrázek</span>
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) readImageFile(file)
-                  e.target.value = ''
-                }}
-              />
-            </label>
-            {editImage && (
-              <button type="button" onClick={handleRemoveImage} className="self-start text-xs text-[var(--accent)] hover:underline">
-                Odebrat portrét
-              </button>
-            )}
-          </div>
+          <ImageDropField label="Portrét" value={editImage} onChange={handleImageChange} removeLabel="Odebrat portrét" className="sm:w-56" />
         </div>
 
         <label className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">

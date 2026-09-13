@@ -50,7 +50,7 @@ export async function importLegacyGames(): Promise<LegacyImportResult> {
     try {
       const [setup, story] = await Promise.all([legacy.loadSetup(meta.name), legacy.loadStory(meta.name)])
       const target = await freeGameName(meta.name, existing)
-      const detail = await api.createGame(target)
+      await api.createGame(target)
 
       // Staré postavy měly jen jedno jméno → křestní jméno = nickname, příjmení prázdné
       const created = new Set<string>()
@@ -79,8 +79,9 @@ export async function importLegacyGames(): Promise<LegacyImportResult> {
         },
       })
 
-      if (story && story.length > 0 && detail.scenes[0]) {
-        await api.saveSceneEntries(target, detail.scenes[0].id, story)
+      if (story && story.length > 0) {
+        const scene = await api.createScene(target, { title: 'Scéna 1' })
+        await api.saveSceneEntries(target, scene.id, story)
       }
 
       await legacy.deleteGame(meta.name)

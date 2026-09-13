@@ -41,13 +41,17 @@ vault/
     ├── game.md              # nastavení hry (frontmatter) + volné poznámky
     ├── characters/<Celé jméno>.md  # jedna postava (PC i NPC) = jeden soubor (frontmatter + markdown poznámky)
     ├── portraits/           # portréty postav podle celého jména (_dm.* = vypravěč)
-    ├── backgrounds/         # obrázky pozadí
-    └── scenes/001 - Název.md  # scény = záznamy příběhu
+    ├── backgrounds/         # pozadí hry + obrázky scén (podle názvu scény)
+    └── scenes/001 - Název.md  # scény = popis + záznamy příběhu
 ```
 
-Formát scény:
+Formát scény (frontmatter `title`, `image`, tělo = markdown popis, značka `<!-- entries -->`, záznamy):
 
 ```markdown
+Popis scény v markdownu (upravuje se v dialogu scény i v Obsidianu).
+
+<!-- entries -->
+
 <!-- entry id="1700000000000" ts="1700000000000" -->
 **[[Aria Stormwind|Aria]]**: Jednořádková replika postavy.
 
@@ -58,8 +62,10 @@ Víceřádkový markdown vypravěče.
 
 Postavy jsou wikilinky na soubory v `characters/` (celé jméno) s aliasem = nickname. Můžeš dopisovat záznamy
 i ručně v Obsidianu (`**[[Celé jméno]]**: text` nebo `**Nickname**: text`) – aplikace je načte tlačítkem 💬.
+Soubor scény bez značky `<!-- entries -->` se čte celý jako záznamy (starý formát).
 Aplikace při zápisu zachovává vlastní frontmatter klíče a tělo poznámek u postav i hry.
-Přejmenování postavy v aplikaci přejmenuje soubor, portrét i odkazy ve scénách.
+Přejmenování postavy v aplikaci přejmenuje soubor, portrét i odkazy ve scénách; přejmenování scény
+přejmenuje její soubor i obrázek.
 
 ## API (výběr)
 
@@ -67,10 +73,11 @@ Přejmenování postavy v aplikaci přejmenuje soubor, portrét i odkazy ve scé
 GET/POST      /api/games
 GET/PATCH/DEL /api/games/:game
 PUT           /api/games/:game/setup
-POST          /api/games/:game/assets            (multipart: kind, characterName?, file)
-POST          /api/games/:game/assets/from-url   ({ kind, url, characterName? })
-GET/POST      /api/games/:game/scenes
-GET/PUT/DEL   /api/games/:game/scenes/:scene
+POST/PUT/DEL  /api/games/:game/characters[/:id]
+POST          /api/games/:game/assets            (multipart: kind, ownerName?, file)
+POST          /api/games/:game/assets/from-url   ({ kind, url, ownerName? })
+GET/POST      /api/games/:game/scenes            (POST: { title, description?, image? })
+GET/PUT/PATCH/DEL /api/games/:game/scenes/:scene (PUT = záznamy, PATCH = název/popis/obrázek)
 GET           /vault/<Hra>/<cesta>                (statické soubory z vaultu)
 ```
 

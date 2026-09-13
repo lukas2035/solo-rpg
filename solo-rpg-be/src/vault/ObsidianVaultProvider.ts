@@ -11,6 +11,7 @@ import {
   type GameMeta,
   type GameSettings,
   type GameSetup,
+  type SceneInput,
   type SceneMeta,
   type StoryEntry,
 } from '@solo-rpg/shared'
@@ -42,7 +43,8 @@ const PORTRAIT_DIR = 'portraits'
 const BACKGROUND_DIR = 'backgrounds'
 const SCENE_DIR = 'scenes'
 const DEFAULT_DM_NAME = 'DM'
-const DEFAULT_SCENE_TITLE = 'Scéna 1'
+/** Odděluje markdown popis scény (před) od záznamů příběhu (za) */
+const ENTRIES_MARKER = /<!--\s*entries\s*-->/
 
 type Frontmatter = Record<string, unknown>
 
@@ -62,6 +64,8 @@ interface SceneFile {
   fileName: string
   data: Frontmatter
   body: string
+  /** Část těla se záznamy příběhu (za `<!-- entries -->`) */
+  entriesBody: string
   meta: SceneMeta
 }
 
@@ -93,6 +97,21 @@ function splitName(name: string): { firstName: string; lastName: string } {
 /** Klíč pro porovnání jmen postav (souborový systém Windows nerozlišuje velikost písmen). */
 function nameKey(name: string): string {
   return safeFileName(name).toLocaleLowerCase('cs')
+}
+
+/** Tělo scény = markdown popis + `<!-- entries -->` + záznamy. Bez značky je celé tělo záznamy (starý formát). */
+function splitSceneBody(body: string): { description: string; entries: string } {
+  const match = body.match(ENTRIES_MARKER)
+  if (!match || match.index === undefined) return { description: '', entries: body }
+  return {
+    description: body.slice(0, match.index).replace(/^\n+/, '').trimEnd(),
+    entries: body.slice(match.index + match[0].length),
+  }
+}
+
+function joinSceneBody(description: string, entriesMd: string): string {
+  const head = description.trim() ? `\n${description.trimEnd()}\n\n` : '\n'
+  return `${head}<!-- entries -->\n${entriesMd}`
 }
 
 /**
@@ -199,7 +218,6 @@ export class ObsidianVaultProvider implements StorageProvider {
       },
       body: `# ${trimmed}\n\nPoznámky ke hře (volný text, aplikace jej nemění).\n`,
     })
-    await this.createScene(trimmed, DEFAULT_SCENE_TITLE)
     const detail = await this.getGame(trimmed)
     if (!detail) throw new Error('Vytvoření hry selhalo.')
     return detail
@@ -216,11 +234,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     if (!file) return null
     const stat = await fs.stat(path.join(dir, GAME_FILE))
     const characters = await this.readCharacters(dir)
-    let scenes = await this.listScenes(name)
-    if (scenes.length === 0) {
-      await this.createScene(name, DEFAULT_SCENE_TITLE)
-      scenes = await this.listScenes(name)
-    }
+    const scenes = await this.listScenes(name)
     return {
       meta: this.metaFromGameFile(name.trim(), file, stat),
       setup: this.setupFromGameFile(file, characters.map(c => c.character)),
@@ -445,9 +459,16 @@ export class ObsidianVaultProvider implements StorageProvider {
 
     switch (asset.kind) {
       case 'portrait': {
-        const base = safeFileName(asset.characterName ?? '', 'postava')
+        const base = safeFileName(asset.ownerName ?? '', 'postava')
         relPath = `${PORTRAIT_DIR}/${base}${ext}`
         await this.removeSiblingsWithOtherExt(path.join(dir, PORTRAIT_DIR), base, ext)
+        break
+      }
+      case 'scene': {
+        // Obrázek scény nese její název
+        const base = safeFileName(asset.ownerName ?? '', 'scena')
+        relPath = `${BACKGROUND_DIR}/${base}${ext}`
+        await this.removeSiblingsWithOtherExt(path.join(dir, BACKGROUND_DIR), base, ext)
         break
       }
       case 'dm': {
@@ -506,14 +527,18 @@ export class ObsidianVaultProvider implements StorageProvider {
       const stat = await fs.stat(path.join(sceneDir, fileName))
       const baseName = fileName.replace(/\.md$/i, '')
       const orderFromName = parseInt(baseName, 10)
+      const { description, entries } = splitSceneBody(parsed.content)
       scenes.push({
         fileName,
         data,
         body: parsed.content,
+        entriesBody: entries,
         meta: {
           id: stringOrNull(data.id) ?? baseName,
           title: stringOrNull(data.title) ?? baseName.replace(/^\d+\s*-\s*/, ''),
           order: typeof data.order === 'number' ? data.order : Number.isFinite(orderFromName) ? orderFromName : index + 1,
+          description,
+          image: stringOrNull(data.image),
           createdAt: toTimestamp(data.createdAt, stat.birthtimeMs),
           updatedAt: toTimestamp(data.updatedAt, stat.mtimeMs),
         },
@@ -527,22 +552,96 @@ export class ObsidianVaultProvider implements StorageProvider {
     return scenes.find(s => s.meta.id === sceneId) ?? null
   }
 
+  private assertSceneTitleFree(existing: SceneFile[], title: string, exceptId?: string): void {
+    const key = nameKey(title)
+    if (existing.some(s => s.meta.id !== exceptId && nameKey(s.meta.title) === key)) {
+      throw new ConflictError(`Scéna „${title}“ už existuje. Zvol jiný název.`)
+    }
+  }
+
+  private async writeSceneFile(dir: string, meta: SceneMeta, entriesBody: string, extra: Frontmatter): Promise<void> {
+    const data: Frontmatter = {
+      ...extra,
+      id: meta.id,
+      title: meta.title,
+      order: meta.order,
+      image: meta.image,
+      createdAt: toIso(meta.createdAt),
+      updatedAt: toIso(meta.updatedAt),
+    }
+    const filePath = path.join(dir, SCENE_DIR, this.sceneFileName(meta.order, meta.title))
+    await writeFileAtomic(filePath, matter.stringify(joinSceneBody(meta.description, entriesBody), data))
+  }
+
+  /** Smaže obrázek scény ve vaultu, pokud ho nepoužívá jiná scéna ani pozadí hry. */
+  private async removeSceneImageIfUnused(dir: string, image: string, scenes: SceneFile[], exceptId: string): Promise<void> {
+    if (isRemoteImage(image) || !image.startsWith(`${BACKGROUND_DIR}/`)) return
+    const game = await this.readGameFile(dir)
+    const used = scenes.some(s => s.meta.id !== exceptId && s.meta.image === image) || stringOrNull(game?.data.background) === image
+    if (!used) await removeIfExists(path.join(dir, image))
+  }
+
   async listScenes(name: string): Promise<SceneMeta[]> {
     const dir = await this.requireGameDir(name)
     return (await this.readScenes(dir)).map(s => s.meta)
   }
 
-  async createScene(name: string, title: string): Promise<SceneMeta> {
+  async createScene(name: string, input: SceneInput): Promise<SceneMeta> {
     const dir = await this.requireGameDir(name)
     const scenes = await this.readScenes(dir)
+    const title = input.title.trim()
+    this.assertSceneTitleFree(scenes, title)
     const order = scenes.reduce((max, s) => Math.max(max, s.meta.order), 0) + 1
     const now = Date.now()
-    const meta: SceneMeta = { id: `scene-${now}`, title: title.trim(), order, createdAt: now, updatedAt: now }
-    const filePath = path.join(dir, SCENE_DIR, this.sceneFileName(order, meta.title))
-    await writeFileAtomic(
-      filePath,
-      matter.stringify('', { id: meta.id, title: meta.title, order, createdAt: toIso(now), updatedAt: toIso(now) })
-    )
+    const meta: SceneMeta = {
+      id: `scene-${now}`,
+      title,
+      order,
+      description: input.description ?? '',
+      image: input.image ?? null,
+      createdAt: now,
+      updatedAt: now,
+    }
+    await this.writeSceneFile(dir, meta, '', {})
+    await this.touchGame(dir)
+    return meta
+  }
+
+  async updateScene(name: string, sceneId: string, input: SceneInput): Promise<SceneMeta> {
+    const dir = await this.requireGameDir(name)
+    const scenes = await this.readScenes(dir)
+    const current = scenes.find(s => s.meta.id === sceneId)
+    if (!current) throw new NotFoundError(`Scéna „${sceneId}“ neexistuje.`)
+    const previous = current.meta
+    const title = input.title.trim()
+    this.assertSceneTitleFree(scenes, title, sceneId)
+
+    let image = input.image === undefined ? previous.image : input.image
+
+    if (title !== previous.title) {
+      await removeIfExists(path.join(dir, SCENE_DIR, current.fileName))
+      // Obrázek scény nese její název → přejmenovat spolu se scénou
+      if (previous.image && image === previous.image && previous.image.startsWith(`${BACKGROUND_DIR}/`) && (await exists(path.join(dir, previous.image)))) {
+        const ext = path.extname(previous.image)
+        const base = safeFileName(title, 'scena')
+        await this.removeSiblingsWithOtherExt(path.join(dir, BACKGROUND_DIR), base, ext)
+        const target = `${BACKGROUND_DIR}/${base}${ext}`
+        await fs.rename(path.join(dir, previous.image), path.join(dir, target))
+        image = target
+      }
+    }
+    if (previous.image && image !== previous.image) {
+      await this.removeSceneImageIfUnused(dir, previous.image, scenes, sceneId)
+    }
+
+    const meta: SceneMeta = {
+      ...previous,
+      title,
+      description: input.description ?? previous.description,
+      image,
+      updatedAt: Date.now(),
+    }
+    await this.writeSceneFile(dir, meta, current.entriesBody, current.data)
     await this.touchGame(dir)
     return meta
   }
@@ -556,7 +655,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     const characters = await this.readCharacters(dir)
     // Ručně dopsané repliky mohou používat celé jméno i nickname
     const knownSpeakers = characters.flatMap(c => [c.character.name, c.character.nickname])
-    return parseEntries(scene.body, dmName, knownSpeakers)
+    return parseEntries(scene.entriesBody, dmName, knownSpeakers)
   }
 
   async saveSceneEntries(name: string, sceneId: string, entries: StoryEntry[]): Promise<void> {
@@ -568,18 +667,18 @@ export class ObsidianVaultProvider implements StorageProvider {
     const characters = await this.readCharacters(dir)
     const nicknames = new Map(characters.map(c => [c.character.name, c.character.nickname]))
 
-    const body = `\n${serializeEntries(entries, dmName, nicknames)}`
-    const data: Frontmatter = { ...scene.data, id: scene.meta.id, title: scene.meta.title, order: scene.meta.order, updatedAt: toIso(Date.now()) }
-    if (!data.createdAt) data.createdAt = toIso(scene.meta.createdAt)
-    await writeFileAtomic(path.join(dir, SCENE_DIR, scene.fileName), matter.stringify(body, data))
+    const meta: SceneMeta = { ...scene.meta, updatedAt: Date.now() }
+    await this.writeSceneFile(dir, meta, serializeEntries(entries, dmName, nicknames), scene.data)
     await this.touchGame(dir)
   }
 
   async deleteScene(name: string, sceneId: string): Promise<void> {
     const dir = await this.requireGameDir(name)
-    const scene = await this.findScene(dir, sceneId)
+    const scenes = await this.readScenes(dir)
+    const scene = scenes.find(s => s.meta.id === sceneId)
     if (!scene) throw new NotFoundError(`Scéna „${sceneId}“ neexistuje.`)
     await removeIfExists(path.join(dir, SCENE_DIR, scene.fileName))
+    if (scene.meta.image) await this.removeSceneImageIfUnused(dir, scene.meta.image, scenes, sceneId)
     await this.touchGame(dir)
   }
 }

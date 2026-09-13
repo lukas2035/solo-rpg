@@ -1,12 +1,13 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Character, CharacterInput, GameSettings, GameSetup, ImageRef, SceneMeta, StoryEntry as ApiStoryEntry } from '@solo-rpg/shared'
+import type { Character, CharacterInput, GameSettings, GameSetup, ImageRef, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry } from '@solo-rpg/shared'
 import CharacterBar from '../components/CharacterBar'
 import StoryPanel from '../components/StoryPanel'
 import InputArea from '../components/InputArea'
 import PortraitModal from '../components/PortraitModal'
 import DmSettingsModal from '../components/DmSettingsModal'
 import CharacterModal, { type CharacterFormValues } from '../components/CharacterModal'
+import SceneModal, { type SceneFormValues } from '../components/SceneModal'
 import SceneBar from '../components/SceneBar'
 import * as api from '../utils/api'
 import { assetUrl } from '../utils/api'
@@ -29,6 +30,7 @@ interface StoryEntry {
 }
 
 type CharacterModalState = { mode: 'create' } | { mode: 'edit'; id: string }
+type SceneModalState = { mode: 'create' } | { mode: 'edit'; id: string }
 
 const SETUP_AUTOSAVE_MS = 600
 
@@ -53,6 +55,7 @@ export default function StoryEditor() {
   const [dmImage, setDmImage] = useState<ImageRef>(null)
   const [showDmSettings, setShowDmSettings] = useState(false)
   const [characterModal, setCharacterModal] = useState<CharacterModalState | null>(null)
+  const [sceneModal, setSceneModal] = useState<SceneModalState | null>(null)
   const [showShortcutNumbers, setShowShortcutNumbers] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -69,7 +72,13 @@ export default function StoryEditor() {
     () => storyEntries.map(e => ({ ...e, character: e.character ? toDisplay(e.character) : null })),
     [storyEntries, toDisplay]
   )
-  const displayBackground = assetUrl(gameName, backgroundImage)
+  const currentScene = useMemo(() => scenes.find(s => s.id === currentSceneId) ?? null, [scenes, currentSceneId])
+  const editingScene = useMemo(
+    () => (sceneModal?.mode === 'edit' ? scenes.find(s => s.id === sceneModal.id) ?? null : null),
+    [sceneModal, scenes]
+  )
+  // Obrázek scény má přednost před pozadím hry
+  const displayBackground = assetUrl(gameName, currentScene?.image ?? backgroundImage)
   const displayDmImage = assetUrl(gameName, dmImage)
 
   // Při držení Ctrl nebo Alt zobrazit u jmen postav jejich pořadové číslo (klávesová zkratka)
@@ -131,6 +140,8 @@ export default function StoryEditor() {
         setStoryEntries(resolved.entries)
         setScenes(detail.scenes)
         setCurrentSceneId(scene?.id ?? null)
+        // Hra bez scén → nejdřív vytvořit první scénu
+        if (!scene) setSceneModal({ mode: 'create' })
         applySetup({ ...detail.setup, characters: resolved.characters })
         setLoadError(null)
         setupLoadedRef.current = true
@@ -395,36 +406,41 @@ export default function StoryEditor() {
     }
   }
 
-  const handleCreateScene = async () => {
-    const input = window.prompt('Název nové scény:', `Scéna ${scenes.length + 1}`)
-    if (input === null) return
-    const title = input.trim()
-    if (!title) return
-    try {
-      const scene = await api.createScene(gameName, title)
-      setScenes([...scenes, scene])
+  const handleCreateScene = () => setSceneModal({ mode: 'create' })
+
+  /** Submit dialogu scény: vytvoří/aktualizuje soubor scény a uloží její obrázek pod jejím názvem */
+  const handleSceneSubmit = async (values: SceneFormValues) => {
+    const editing = editingScene
+    const base: SceneInput = { title: values.title, description: values.description }
+
+    // Nejdřív scéna (kontrola duplicitního názvu), teprve pak obrázek pojmenovaný podle ní
+    let saved = editing
+      ? await api.updateScene(gameName, editing.id, { ...base, image: values.image === null ? null : undefined })
+      : await api.createScene(gameName, base)
+
+    if (values.image) {
+      const ref = await api.storeImage(gameName, 'scene', values.image, saved.title)
+      saved = await api.updateScene(gameName, saved.id, { ...base, image: ref })
+    }
+
+    if (editing) {
+      setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))
+    } else {
+      setScenes(prev => [...prev, saved])
       setStoryEntries([])
-      setCurrentSceneId(scene.id)
-    } catch (error) {
-      console.error('Vytvoření scény selhalo:', error)
+      setCurrentSceneId(saved.id)
     }
   }
 
-  const handleDeleteScene = async (sceneId: string) => {
-    const scene = scenes.find(s => s.id === sceneId)
-    if (!scene || scenes.length <= 1) return
-    if (!window.confirm(`Opravdu smazat scénu „${scene.title}“ včetně jejího souboru ve vaultu?`)) return
-    try {
-      await api.deleteScene(gameName, sceneId)
-      const remaining = scenes.filter(s => s.id !== sceneId)
-      setScenes(remaining)
-      if (sceneId === currentSceneId) {
-        const fallback = remaining[remaining.length - 1]
-        setCurrentSceneId(null)
-        await handleSelectScene(fallback.id)
-      }
-    } catch (error) {
-      console.error('Smazání scény selhalo:', error)
+  const deleteScene = async (sceneId: string) => {
+    await api.deleteScene(gameName, sceneId)
+    const remaining = scenes.filter(s => s.id !== sceneId)
+    setScenes(remaining)
+    if (sceneId === currentSceneId) {
+      const fallback = remaining[remaining.length - 1]
+      setCurrentSceneId(null)
+      setStoryEntries([])
+      if (fallback) await handleSelectScene(fallback.id)
     }
   }
 
@@ -469,7 +485,7 @@ export default function StoryEditor() {
         currentSceneId={currentSceneId}
         onSelect={handleSelectScene}
         onCreate={handleCreateScene}
-        onDelete={handleDeleteScene}
+        onEdit={(id) => setSceneModal({ mode: 'edit', id })}
       />
 
       {loadError && (
@@ -522,6 +538,19 @@ export default function StoryEditor() {
           onSubmit={handleCharacterSubmit}
           onDelete={editingCharacter ? () => deleteCharacter(editingCharacter.id) : undefined}
           onClose={() => setCharacterModal(null)}
+        />
+      )}
+      {/* Vytvoření / úprava scény; bez scén je dialog povinný */}
+      {sceneModal && (
+        <SceneModal
+          key={sceneModal.mode === 'edit' ? sceneModal.id : 'new'}
+          scene={editingScene}
+          image={editingScene ? assetUrl(gameName, editingScene.image) : null}
+          defaultTitle={`Scéna ${scenes.length + 1}`}
+          required={scenes.length === 0}
+          onSubmit={handleSceneSubmit}
+          onDelete={editingScene ? () => deleteScene(editingScene.id) : undefined}
+          onClose={() => setSceneModal(null)}
         />
       )}
     </div>

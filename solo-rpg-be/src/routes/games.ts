@@ -5,9 +5,9 @@ import {
   AssetKindSchema,
   CharacterInputSchema,
   CreateGameRequestSchema,
-  CreateSceneRequestSchema,
   GameSettingsSchema,
   RenameGameRequestSchema,
+  SceneInputSchema,
   StoryEntrySchema,
   isValidGameName,
 } from '@solo-rpg/shared'
@@ -109,7 +109,7 @@ export async function registerGameRoutes(app: FastifyInstance, storage: StorageP
     }
     const path = await storage.saveAsset(game, {
       kind,
-      characterName: fieldValue('characterName'),
+      ownerName: fieldValue('ownerName') ?? fieldValue('characterName'),
       filename: file.filename,
       mimeType: file.mimetype,
       data,
@@ -129,7 +129,7 @@ export async function registerGameRoutes(app: FastifyInstance, storage: StorageP
       const data = Buffer.from(await response.arrayBuffer())
       if (data.byteLength > MAX_IMAGE_BYTES) throw new Error('Obrázek je příliš velký.')
       const filename = decodeURIComponent(new URL(body.url).pathname.split('/').pop() || 'obrazek')
-      const path = await storage.saveAsset(game, { kind: body.kind, characterName: body.characterName, filename, mimeType, data })
+      const path = await storage.saveAsset(game, { kind: body.kind, ownerName: body.ownerName, filename, mimeType, data })
       return { path }
     } catch (error) {
       // Stažení se nepovedlo – ponecháme vzdálenou URL, aby hra fungovala dál
@@ -147,8 +147,14 @@ export async function registerGameRoutes(app: FastifyInstance, storage: StorageP
 
   app.post('/api/games/:game/scenes', async (request, reply) => {
     const { game } = GameParams.parse(request.params)
-    const { title } = CreateSceneRequestSchema.parse(request.body)
-    return reply.code(201).send(await storage.createScene(game, title))
+    const input = SceneInputSchema.parse(request.body)
+    return reply.code(201).send(await storage.createScene(game, input))
+  })
+
+  app.patch('/api/games/:game/scenes/:scene', async (request) => {
+    const { game, scene } = SceneParams.parse(request.params)
+    const input = SceneInputSchema.parse(request.body)
+    return storage.updateScene(game, scene, input)
   })
 
   app.get('/api/games/:game/scenes/:scene', async (request, reply) => {

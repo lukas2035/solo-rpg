@@ -8,6 +8,7 @@ import type {
   GameSettings,
   GameSetup,
   ImageRef,
+  SceneInput,
   SceneMeta,
   StoryEntry,
 } from '@solo-rpg/shared'
@@ -73,32 +74,32 @@ export const deleteCharacter = (game: string, characterId: string) =>
 
 // ---------- obrázky ----------
 
-export async function uploadAsset(game: string, kind: AssetKind, file: Blob, filename: string, characterName?: string): Promise<ImageRef> {
+export async function uploadAsset(game: string, kind: AssetKind, file: Blob, filename: string, ownerName?: string): Promise<ImageRef> {
   const form = new FormData()
   form.append('kind', kind)
-  if (characterName) form.append('characterName', characterName)
+  if (ownerName) form.append('ownerName', ownerName)
   form.append('file', file, filename)
   const result = await request<AssetResponse>('POST', `${gamePath(game)}/assets`, form)
   return result.path
 }
 
-export async function assetFromUrl(game: string, kind: AssetKind, url: string, characterName?: string): Promise<ImageRef> {
-  const result = await request<AssetResponse>('POST', `${gamePath(game)}/assets/from-url`, { kind, url, characterName })
+export async function assetFromUrl(game: string, kind: AssetKind, url: string, ownerName?: string): Promise<ImageRef> {
+  const result = await request<AssetResponse>('POST', `${gamePath(game)}/assets/from-url`, { kind, url, ownerName })
   return result.path
 }
 
 /**
  * Uloží obrázek zadaný jako File, data: URL nebo http(s) URL do vaultu
- * a vrátí odkaz použitelný v GameSetup.
+ * a vrátí odkaz použitelný v GameSetup. `ownerName` = celé jméno postavy (portrait) / název scény (scene).
  */
-export async function storeImage(game: string, kind: AssetKind, image: File | string, characterName?: string): Promise<ImageRef> {
-  if (image instanceof File) return uploadAsset(game, kind, image, image.name, characterName)
+export async function storeImage(game: string, kind: AssetKind, image: File | string, ownerName?: string): Promise<ImageRef> {
+  if (image instanceof File) return uploadAsset(game, kind, image, image.name, ownerName)
   if (image.startsWith('data:') || image.startsWith('blob:')) {
     const blob = await (await fetch(image)).blob()
     const ext = blob.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png'
-    return uploadAsset(game, kind, blob, `obrazek.${ext}`, characterName)
+    return uploadAsset(game, kind, blob, `obrazek.${ext}`, ownerName)
   }
-  if (/^https?:/i.test(image)) return assetFromUrl(game, kind, image, characterName)
+  if (/^https?:/i.test(image)) return assetFromUrl(game, kind, image, ownerName)
   return image
 }
 
@@ -113,7 +114,9 @@ export function assetUrl(game: string, ref: ImageRef): string | null {
 // ---------- scény ----------
 
 export const listScenes = (game: string) => request<SceneMeta[]>('GET', `${gamePath(game)}/scenes`)
-export const createScene = (game: string, title: string) => request<SceneMeta>('POST', `${gamePath(game)}/scenes`, { title })
+export const createScene = (game: string, input: SceneInput) => request<SceneMeta>('POST', `${gamePath(game)}/scenes`, input)
+export const updateScene = (game: string, sceneId: string, input: SceneInput) =>
+  request<SceneMeta>('PATCH', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}`, input)
 export const getSceneEntries = (game: string, sceneId: string) =>
   request<StoryEntry[]>('GET', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}`)
 export const saveSceneEntries = (game: string, sceneId: string, entries: StoryEntry[]) =>

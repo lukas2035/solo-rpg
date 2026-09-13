@@ -72,10 +72,22 @@ export const SceneMetaSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
   order: z.number().int().nonnegative(),
+  /** Markdown popis scény (tělo souboru před značkou `<!-- entries -->`) */
+  description: z.string(),
+  /** Obrázek scény – pozadí při jejím přehrávání (`backgrounds/<Název scény>.<ext>`) */
+  image: ImageRefSchema,
   createdAt: z.number(),
   updatedAt: z.number(),
 })
 export type SceneMeta = z.infer<typeof SceneMetaSchema>
+
+/** Vstup pro vytvoření/úpravu scény */
+export const SceneInputSchema = z.object({
+  title: z.string().trim().min(1).max(100),
+  description: z.string().optional(),
+  image: ImageRefSchema.optional(),
+})
+export type SceneInput = z.infer<typeof SceneInputSchema>
 
 export const StoryEntrySchema = z.object({
   id: z.string().min(1),
@@ -103,17 +115,17 @@ export type CreateGameRequest = z.infer<typeof CreateGameRequestSchema>
 export const RenameGameRequestSchema = z.object({ name: z.string().trim().min(1).max(100) })
 export type RenameGameRequest = z.infer<typeof RenameGameRequestSchema>
 
-export const CreateSceneRequestSchema = z.object({ title: z.string().trim().min(1).max(100) })
-export type CreateSceneRequest = z.infer<typeof CreateSceneRequestSchema>
+export const CreateSceneRequestSchema = SceneInputSchema
+export type CreateSceneRequest = SceneInput
 
-export const AssetKindSchema = z.enum(['portrait', 'background', 'dm'])
+export const AssetKindSchema = z.enum(['portrait', 'background', 'dm', 'scene'])
 export type AssetKind = z.infer<typeof AssetKindSchema>
 
 export const AssetFromUrlRequestSchema = z.object({
   kind: AssetKindSchema,
   url: z.url(),
-  /** Jméno postavy – pouze pro kind = portrait */
-  characterName: z.string().optional(),
+  /** Celé jméno postavy (kind = portrait) nebo název scény (kind = scene) – určuje název souboru */
+  ownerName: z.string().optional(),
 })
 export type AssetFromUrlRequest = z.infer<typeof AssetFromUrlRequestSchema>
 

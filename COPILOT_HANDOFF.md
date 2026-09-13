@@ -52,8 +52,9 @@ solo-rpg/
 │   └── src/
 │       ├── pages/Home.tsx (seznam her přes API + tlačítko „Přenést hry z prohlížeče do vaultu“)
 │       ├── pages/StoryEditor.tsx (přepnuto na API, scény, autosave nastavení s debounce)
-│       ├── components/ CharacterBar, CharacterModal (nový), SceneBar, DmSettingsModal, InputArea, PortraitModal, StoryPanel
-│       └── utils/ api.ts (API klient, ApiError), importLegacyGames.ts,
+│       ├── components/ CharacterBar, CharacterModal, SceneBar, SceneModal, ImageDropField (sdílené pole obrázku),
+│       │               DmSettingsModal, InputArea, PortraitModal, StoryPanel
+│       └── utils/ api.ts (API klient, ApiError), forms.ts (selectAll, inputClass), importLegacyGames.ts,
 │                  legacyBrowserStorage.ts (bývalé setupStorage.ts – IndexedDB, jen pro jednorázový import)
 └── vault/                  výchozí VAULT_PATH (gitignored jako `/vault/` – POZOR, ne `vault/`, to by ignorovalo i src/vault) – otevřít v Obsidianu „Open folder as vault“
 ```
@@ -66,14 +67,17 @@ vault/<Název hry>/
                           tělo = markdown poznámky (editovatelné v modalu i v Obsidianu). PC i NPC bez rozlišení.
                           (stará složka npcs/ se při prvním čtení automaticky přejmenuje, `name` se rozdělí na jméno/příjmení)
   portraits/<Celé jméno>.png   (_dm.png pro vypravěče)
-  backgrounds/<soubor>
-  scenes/001 - Název.md   frontmatter: id, title, createdAt, updatedAt
+  backgrounds/<soubor>    pozadí hry + obrázky scén jako backgrounds/<Název scény>.ext
+  scenes/001 - Název.md   frontmatter: id, title, order, image, createdAt, updatedAt
+                          tělo: markdown popis scény, pak značka `<!-- entries -->`, pak záznamy
                           záznamy: <!-- entry id="..." ts="..." --> + **[[Celé jméno|nickname]]**: text  |  **DM**:\n víceřádkový text
+                          (soubor bez značky = starý formát, celé tělo jsou záznamy)
 ```
 Parser scén dělí i ručně dopsané záznamy bez markeru podle řádků `**Jméno**:` – wikilink `[[..]]` vždy,
 plain jméno jen pokud je to známý mluvčí (celé jméno nebo nickname), aby `**Důležité**:` v DM odstavci nebyl nový mluvčí.
 Víceřádkový text → `markdown: true`. `StoryEntry.characterName` = celé jméno; alias v odkazu je nickname.
 Přejmenování postavy / změna nicku na BE přepíše hlavičky mluvčího ve všech scénách a přejmenuje portrét.
+Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otevře povinný `SceneModal`.
 
 ### Postavy (FE)
 - „+“ v pásu i klik na postavu otevře `CharacterModal`: Jméno, Příjmení, Nickname (sleduje křestní jméno, dokud ho
@@ -83,14 +87,25 @@ Přejmenování postavy / změna nicku na BE přepíše hlavičky mluvčího ve 
 - Mluvčí dopsaný v Obsidianu bez souboru postavy = dočasná postava (`id: tmp-…`); klik na ni otevře dialog a vytvoří soubor.
 - V UI (pás, taby, repliky) se zobrazuje nickname.
 
+### Scény (FE)
+- `SceneBar`: select scén, „+“ (nová) a ✏️ (úprava aktuální) → `SceneModal`: název, markdown popis, obrázek scény.
+- Obrázek scény se ukládá jako `backgrounds/<Název scény>.ext` (AssetKind `scene`, `ownerName` = název) a při aktivní
+  scéně má přednost před pozadím hry. Přejmenování scény přejmenuje soubor i obrázek; smazání scény smaže i obrázek.
+- Submit: `POST /scenes` nebo `PATCH /scenes/:id` (409 při duplicitním názvu) → `storeImage` → `PATCH` s cestou.
+  `image: undefined` = beze změny, `null` = odebrat (stejný vzor jako u postav).
+- Hra bez scén → dialog s `required` (bez Zrušit, Esc nezavře). Smazat lze i poslední scénu → znovu povinný dialog.
+- Sdílené: `ImageDropField` (klik/drop/URL), `utils/forms.ts` (`selectAll`, `inputClass`).
+
 ### API (BE, port 3001; Vite proxy přesměrovává `/api` a `/vault` z 5173)
 ```
 GET  /api/health
 GET/POST /api/games            GET/PATCH(rename)/DELETE /api/games/:name
 PUT  /api/games/:name/setup    (jen backgroundImage, brightBackground, dm)
 POST /api/games/:name/characters             PUT/DELETE /api/games/:name/characters/:id
-POST /api/games/:name/assets (multipart)     POST /api/games/:name/assets/from-url
-GET/POST /api/games/:name/scenes             GET/PUT/DELETE /api/games/:name/scenes/:id
+POST /api/games/:name/assets (multipart: kind portrait|dm|background|scene, ownerName?, file)
+POST /api/games/:name/assets/from-url ({ kind, url, ownerName? })
+GET/POST /api/games/:name/scenes ({title, description?, image?})
+GET(záznamy)/PUT(záznamy)/PATCH(meta)/DELETE /api/games/:name/scenes/:id
 GET  /vault/*  (statické soubory vaultu)
 ```
 
@@ -102,6 +117,8 @@ GET  /vault/*  (statické soubory vaultu)
 - Ve vaultu existují testovací hry („Testovací hra“, „Testovací hra 2“) – lze smazat.
 - Postavy: API smoke test (create/409/portrét/alias ve scéně/rename vč. portrétu a wikilinků/migrace npcs/delete)
   + CDP test dialogu v headless Edge (předvyplnění nicku, Enter, 409 hláška, editace) – vše prošlo.
+- Scény: API smoke test (create s popisem/409/obrázek scény/záznamy pod `<!-- entries -->`/rename souboru i obrázku/
+  starý formát bez značky/odebrání obrázku/delete) + CDP test (povinný dialog u hry bez scén, Esc nezavře, vytvoření, ✏️ editace).
 
 ## 4. Spuštění
 ```

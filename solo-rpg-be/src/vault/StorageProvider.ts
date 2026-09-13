@@ -1,9 +1,9 @@
-import type { Character, CharacterInput, GameDetail, GameMeta, GameSettings, GameSetup, SceneMeta, StoryEntry, AssetKind } from '@solo-rpg/shared'
+import type { Character, CharacterInput, GameDetail, GameMeta, GameSettings, GameSetup, SceneInput, SceneMeta, StoryEntry, AssetKind } from '@solo-rpg/shared'
 
 export interface AssetInput {
   kind: AssetKind
-  /** Jméno postavy (pouze pro portrét) */
-  characterName?: string
+  /** Celé jméno postavy (portrait) nebo název scény (scene) – určuje název souboru */
+  ownerName?: string
   /** Původní název souboru (pro odvození přípony a jména pozadí) */
   filename: string
   mimeType?: string
@@ -30,7 +30,8 @@ export interface StorageProvider {
   saveAsset(name: string, asset: AssetInput): Promise<string>
 
   listScenes(name: string): Promise<SceneMeta[]>
-  createScene(name: string, title: string): Promise<SceneMeta>
+  createScene(name: string, input: SceneInput): Promise<SceneMeta>
+  updateScene(name: string, sceneId: string, input: SceneInput): Promise<SceneMeta>
   getSceneEntries(name: string, sceneId: string): Promise<StoryEntry[] | null>
   saveSceneEntries(name: string, sceneId: string, entries: StoryEntry[]): Promise<void>
   deleteScene(name: string, sceneId: string): Promise<void>
