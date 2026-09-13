@@ -21,8 +21,6 @@ interface CharacterBarProps {
   onCharacterDelete?: (characterId: string) => void
   onExportMarkdown?: () => string
   onSaveSetup?: () => Promise<boolean>
-  onLoadSetup?: () => Promise<boolean>
-  onLoadStory?: () => Promise<boolean>
   onRenameGame?: () => Promise<boolean>
   onEditDm?: () => void
   onClearStory?: () => Promise<boolean>
@@ -38,8 +36,6 @@ export default function CharacterBar({
   onCharacterDelete,
   onExportMarkdown,
   onSaveSetup,
-  onLoadSetup,
-  onLoadStory,
   onRenameGame,
   onEditDm,
   onClearStory,
@@ -48,7 +44,7 @@ export default function CharacterBar({
   const navigate = useNavigate()
   const [aspectRatios, setAspectRatios] = useState<Record<string, number>>({})
   const [copied, setCopied] = useState(false)
-  const [feedback, setFeedback] = useState<'saved' | 'save-failed' | 'loaded' | 'load-failed' | 'story-loaded' | 'story-load-failed' | 'story-cleared' | 'story-clear-failed' | 'renamed' | 'rename-failed' | null>(null)
+  const [feedback, setFeedback] = useState<'saved' | 'save-failed' | 'story-cleared' | 'story-clear-failed' | 'renamed' | 'rename-failed' | null>(null)
 
   const showFeedback = (value: NonNullable<typeof feedback>) => {
     setFeedback(value)
@@ -58,16 +54,6 @@ export default function CharacterBar({
   const handleSaveSetup = async () => {
     if (!onSaveSetup) return
     showFeedback((await onSaveSetup()) ? 'saved' : 'save-failed')
-  }
-
-  const handleLoadSetup = async () => {
-    if (!onLoadSetup) return
-    showFeedback((await onLoadSetup()) ? 'loaded' : 'load-failed')
-  }
-
-  const handleLoadStory = async () => {
-    if (!onLoadStory) return
-    showFeedback((await onLoadStory()) ? 'story-loaded' : 'story-load-failed')
   }
 
   const handleRenameGame = async () => {
@@ -202,22 +188,6 @@ export default function CharacterBar({
             className="w-8 h-8 rounded-md border border-[var(--accent)]/60 bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all"
           >
             {feedback === 'saved' ? '✓' : feedback === 'save-failed' ? '✗' : '💾'}
-          </button>
-          <button
-            type="button"
-            onClick={handleLoadSetup}
-            title="Znovu načíst postavy a pozadí z vaultu (po úpravách v Obsidianu)"
-            className="w-8 h-8 rounded-md border border-[var(--accent)]/60 bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all"
-          >
-            {feedback === 'loaded' ? '✓' : feedback === 'load-failed' ? '✗' : '📂'}
-          </button>
-          <button
-            type="button"
-            onClick={handleLoadStory}
-            title="Znovu načíst scénu z vaultu (po úpravách v Obsidianu)"
-            className="w-8 h-8 rounded-md border border-[var(--accent)]/60 bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all"
-          >
-            {feedback === 'story-loaded' ? '✓' : feedback === 'story-load-failed' ? '✗' : '💬'}
           </button>
           <button
             type="button"

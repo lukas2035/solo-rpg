@@ -58,6 +58,15 @@ export default function StoryEditor() {
   const [sceneModal, setSceneModal] = useState<SceneModalState | null>(null)
   const [showShortcutNumbers, setShowShortcutNumbers] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  /** Cesty souborů změněných mimo aplikaci; null = žádné nevyřízené změny */
+  const [vaultChanges, setVaultChanges] = useState<string[] | null>(null)
+
+  // Sledování změn ve složce hry (SSE z BE)
+  useEffect(() => {
+    return api.subscribeVaultChanges(gameName, paths => {
+      setVaultChanges(prev => [...new Set([...(prev ?? []), ...paths])])
+    })
+  }, [gameName])
 
   // Autosave nastavení spouštíme až po prvním načtení ze serveru
   const setupLoadedRef = useRef(false)
@@ -362,33 +371,23 @@ export default function StoryEditor() {
     }
   }
 
-  /** Znovu načte nastavení z vaultu (např. po úpravě v Obsidianu) */
-  const handleLoadSetup = async (): Promise<boolean> => {
+  /** Znovu načte celou hru z vaultu (nastavení, postavy, scény i záznamy aktuální scény) – po změnách v Obsidianu */
+  const reloadFromVault = async (): Promise<boolean> => {
     try {
       const detail = await api.getGame(gameName)
-      const resolved = resolveEntries(toApiEntries(storyEntries), detail.setup.characters)
+      const scene = detail.scenes.find(s => s.id === currentSceneId) ?? detail.scenes[detail.scenes.length - 1] ?? null
+      const stored = scene ? await api.getSceneEntries(gameName, scene.id) : []
+      const resolved = resolveEntries(stored, detail.setup.characters)
       setCharacters(resolved.characters)
       setStoryEntries(resolved.entries)
       setScenes(detail.scenes)
+      setCurrentSceneId(scene?.id ?? null)
       applySetup({ ...detail.setup, characters: resolved.characters })
+      setVaultChanges(null)
+      if (!scene) setSceneModal({ mode: 'create' })
       return true
     } catch (error) {
-      console.error('Načtení nastavení selhalo:', error)
-      return false
-    }
-  }
-
-  /** Znovu načte aktuální scénu z vaultu */
-  const handleLoadStory = async (): Promise<boolean> => {
-    if (!currentSceneId) return false
-    try {
-      const stored = await api.getSceneEntries(gameName, currentSceneId)
-      const resolved = resolveEntries(stored, characters)
-      setCharacters(resolved.characters)
-      setStoryEntries(resolved.entries)
-      return true
-    } catch (error) {
-      console.error('Načtení scény selhalo:', error)
+      console.error('Načtení z vaultu selhalo:', error)
       return false
     }
   }
@@ -494,8 +493,6 @@ export default function StoryEditor() {
         onCharacterDelete={handleCharacterDelete}
         onExportMarkdown={handleExportMarkdown}
         onSaveSetup={handleSaveSetup}
-        onLoadSetup={handleLoadSetup}
-        onLoadStory={handleLoadStory}
         onRenameGame={handleRenameGame}
         onEditDm={() => setShowDmSettings(true)}
         onClearStory={handleClearStory}
@@ -517,6 +514,34 @@ export default function StoryEditor() {
       {loadError && (
         <div className="relative z-10 mx-4 mt-2 px-4 py-2 rounded-lg bg-red-900/70 border border-red-500 text-sm text-red-100">
           {loadError}
+        </div>
+      )}
+
+      {/* Soubory hry se změnily mimo aplikaci (Obsidian, průzkumník…) */}
+      {vaultChanges && (
+        <div
+          className="relative z-10 mx-4 mt-2 px-4 py-2 rounded-lg bg-amber-900/70 border border-amber-500 text-sm text-amber-100 flex items-center gap-3"
+          title={vaultChanges.join('\n')}
+        >
+          <span className="flex-1">
+            Došlo ke změně v souborech hry ve vaultu ({vaultChanges.length}{' '}
+            {vaultChanges.length === 1 ? 'soubor' : vaultChanges.length < 5 ? 'soubory' : 'souborů'}). Neuložené úpravy v aplikaci se načtením přepíšou.
+          </span>
+          <button
+            type="button"
+            onClick={() => void reloadFromVault()}
+            className="px-3 py-1 rounded-md bg-amber-500 text-black font-semibold hover:opacity-80 transition-opacity"
+          >
+            Načíst aktuální stav
+          </button>
+          <button
+            type="button"
+            onClick={() => setVaultChanges(null)}
+            title="Skrýt upozornění"
+            className="px-2 py-1 rounded-md border border-amber-400/60 hover:border-amber-300 transition-colors"
+          >
+            ✕
+          </button>
         </div>
       )}
 

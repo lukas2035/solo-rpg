@@ -4,11 +4,13 @@ import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
 import { loadConfig } from './config.js'
 import { ObsidianVaultProvider } from './vault/ObsidianVaultProvider.js'
+import { GameWatcher } from './vault/GameWatcher.js'
 import { registerGameRoutes } from './routes/games.js'
 
 const config = loadConfig()
 const storage = new ObsidianVaultProvider(config.vaultPath)
 await storage.init()
+const watcher = new GameWatcher(config.vaultPath)
 
 const app = Fastify({
   logger: { level: 'info', transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss', ignore: 'pid,hostname' } } },
@@ -30,7 +32,8 @@ await app.register(fastifyStatic, {
 
 app.get('/api/health', async () => ({ ok: true, vaultPath: config.vaultPath }))
 
-await registerGameRoutes(app, storage)
+await registerGameRoutes(app, storage, watcher)
+app.addHook('onClose', async () => watcher.closeAll())
 
 try {
   await app.listen({ port: config.port, host: '127.0.0.1' })

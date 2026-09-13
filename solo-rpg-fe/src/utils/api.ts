@@ -123,3 +123,22 @@ export const saveSceneEntries = (game: string, sceneId: string, entries: StoryEn
   request<void>('PUT', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}`, entries)
 export const deleteScene = (game: string, sceneId: string) =>
   request<void>('DELETE', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}`)
+
+// ---------- změny ve vaultu ----------
+
+/**
+ * Přihlásí se k hlášení změn souborů hry (SSE). `onChange` dostane relativní cesty změněných souborů.
+ * Vrací funkci pro odhlášení.
+ */
+export function subscribeVaultChanges(game: string, onChange: (paths: string[]) => void): () => void {
+  const source = new EventSource(`${API_BASE}${gamePath(game)}/events`)
+  source.addEventListener('change', (event) => {
+    try {
+      const data = JSON.parse((event as MessageEvent<string>).data) as { paths?: string[] }
+      onChange(data.paths ?? [])
+    } catch {
+      onChange([])
+    }
+  })
+  return () => source.close()
+}

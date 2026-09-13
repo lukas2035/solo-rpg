@@ -12,8 +12,11 @@ import {
   isValidGameName,
 } from '@solo-rpg/shared'
 import { ConflictError, NotFoundError, ValidationError, type StorageProvider } from '../vault/StorageProvider.js'
+import type { GameWatcher } from '../vault/GameWatcher.js'
 
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024
+const SSE_HEARTBEAT_MS = 25_000
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
 const GameParams = z.object({ game: z.string().min(1) })
 const SceneParams = GameParams.extend({ scene: z.string().min(1) })
@@ -28,8 +31,45 @@ function sendError(reply: FastifyReply, error: unknown): FastifyReply {
   return reply.code(500).send({ error: error instanceof Error ? error.message : 'Neznámá chyba.' })
 }
 
-export async function registerGameRoutes(app: FastifyInstance, storage: StorageProvider): Promise<void> {
+export async function registerGameRoutes(app: FastifyInstance, storage: StorageProvider, watcher: GameWatcher): Promise<void> {
   app.setErrorHandler((error, _request, reply) => sendError(reply, error))
+
+  // Vlastní zápisy BE do složky hry nemají vyvolat hlášení „změna ve vaultu“ – utišit watcher před i po zpracování
+  const noteOwnChange = (request: { method: string; params: unknown }) => {
+    if (!MUTATING_METHODS.has(request.method)) return
+    const params = request.params as { game?: unknown } | undefined
+    if (typeof params?.game === 'string') watcher.noteOwnChange(params.game)
+  }
+  app.addHook('preHandler', async (request) => noteOwnChange(request))
+  app.addHook('onResponse', async (request) => noteOwnChange(request))
+
+  // ---------- změny ve vaultu (SSE) ----------
+
+  app.get('/api/games/:game/events', async (request, reply) => {
+    const { game } = GameParams.parse(request.params)
+    if (!(await storage.getGame(game))) return reply.code(404).send({ error: `Hra „${game}“ neexistuje.` })
+
+    // Stream si obsluhujeme sami přes raw response
+    reply.hijack()
+    reply.raw.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache, no-transform',
+      connection: 'keep-alive',
+      'access-control-allow-origin': (request.headers.origin as string | undefined) ?? '*',
+      'access-control-allow-credentials': 'true',
+    })
+    reply.raw.write('retry: 3000\n\n')
+
+    const unsubscribe = watcher.subscribe(game, paths => {
+      reply.raw.write(`event: change\ndata: ${JSON.stringify({ paths })}\n\n`)
+    })
+    const heartbeat = setInterval(() => reply.raw.write(': ping\n\n'), SSE_HEARTBEAT_MS)
+
+    request.raw.on('close', () => {
+      clearInterval(heartbeat)
+      unsubscribe?.()
+    })
+  })
 
   // ---------- hry ----------
 

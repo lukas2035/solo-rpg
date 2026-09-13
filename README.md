@@ -61,7 +61,8 @@ Víceřádkový markdown vypravěče.
 ```
 
 Postavy jsou wikilinky na soubory v `characters/` (celé jméno) s aliasem = nickname. Můžeš dopisovat záznamy
-i ručně v Obsidianu (`**[[Celé jméno]]**: text` nebo `**Nickname**: text`) – aplikace je načte tlačítkem 💬.
+i ručně v Obsidianu (`**[[Celé jméno]]**: text` nebo `**Nickname**: text`) – aplikace změnu souborů zaznamená
+(BE sleduje složku hry) a nabídne tlačítko „Načíst aktuální stav“.
 Soubor scény bez značky `<!-- entries -->` se čte celý jako záznamy (starý formát).
 Aplikace při zápisu zachovává vlastní frontmatter klíče a tělo poznámek u postav i hry.
 Přejmenování postavy v aplikaci přejmenuje soubor, portrét i odkazy ve scénách; přejmenování scény
@@ -78,6 +79,7 @@ POST          /api/games/:game/assets            (multipart: kind, ownerName?, f
 POST          /api/games/:game/assets/from-url   ({ kind, url, ownerName? })
 GET/POST      /api/games/:game/scenes            (POST: { title, description?, image?, characters? })
 GET/PUT/PATCH/DEL /api/games/:game/scenes/:scene (PUT = záznamy, PATCH = název/popis/obrázek/postavy)
+GET           /api/games/:game/events            (SSE – změny souborů hry provedené mimo aplikaci)
 GET           /vault/<Hra>/<cesta>                (statické soubory z vaultu)
 ```
 

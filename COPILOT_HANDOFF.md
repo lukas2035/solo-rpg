@@ -47,6 +47,7 @@ solo-rpg/
 │       └── vault/StorageProvider.ts (interface + NotFound/Conflict/ValidationError)
 │                 ObsidianVaultProvider.ts (fs + gray-matter; CRUD postav, migrace npcs/ → characters/)
 │                 sceneMarkdown.ts (parseEntries / serializeEntries / renameSpeaker)
+│                 GameWatcher.ts (fs.watch recursive na složku otevřené hry → SSE `change` události)
 │                 fsUtils.ts (assertInside, writeFileAtomic, safeFileName…)
 ├── solo-rpg-fe/            Vite + React 19 + react-router + Tailwind, lint = oxlint
 │   └── src/
@@ -104,6 +105,15 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
   přepíše seznamy ve scénách; soubor scény bez klíče `characters` = všechny postavy hry (zpětná kompatibilita).
 - Sdílené: `ImageDropField` (klik/drop/URL), `utils/forms.ts` (`selectAll`, `inputClass`).
 
+### Změny ve vaultu zvenčí (Obsidian)
+- Tlačítka „znovu načíst“ (📂/💬) jsou pryč. FE se při otevření hry připojí na `GET /api/games/:name/events` (SSE,
+  `api.subscribeVaultChanges`). BE `GameWatcher` sleduje složku hry přes `fs.watch({recursive})` – jen dokud je někdo
+  připojený; na Windows jeden handle na strom, počet souborů nehraje roli. Ignoruje `*.tmp` a skryté složky (`.obsidian`).
+- Vlastní zápisy BE se nehlásí: hooky `preHandler`/`onResponse` pro POST/PUT/PATCH/DELETE na `/api/games/:game/*`
+  volají `watcher.noteOwnChange(game)` → 1,5 s tiché okno. Události se sdružují (debounce 400 ms).
+- FE zobrazí oranžový banner „Došlo ke změně v souborech hry“ s tlačítkem „Načíst aktuální stav“ (`reloadFromVault`:
+  getGame + záznamy aktuální scény) a ✕ pro skrytí.
+
 ### API (BE, port 3001; Vite proxy přesměrovává `/api` a `/vault` z 5173)
 ```
 GET  /api/health
@@ -114,6 +124,7 @@ POST /api/games/:name/assets (multipart: kind portrait|dm|background|scene, owne
 POST /api/games/:name/assets/from-url ({ kind, url, ownerName? })
 GET/POST /api/games/:name/scenes ({title, description?, image?, characters?})
 GET(záznamy)/PUT(záznamy)/PATCH(meta)/DELETE /api/games/:name/scenes/:id
+GET  /api/games/:name/events  (SSE: event `change`, data `{paths: string[]}` – změny souborů hry mimo BE)
 GET  /vault/*  (statické soubory vaultu)
 ```
 
