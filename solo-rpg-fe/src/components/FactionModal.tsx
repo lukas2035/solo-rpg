@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Faction, FactionRelation, FactionStance, FactionStatus, FactionType, StoryThread } from '@solo-rpg/shared'
+import type { Faction, FactionRelation, FactionStance, FactionStatus, FactionType, LoreEntry, StoryThread } from '@solo-rpg/shared'
 import ChipGroup from './ChipGroup'
 import EntityChecklist, { type EntityOption } from './EntityChecklist'
 import ImageDropField from './ImageDropField'
+import RelatedEntities from './RelatedEntities'
 import { inputClass, selectAll } from '../utils/forms'
+import { LORE_KNOWLEDGE_LABELS, LORE_TYPE_ICONS } from '../utils/lore'
 import {
   FACTION_STANCES,
   FACTION_STANCE_CLASS,
@@ -16,6 +18,7 @@ import {
   FACTION_TYPES,
   FACTION_TYPE_ICONS,
   FACTION_TYPE_LABELS,
+  isLooseGroup,
 } from '../utils/factions'
 import { THREAD_STATUS_LABELS, THREAD_TYPE_ICONS } from '../utils/threads'
 
@@ -29,6 +32,7 @@ export interface FactionFormValues {
   parentFaction: string | null
   goals: string[]
   characters: string[]
+  locations: string[]
   relations: FactionRelation[]
   description: string
   secrets: string
@@ -47,24 +51,27 @@ interface FactionModalProps {
   /** Aktuální emblém jako URL použitelná v <img> */
   emblem: string | null
   allCharacters: EntityOption[]
+  allLocations: EntityOption[]
   /** Ostatní frakce hry (bez upravované) */
   otherFactions: Faction[]
-  /** Dopočítané: podfrakce, příchozí vztahy, nitě odkazující na frakci */
+  /** Dopočítané: podfrakce, příchozí vztahy, nitě a lore odkazující na frakci */
   subfactions: Faction[]
   incomingRelations: IncomingRelation[]
   relatedThreads: StoryThread[]
+  relatedLore?: LoreEntry[]
   onSubmit: (values: FactionFormValues) => Promise<void>
   onDelete?: () => Promise<void>
   /** Otevře úpravu jiné frakce (příchozí vztah, podfrakce, rodič) */
   onOpenFaction?: (faction: Faction) => void
   onOpenThread?: (thread: StoryThread) => void
+  onOpenLore?: (lore: LoreEntry) => void
   onClose: () => void
 }
 
 /** Dialog pro vytvoření a úpravu frakce */
 export default function FactionModal({
-  faction, emblem, allCharacters, otherFactions, subfactions, incomingRelations, relatedThreads,
-  onSubmit, onDelete, onOpenFaction, onOpenThread, onClose,
+  faction, emblem, allCharacters, allLocations, otherFactions, subfactions, incomingRelations, relatedThreads, relatedLore = [],
+  onSubmit, onDelete, onOpenFaction, onOpenThread, onOpenLore, onClose,
 }: FactionModalProps) {
   const isEdit = faction !== null
   const [title, setTitle] = useState(faction?.title ?? '')
@@ -76,6 +83,7 @@ export default function FactionModal({
   const [goals, setGoals] = useState<string[]>(faction?.goals ?? [])
   const [newGoal, setNewGoal] = useState('')
   const [characters, setCharacters] = useState<string[]>(faction?.characters ?? [])
+  const [locations, setLocations] = useState<string[]>(faction?.locations ?? [])
   const [relations, setRelations] = useState<FactionRelation[]>(faction?.relations ?? [])
   const [description, setDescription] = useState(faction?.description ?? '')
   const [secrets, setSecrets] = useState(faction?.secrets ?? '')
@@ -86,6 +94,8 @@ export default function FactionModal({
   const [saving, setSaving] = useState(false)
   const titleRef = useRef<HTMLInputElement | null>(null)
   const goalRef = useRef<HTMLInputElement | null>(null)
+  /** Volná parta – bez struktury; skryté sekce se při uložení vyprázdní */
+  const loose = isLooseGroup(type)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -152,12 +162,13 @@ export default function FactionModal({
         title: trimmed,
         type,
         status,
-        stance,
-        leader,
-        parentFaction,
-        goals: [...goals.map(g => g.trim()).filter(Boolean), ...(pendingGoal ? [pendingGoal] : [])],
+        stance: loose && stance === 'unknown' ? 'neutral' : stance,
+        leader: loose ? null : leader,
+        parentFaction: loose ? null : parentFaction,
+        goals: loose ? [] : [...goals.map(g => g.trim()).filter(Boolean), ...(pendingGoal ? [pendingGoal] : [])],
         characters: characters.filter(n => allCharacters.some(c => c.name === n)),
-        relations: relations.map(r => ({ ...r, note: r.note.trim() })),
+        locations: locations.filter(n => allLocations.some(l => l.name === n)),
+        relations: loose ? [] : relations.map(r => ({ ...r, note: r.note.trim() })),
         description,
         secrets,
         emblem: emblemChanged ? editEmblem : undefined,
@@ -229,31 +240,34 @@ export default function FactionModal({
               onChange={setType}
             />
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <ChipGroup
-                label="Stav"
-                options={FACTION_STATUSES}
-                value={status}
-                labels={FACTION_STATUS_LABELS}
-                hints={FACTION_STATUS_HINTS}
-                onChange={setStatus}
-                className={(s, selected) => (selected ? FACTION_STATUS_CLASS[s] : '')}
-              />
-              <ChipGroup
-                label="Postoj k družině"
-                options={FACTION_STANCES}
-                value={stance}
-                labels={FACTION_STANCE_LABELS}
-                hints={FACTION_STANCE_HINTS}
-                onChange={setStance}
-                className={(s, selected) => (selected ? FACTION_STANCE_CLASS[s] : '')}
-              />
-            </div>
+            {!loose && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <ChipGroup
+                  label="Stav"
+                  options={FACTION_STATUSES}
+                  value={status}
+                  labels={FACTION_STATUS_LABELS}
+                  hints={FACTION_STATUS_HINTS}
+                  onChange={setStatus}
+                  className={(s, selected) => (selected ? FACTION_STATUS_CLASS[s] : '')}
+                />
+                <ChipGroup
+                  label="Postoj k družině"
+                  options={FACTION_STANCES}
+                  value={stance}
+                  labels={FACTION_STANCE_LABELS}
+                  hints={FACTION_STANCE_HINTS}
+                  onChange={setStance}
+                  className={(s, selected) => (selected ? FACTION_STANCE_CLASS[s] : '')}
+                />
+              </div>
+            )}
           </div>
 
-          <ImageDropField label="Emblém" value={editEmblem} onChange={(next) => { setEditEmblem(next); setEmblemChanged(true) }} removeLabel="Odebrat emblém" className="sm:w-48" />
+          <ImageDropField label={loose ? 'Obrázek' : 'Emblém'} value={editEmblem} onChange={(next) => { setEditEmblem(next); setEmblemChanged(true) }} removeLabel={loose ? 'Odebrat obrázek' : 'Odebrat emblém'} className="sm:w-48" />
         </div>
 
+        {!loose && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <label className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">
             Vůdce <span className="opacity-60">(existující postava; jinak popiš v textu)</span>
@@ -273,8 +287,10 @@ export default function FactionModal({
             </select>
           </label>
         </div>
+        )}
 
         {/* Cíle */}
+        {!loose && (
         <fieldset className="flex flex-col gap-2 text-left text-sm text-[var(--text)]">
           <legend className="mb-1">Cíle <span className="opacity-60">({goals.length}; obecné záměry organizace, ne úkoly pro hráče)</span></legend>
           {goals.length > 0 && (
@@ -304,10 +320,16 @@ export default function FactionModal({
             <button type="button" onClick={addGoal} disabled={!newGoal.trim()} className="px-3 h-7 rounded-md border border-[var(--accent)]/60 text-[var(--accent)] hover:bg-black/60 disabled:opacity-30">+ Přidat</button>
           </div>
         </fieldset>
+        )}
 
-        <EntityChecklist legend="Důležité postavy" options={allCharacters} selected={characters} onToggle={toggleCharacter} emptyText="Hra zatím nemá žádné postavy." />
+        <EntityChecklist legend={loose ? 'Členové' : 'Důležité postavy'} options={allCharacters} selected={characters} onToggle={toggleCharacter} emptyText="Hra zatím nemá žádné postavy." />
+
+        {allLocations.length > 0 && (
+          <EntityChecklist legend="Působí v lokacích" options={allLocations} selected={locations} onToggle={(name) => setLocations(prev => (prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]))} emptyText="" />
+        )}
 
         {/* Vztahy k jiným frakcím */}
+        {!loose && (
         <fieldset className="flex flex-col gap-2 text-left text-sm text-[var(--text)]">
           <legend className="mb-1">Vztahy k jiným frakcím <span className="opacity-60">({relations.length + incomingRelations.length})</span></legend>
           {relations.map((r, i) => (
@@ -351,9 +373,10 @@ export default function FactionModal({
             <p className="opacity-60 text-xs">Hra zatím nemá jiné frakce.</p>
           )}
         </fieldset>
+        )}
 
         {/* Dopočítané vazby */}
-        {isEdit && (subfactions.length > 0 || relatedThreads.length > 0) && (
+        {isEdit && (subfactions.length > 0 || relatedThreads.length > 0 || relatedLore.length > 0) && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-[var(--text)]">
             {subfactions.length > 0 && (
               <div className="flex flex-col gap-1 text-left">
@@ -372,18 +395,22 @@ export default function FactionModal({
                 ))}
               </div>
             )}
+            <RelatedEntities
+              heading={<>Lore <span className="normal-case">(vazba se upravuje u záznamu)</span></>}
+              items={relatedLore.map(l => ({ key: l.id, icon: LORE_TYPE_ICONS[l.type], label: l.title, suffix: LORE_KNOWLEDGE_LABELS[l.knowledge], onOpen: onOpenLore ? () => onOpenLore(l) : undefined }))}
+            />
           </div>
         )}
 
         <label className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">
-          Popis <span className="opacity-60">(markdown – co frakce je, kde působí, jakou má roli)</span>
+          Popis <span className="opacity-60">{loose ? '(markdown – kdo to je, co je spojuje)' : '(markdown – co frakce je, kde působí, jakou má roli)'}</span>
           <textarea
             rows={5}
             value={description}
             onFocus={selectAll}
             onChange={(e) => setDescription(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); void handleSubmit() } }}
-            placeholder="Dominantní upírská politická struktura ve městě. Udržuje Maškarádu a svůj vliv nad pražskými Rodnými…"
+            placeholder={loose ? 'Markova parta ze střední. Scházejí se každý pátek v hospodě U Kalicha…' : 'Dominantní upírská politická struktura ve městě. Udržuje Maškarádu a svůj vliv nad pražskými Rodnými…'}
             className={`${inputClass} font-mono text-sm resize-y whitespace-pre-wrap`}
           />
         </label>

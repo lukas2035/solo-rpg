@@ -11,6 +11,7 @@ export const FACTION_TYPE_LABELS: Record<FactionType, string> = {
   clan: 'Klan / kmen',
   secret: 'Tajná společnost',
   supernatural: 'Nadpřirozená',
+  group: 'Volná skupina / parta',
   other: 'Jiná',
 }
 
@@ -23,8 +24,12 @@ export const FACTION_TYPE_ICONS: Record<FactionType, string> = {
   clan: '🛡️',
   secret: '🎭',
   supernatural: '🔮',
+  group: '👥',
   other: '🏴',
 }
+
+/** Volná skupina nemá organizační strukturu – formulář skrývá vůdce, hierarchii, cíle a vztahy */
+export const isLooseGroup = (type: FactionType | null) => type === 'group'
 
 export const FACTION_STATUS_LABELS: Record<FactionStatus, string> = {
   active: 'Aktivní',

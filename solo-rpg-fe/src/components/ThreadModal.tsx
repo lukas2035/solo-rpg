@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Quest, StoryThread, ThreadCertainty, ThreadHorizon, ThreadInput, ThreadStatus, ThreadType } from '@solo-rpg/shared'
+import type { LoreEntry, Quest, StoryThread, ThreadCertainty, ThreadHorizon, ThreadInput, ThreadStatus, ThreadType } from '@solo-rpg/shared'
 import ChipGroup from './ChipGroup'
 import EntityChecklist, { type EntityOption } from './EntityChecklist'
+import RelatedEntities from './RelatedEntities'
 import { inputClass, selectAll } from '../utils/forms'
+import { LORE_KNOWLEDGE_LABELS, LORE_TYPE_ICONS } from '../utils/lore'
 import { QUEST_STATUS_LABELS, QUEST_TYPE_ICONS } from '../utils/quests'
 import {
   THREAD_CERTAINTIES,
@@ -26,13 +28,16 @@ interface ThreadModalProps {
   thread: StoryThread | null
   allCharacters: EntityOption[]
   allFactions: EntityOption[]
+  allLocations: EntityOption[]
   /** Názvy scén hry (vazba „vznikla ve scéně“) */
   sceneTitles: string[]
   /** Předvyplněná scéna pro novou nit (aktuální scéna) */
   defaultScene?: string | null
-  /** Dopočítané: questy, které na nit odkazují (vazba se edituje u questu) */
+  /** Dopočítané: questy a lore, které na nit odkazují (vazba se edituje u nich) */
   relatedQuests?: Quest[]
+  relatedLore?: LoreEntry[]
   onOpenQuest?: (quest: Quest) => void
+  onOpenLore?: (lore: LoreEntry) => void
   /** Uloží nit; při chybě (např. duplicitní název) vyhodí výjimku s hláškou pro uživatele */
   onSubmit: (input: ThreadInput) => Promise<void>
   onDelete?: () => Promise<void>
@@ -42,7 +47,7 @@ interface ThreadModalProps {
 const DEFAULT_CLOCK_MAX = 6
 
 /** Dialog pro vytvoření a úpravu dějové nitě */
-export default function ThreadModal({ thread, allCharacters, allFactions, sceneTitles, defaultScene = null, relatedQuests = [], onOpenQuest, onSubmit, onDelete, onClose }: ThreadModalProps) {
+export default function ThreadModal({ thread, allCharacters, allFactions, allLocations, sceneTitles, defaultScene = null, relatedQuests = [], relatedLore = [], onOpenQuest, onOpenLore, onSubmit, onDelete, onClose }: ThreadModalProps) {
   const isEdit = thread !== null
   const [title, setTitle] = useState(thread?.title ?? '')
   const [type, setType] = useState<ThreadType | null>(thread?.type ?? null)
@@ -55,6 +60,7 @@ export default function ThreadModal({ thread, allCharacters, allFactions, sceneT
   const [clockMax, setClockMax] = useState(thread?.clock?.max ?? DEFAULT_CLOCK_MAX)
   const [characters, setCharacters] = useState<string[]>(thread?.characters ?? [])
   const [factions, setFactions] = useState<string[]>(thread?.factions ?? [])
+  const [locations, setLocations] = useState<string[]>(thread?.locations ?? [])
   const [scene, setScene] = useState<string | null>(thread ? thread.scene : defaultScene)
   const [description, setDescription] = useState(thread?.description ?? '')
   const [error, setError] = useState<string | null>(null)
@@ -102,6 +108,7 @@ export default function ThreadModal({ thread, allCharacters, allFactions, sceneT
         clock: clockEnabled ? { current: Math.min(clockCurrent, clockMax), max: clockMax } : null,
         characters: characters.filter(n => allCharacters.some(c => c.name === n)),
         factions: factions.filter(n => allFactions.some(f => f.name === n)),
+        locations: locations.filter(n => allLocations.some(l => l.name === n)),
         scene,
         description,
       })
@@ -248,18 +255,20 @@ export default function ThreadModal({ thread, allCharacters, allFactions, sceneT
           <EntityChecklist legend="Týká se frakcí" options={allFactions} selected={factions} onToggle={toggleIn(setFactions)} emptyText="" />
         )}
 
-        {isEdit && relatedQuests.length > 0 && (
-          <div className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">
-            <span className="opacity-70 text-xs uppercase tracking-wide">Součást questů <span className="normal-case">(vazba se upravuje u questu)</span></span>
-            {relatedQuests.map(q => (
-              <span key={q.id} title={QUEST_STATUS_LABELS[q.status]}>
-                {QUEST_TYPE_ICONS[q.type]}{' '}
-                <button type="button" onClick={onOpenQuest ? () => onOpenQuest(q) : undefined} disabled={!onOpenQuest} className="text-[var(--accent)] hover:underline disabled:no-underline disabled:opacity-70 text-left">
-                  {q.title}
-                </button>
-                <span className="opacity-50 text-xs"> · {QUEST_STATUS_LABELS[q.status]}</span>
-              </span>
-            ))}
+        {allLocations.length > 0 && (
+          <EntityChecklist legend="Odehrává se v lokacích" options={allLocations} selected={locations} onToggle={toggleIn(setLocations)} emptyText="" />
+        )}
+
+        {isEdit && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <RelatedEntities
+              heading={<>Součást questů <span className="normal-case">(vazba se upravuje u questu)</span></>}
+              items={relatedQuests.map(q => ({ key: q.id, icon: QUEST_TYPE_ICONS[q.type], label: q.title, suffix: QUEST_STATUS_LABELS[q.status], onOpen: onOpenQuest ? () => onOpenQuest(q) : undefined }))}
+            />
+            <RelatedEntities
+              heading={<>Lore <span className="normal-case">(vazba se upravuje u záznamu)</span></>}
+              items={relatedLore.map(l => ({ key: l.id, icon: LORE_TYPE_ICONS[l.type], label: l.title, suffix: LORE_KNOWLEDGE_LABELS[l.knowledge], onOpen: onOpenLore ? () => onOpenLore(l) : undefined }))}
+            />
           </div>
         )}
 

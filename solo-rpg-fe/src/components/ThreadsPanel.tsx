@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { StoryThread, ThreadCertainty, ThreadHorizon, ThreadStatus, ThreadType } from '@solo-rpg/shared'
 import { OPEN_THREAD_STATUSES } from '@solo-rpg/shared'
+import FilterSelect from './FilterSelect'
 import { inputClass } from '../utils/forms'
 import {
   THREAD_CERTAINTIES,
@@ -27,22 +28,6 @@ interface ThreadsPanelProps {
 }
 
 const OPEN_SET = new Set<ThreadStatus>(OPEN_THREAD_STATUSES)
-
-/** Filtrovací select: prázdná hodnota = vše */
-function FilterSelect<T extends string>({ value, options, labels, all, onChange }: {
-  value: T | ''
-  options: readonly T[]
-  labels: Record<T, string>
-  all: string
-  onChange: (value: T | '') => void
-}) {
-  return (
-    <select value={value} onChange={(e) => onChange(e.target.value as T | '')} className={`${inputClass} py-1 text-xs`}>
-      <option value="">{all}</option>
-      {options.map(o => <option key={o} value={o}>{labels[o]}</option>)}
-    </select>
-  )
-}
 
 /** Jedna nit v seznamu */
 function ThreadRow({ thread, onEdit, onStatusChange, onClockStep }: {

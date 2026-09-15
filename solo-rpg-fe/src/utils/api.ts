@@ -1,4 +1,5 @@
 import type {
+  AiGenerateResponse,
   AssetKind,
   AssetResponse,
   Character,
@@ -12,6 +13,7 @@ import type {
   NarratorInput,
   SceneInput,
   SceneMeta,
+  SceneSummaryResponse,
   StoryEntry,
   StoryThread,
   ThreadInput,
@@ -19,9 +21,19 @@ import type {
   FactionInput,
   Quest,
   QuestInput,
+  StoryLocation,
+  LocationInput,
+  LoreEntry,
+  LoreInput,
+  GameSession,
+  GameSessionInput,
+  VaultInfo,
+  PickResponse,
+  BackupGameResponse,
 } from '@solo-rpg/shared'
 import { isRemoteImage } from '@solo-rpg/shared'
 import { useSyncExternalStore } from 'react'
+import { getVaultPath } from './vaultPath'
 
 /**
  * Klient lokálního API (solo-rpg-be). Ve vývoji Vite proxy přesměruje
@@ -38,10 +50,25 @@ export class ApiError extends Error {
   }
 }
 
+/** Cesta ke složce s hrami uložená v prohlížeči – BE podle ní přepne otevřený vault (hlavička musí být ASCII, proto encode) */
+function vaultHeaders(): Record<string, string> {
+  const vaultPath = getVaultPath()
+  return vaultPath ? { 'x-vault-path': encodeURIComponent(vaultPath) } : {}
+}
+
+/** Stejná informace jako query parametr – pro EventSource a <img>, kde hlavičky nastavit nejde */
+function vaultQuery(separator: '?' | '&'): string {
+  const vaultPath = getVaultPath()
+  return vaultPath ? `${separator}vault=${encodeURIComponent(vaultPath)}` : ''
+}
+
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
   const response = await fetch(`${API_BASE}${url}`, {
     method,
-    headers: body instanceof FormData || body === undefined ? undefined : { 'content-type': 'application/json' },
+    headers: {
+      ...vaultHeaders(),
+      ...(body instanceof FormData || body === undefined ? {} : { 'content-type': 'application/json' }),
+    },
     body: body instanceof FormData ? body : body === undefined ? undefined : JSON.stringify(body),
   })
   if (!response.ok) {
@@ -59,6 +86,27 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
 }
 
 const gamePath = (game: string) => `/api/games/${encodeURIComponent(game)}`
+
+// ---------- složka s hrami (vault) ----------
+
+export const getVaultInfo = () => request<VaultInfo>('GET', '/api/vault')
+/** Přepne BE na jinou složku s hrami; `create` = založit, pokud neexistuje */
+export const setVaultPath = (path: string, create = false) => request<VaultInfo>('PUT', '/api/vault', { path, create })
+
+// ---------- nativní dialogy (BE běží na stejném počítači) ----------
+
+/** Nativní výběr složky; vrací cestu, null při zrušení. Vyhodí ApiError 501, kde není dostupný. */
+export const pickFolder = (options: { title?: string; initialPath?: string } = {}) =>
+  request<PickResponse>('POST', '/api/system/pick-folder', options).then(r => r.path)
+/** Nativní dialog „Uložit jako“; vrací cestu, null při zrušení. Vyhodí ApiError 501, kde není dostupný. */
+export const pickSaveFile = (options: { title?: string; fileName: string; initialDir?: string; extension?: string }) =>
+  request<PickResponse>('POST', '/api/system/pick-save-file', options).then(r => r.path)
+
+// ---------- záloha hry ----------
+
+/** Zabalí celou složku hry do zipu na dané absolutní cestě */
+export const backupGame = (game: string, targetPath: string) =>
+  request<BackupGameResponse>('POST', `${gamePath(game)}/backup`, { targetPath })
 
 // ---------- hry ----------
 
@@ -150,7 +198,7 @@ export function assetUrl(game: string, ref: ImageRef, version: number = assetVer
   if (!ref) return null
   if (isRemoteImage(ref)) return ref
   const encodedPath = ref.split('/').map(encodeURIComponent).join('/')
-  return `${API_BASE}/vault/${encodeURIComponent(game)}/${encodedPath}?v=${version}`
+  return `${API_BASE}/vault/${encodeURIComponent(game)}/${encodedPath}?v=${version}${vaultQuery('&')}`
 }
 
 // ---------- scény ----------
@@ -165,6 +213,16 @@ export const saveSceneEntries = (game: string, sceneId: string, entries: StoryEn
   request<void>('PUT', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}`, entries)
 export const deleteScene = (game: string, sceneId: string) =>
   request<void>('DELETE', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}`)
+
+// ---------- AI vypravěč ----------
+
+/** Nechá aktuálního vypravěče odpovědět (OpenRouter); vrací nové záznamy, které BE už připsal do scény */
+export const generateAiReply = (game: string, sceneId: string) =>
+  request<AiGenerateResponse>('POST', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/ai`)
+
+/** Nechá AI shrnout děj scény (nic neukládá – výsledek se vloží do pole „Shrnutí“ v dialogu scény) */
+export const summarizeScene = (game: string, sceneId: string) =>
+  request<SceneSummaryResponse>('POST', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/summary`)
 
 // ---------- dějové nitě (threads) ----------
 
@@ -193,6 +251,33 @@ export const updateQuest = (game: string, questId: string, input: QuestInput) =>
 export const deleteQuest = (game: string, questId: string) =>
   request<void>('DELETE', `${gamePath(game)}/quests/${encodeURIComponent(questId)}`)
 
+// ---------- lokace (locations) ----------
+
+export const listLocations = (game: string) => request<StoryLocation[]>('GET', `${gamePath(game)}/locations`)
+export const createLocation = (game: string, input: LocationInput) => request<StoryLocation>('POST', `${gamePath(game)}/locations`, input)
+export const updateLocation = (game: string, locationId: string, input: LocationInput) =>
+  request<StoryLocation>('PUT', `${gamePath(game)}/locations/${encodeURIComponent(locationId)}`, input)
+export const deleteLocation = (game: string, locationId: string) =>
+  request<void>('DELETE', `${gamePath(game)}/locations/${encodeURIComponent(locationId)}`)
+
+// ---------- lore ----------
+
+export const listLore = (game: string) => request<LoreEntry[]>('GET', `${gamePath(game)}/lore`)
+export const createLore = (game: string, input: LoreInput) => request<LoreEntry>('POST', `${gamePath(game)}/lore`, input)
+export const updateLore = (game: string, loreId: string, input: LoreInput) =>
+  request<LoreEntry>('PUT', `${gamePath(game)}/lore/${encodeURIComponent(loreId)}`, input)
+export const deleteLore = (game: string, loreId: string) =>
+  request<void>('DELETE', `${gamePath(game)}/lore/${encodeURIComponent(loreId)}`)
+
+// ---------- herní sezení (stopky) ----------
+
+export const listSessions = (game: string) => request<GameSession[]>('GET', `${gamePath(game)}/sessions`)
+export const createSession = (game: string, input: GameSessionInput) => request<GameSession>('POST', `${gamePath(game)}/sessions`, input)
+export const updateSession = (game: string, sessionId: string, input: GameSessionInput) =>
+  request<GameSession>('PUT', `${gamePath(game)}/sessions/${encodeURIComponent(sessionId)}`, input)
+export const deleteSession = (game: string, sessionId: string) =>
+  request<void>('DELETE', `${gamePath(game)}/sessions/${encodeURIComponent(sessionId)}`)
+
 // ---------- změny ve vaultu ----------
 
 /**
@@ -200,7 +285,7 @@ export const deleteQuest = (game: string, questId: string) =>
  * Vrací funkci pro odhlášení.
  */
 export function subscribeVaultChanges(game: string, onChange: (paths: string[]) => void): () => void {
-  const source = new EventSource(`${API_BASE}${gamePath(game)}/events`)
+  const source = new EventSource(`${API_BASE}${gamePath(game)}/events${vaultQuery('?')}`)
   source.addEventListener('change', (event) => {
     try {
       const data = JSON.parse((event as MessageEvent<string>).data) as { paths?: string[] }

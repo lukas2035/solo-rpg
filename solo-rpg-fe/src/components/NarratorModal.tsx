@@ -7,6 +7,8 @@ import { inputClass, selectAll } from '../utils/forms'
 export interface NarratorFormValues {
   name: string
   description: string
+  /** Doplňkový prompt pro AI vypravěče (připojí se na konec požadavku) */
+  aiPrompt: string
   image: string | null | undefined
 }
 
@@ -26,6 +28,7 @@ export default function NarratorModal({ narrator, image, onSubmit, onDelete, onC
   const isEdit = narrator !== null
   const [name, setName] = useState(narrator?.name ?? '')
   const [description, setDescription] = useState(narrator?.description ?? '')
+  const [aiPrompt, setAiPrompt] = useState(narrator?.aiPrompt ?? '')
   const [editImage, setEditImage] = useState<string | null>(image)
   const [imageChanged, setImageChanged] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -55,7 +58,7 @@ export default function NarratorModal({ narrator, image, onSubmit, onDelete, onC
     setSaving(true)
     setError(null)
     try {
-      await onSubmit({ name: trimmed, description, image: imageChanged ? editImage : undefined })
+      await onSubmit({ name: trimmed, description, aiPrompt, image: imageChanged ? editImage : undefined })
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Uložení vypravěče selhalo.')
@@ -130,6 +133,23 @@ export default function NarratorModal({ narrator, image, onSubmit, onDelete, onC
 
           <ImageDropField label="Portrét" value={editImage} onChange={handleImageChange} removeLabel="Odebrat portrét" className="sm:w-56" />
         </div>
+
+        <label className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">
+          🤖 AI prompt <span className="opacity-60">(doplňkové pokyny pro tohoto vypravěče – připojí se na konec požadavku do AI; za značkou <code>&lt;!-- ai-prompt --&gt;</code> v Obsidianu)</span>
+          <textarea
+            rows={6}
+            value={aiPrompt}
+            onChange={(e) => setAiPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && e.ctrlKey) {
+                e.preventDefault()
+                void handleSubmit()
+              }
+            }}
+            placeholder="např. Piš temně a úsporně. Nikdy nerozhoduj za hráče. Každou odpověď zakonči otázkou nebo volbou…"
+            className={`${inputClass} font-mono text-sm resize-y whitespace-pre-wrap`}
+          />
+        </label>
 
         {error && (
           <div className="px-3 py-2 rounded-lg bg-red-900/70 border border-red-500 text-sm text-red-100">{error}</div>

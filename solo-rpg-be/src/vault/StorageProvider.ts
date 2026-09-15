@@ -1,8 +1,8 @@
-import type { Character, CharacterInput, Faction, FactionInput, GameDetail, GameMeta, GameSettings, GameSetup, Narrator, NarratorInput, Quest, QuestInput, SceneInput, SceneMeta, StoryEntry, StoryThread, ThreadInput, AssetKind } from '@solo-rpg/shared'
+import type { Character, CharacterInput, Faction, FactionInput, GameDetail, GameMeta, GameSession, GameSessionInput, GameSettings, GameSetup, LocationInput, LoreEntry, LoreInput, Narrator, NarratorInput, Quest, QuestInput, SceneInput, SceneMeta, StoryEntry, StoryLocation, StoryThread, ThreadInput, AssetKind } from '@solo-rpg/shared'
 
 export interface AssetInput {
   kind: AssetKind
-  /** Celé jméno postavy (portrait), jméno vypravěče (narrator) nebo název scény (scene) – určuje název souboru */
+  /** Celé jméno postavy (portrait), jméno vypravěče (narrator), název scény (scene), frakce (faction) či lokace (location) – určuje název souboru */
   ownerName?: string
   /** Původní název souboru (pro odvození přípony a jména pozadí) */
   filename: string
@@ -54,6 +54,22 @@ export interface StorageProvider {
   createQuest(name: string, input: QuestInput): Promise<Quest>
   updateQuest(name: string, questId: string, input: QuestInput): Promise<Quest>
   deleteQuest(name: string, questId: string): Promise<void>
+
+  listLocations(name: string): Promise<StoryLocation[]>
+  createLocation(name: string, input: LocationInput): Promise<StoryLocation>
+  updateLocation(name: string, locationId: string, input: LocationInput): Promise<StoryLocation>
+  deleteLocation(name: string, locationId: string): Promise<void>
+
+  listLore(name: string): Promise<LoreEntry[]>
+  createLore(name: string, input: LoreInput): Promise<LoreEntry>
+  updateLore(name: string, loreId: string, input: LoreInput): Promise<LoreEntry>
+  deleteLore(name: string, loreId: string): Promise<void>
+
+  /** Herní sezení (stopky) – záznamy v jednom souboru `sessions.md` */
+  listSessions(name: string): Promise<GameSession[]>
+  createSession(name: string, input: GameSessionInput): Promise<GameSession>
+  updateSession(name: string, sessionId: string, input: GameSessionInput): Promise<GameSession>
+  deleteSession(name: string, sessionId: string): Promise<void>
 }
 
 export class NotFoundError extends Error {}

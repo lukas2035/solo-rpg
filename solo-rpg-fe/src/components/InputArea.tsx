@@ -6,6 +6,8 @@ interface Character {
   /** Zobrazované jméno */
   nickname: string
   image: string | null
+  /** Postavu v aktuální scéně hraje AI */
+  ai?: boolean
 }
 
 interface InputAreaProps {
@@ -173,9 +175,10 @@ export default function InputArea({ characters, showShortcutNumbers, onAddEntry,
             key={char.id}
             type="button"
             onClick={() => selectCharacter(char.id)}
+            title={char.ai ? `${char.name} – hraje AI` : char.name}
             className={tabClass(activeCharacterId === char.id)}
           >
-            {showShortcutNumbers ? `${char.nickname} ${index + 1}` : char.nickname}
+            {char.ai ? '🤖 ' : ''}{showShortcutNumbers ? `${char.nickname} ${index + 1}` : char.nickname}
           </button>
         ))}
         {hasNarrator ? (

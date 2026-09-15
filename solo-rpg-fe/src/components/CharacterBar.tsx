@@ -8,6 +8,10 @@ interface Character {
   /** Zobrazované jméno */
   nickname: string
   image: string | null
+  /** Postavu v aktuální scéně hraje AI */
+  ai?: boolean
+  /** Postava je v seznamu postav scény (lze ji ze scény odebrat); dočasní mluvčí ne */
+  inScene?: boolean
 }
 
 interface CharacterBarProps {
@@ -15,26 +19,58 @@ interface CharacterBarProps {
   /** Zobrazit u jmen pořadové číslo pro přepínání klávesnicí (drženo Ctrl/Alt) */
   showShortcutNumbers?: boolean
   onAddCharacter: () => void
-  /** Klik na postavu → otevřít editaci */
+  /** Ikona ✏️ u postavy (nebo klik na postavu bez portrétu) → otevřít editaci */
   onCharacterClick: (characterId: string) => void
+  /** Klik na portrét → zobrazit na celou obrazovku */
+  onPortraitClick?: (image: string, characterName: string) => void
+  /** Ikona 🗗 u postavy → otevřít portrét v plovoucím okně */
+  onPortraitFloat?: (characterId: string) => void
   onCharacterImageDrop: (characterId: string, file: File) => void
+  /** Ikona ✕ u postavy → odebrat jen z aktuální scény (postava ve hře zůstává) */
+  onCharacterRemoveFromScene?: (characterId: string) => void
+  /** Pravý klik → smazat postavu z celé hry */
   onCharacterDelete?: (characterId: string) => void
   onExportMarkdown?: () => string
+  /** Stáhne celou hru (postavy, svět, všechny scény) jako jeden textový Markdown soubor */
+  onExportGame?: () => Promise<boolean>
   onRenameGame?: () => Promise<boolean>
   /** Otevře výběr aktuálního vypravěče */
   onSelectNarrator?: () => void
+  /** Otevře nastavení AI vypravěče pro aktuální scénu */
+  onOpenAi?: () => void
+  /** Otevře dialog pravidel pod příběhem (popis systému + zda ho posílat AI) */
+  onOpenRules?: () => void
+  /** Hra posílá AI informace o kostkách a pravidlech (zvýraznění tlačítka 🎲) */
+  rulesInAi?: boolean
+  /** AI je pro aktuální scénu zapnutá (zvýraznění tlačítka) */
+  aiEnabled?: boolean
+  /** AI právě generuje odpověď */
+  aiBusy?: boolean
+  /** Otevře dialog herního sezení (stopky, hodnocení) */
+  onOpenSession?: () => void
+  /** Stopky sezení běží (zvýraznění tlačítka) */
+  sessionRunning?: boolean
+  /** Stopky stojí, ale je naměřený čas (pauza) */
+  sessionPaused?: boolean
   onToggleThreads?: () => void
   onToggleFactions?: () => void
   onToggleQuests?: () => void
+  onToggleLocations?: () => void
+  onToggleLore?: () => void
   threadsOpen?: boolean
   factionsOpen?: boolean
   questsOpen?: boolean
+  locationsOpen?: boolean
+  loreOpen?: boolean
   /** Počet otevřených dějových nití (odznak na tlačítku) */
   openThreadCount?: number
   /** Počet aktivních frakcí (odznak na tlačítku) */
   activeFactionCount?: number
   /** Počet aktivních questů (odznak na tlačítku) */
   activeQuestCount?: number
+  /** Počet lokací a záznamů lore (odznak na tlačítku) */
+  locationCount?: number
+  loreCount?: number
   onClearStory?: () => Promise<boolean>
   onShowBackground?: () => void
 }
@@ -44,31 +80,60 @@ export default function CharacterBar({
   showShortcutNumbers,
   onAddCharacter,
   onCharacterClick,
+  onPortraitClick,
+  onPortraitFloat,
   onCharacterImageDrop,
+  onCharacterRemoveFromScene,
   onCharacterDelete,
   onExportMarkdown,
+  onExportGame,
   onRenameGame,
   onSelectNarrator,
+  onOpenAi,
+  onOpenRules,
+  rulesInAi = false,
+  aiEnabled = false,
+  aiBusy = false,
+  onOpenSession,
+  sessionRunning = false,
+  sessionPaused = false,
   onToggleThreads,
   onToggleFactions,
   onToggleQuests,
+  onToggleLocations,
+  onToggleLore,
   threadsOpen = false,
   factionsOpen = false,
   questsOpen = false,
+  locationsOpen = false,
+  loreOpen = false,
   openThreadCount = 0,
   activeFactionCount = 0,
   activeQuestCount = 0,
+  locationCount = 0,
+  loreCount = 0,
   onClearStory,
   onShowBackground,
 }: CharacterBarProps) {
   const navigate = useNavigate()
   const [aspectRatios, setAspectRatios] = useState<Record<string, number>>({})
   const [copied, setCopied] = useState(false)
-  const [feedback, setFeedback] = useState<'story-cleared' | 'story-clear-failed' | 'renamed' | 'rename-failed' | null>(null)
+  const [feedback, setFeedback] = useState<'story-cleared' | 'story-clear-failed' | 'renamed' | 'rename-failed' | 'exported' | 'export-failed' | null>(null)
+  const [exporting, setExporting] = useState(false)
 
   const showFeedback = (value: NonNullable<typeof feedback>) => {
     setFeedback(value)
     setTimeout(() => setFeedback(null), 1500)
+  }
+
+  const handleExportGame = async () => {
+    if (!onExportGame || exporting) return
+    setExporting(true)
+    try {
+      showFeedback((await onExportGame()) ? 'exported' : 'export-failed')
+    } finally {
+      setExporting(false)
+    }
   }
 
   const handleRenameGame = async () => {
@@ -136,15 +201,20 @@ export default function CharacterBar({
           return (
             <div
               key={character.id}
-              className="flex-shrink-0 flex flex-col items-center gap-2 cursor-pointer"
-              title={`${character.name} – klikni pro úpravu`}
+              className="group relative flex-shrink-0 flex flex-col items-center gap-2 cursor-pointer"
+              title={`${character.name}${character.ai ? ' (hraje AI)' : ''}${character.image ? ' – klikni pro zvětšení' : ' – klikni pro úpravu'}`}
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, character.id)}
-              onClick={() => onCharacterClick(character.id)}
+              onClick={() => {
+                if (character.image && onPortraitClick) onPortraitClick(character.image, character.name)
+                else onCharacterClick(character.id)
+              }}
               onContextMenu={(e) => handleCharacterContextMenu(e, character)}
             >
               <div
-                className="rounded-lg border-2 border-[var(--accent)] overflow-hidden bg-gradient-to-b from-gray-700 to-gray-900 flex items-center justify-center hover:border-[var(--accent)] hover:shadow-lg hover:shadow-[var(--accent)]/50 transition-all"
+                className={`rounded-lg border-2 overflow-hidden bg-gradient-to-b from-gray-700 to-gray-900 flex items-center justify-center hover:border-[var(--accent)] hover:shadow-lg hover:shadow-[var(--accent)]/50 transition-all ${
+                  character.ai ? 'border-cyan-400 shadow-[0_0_14px_rgba(34,211,238,0.45)]' : 'border-[var(--accent)]'
+                }`}
                 style={{
                   height: `${CHARACTER_HEIGHT}px`,
                   width: character.image ? `${width}px` : `${CHARACTER_HEIGHT}px`,
@@ -163,7 +233,46 @@ export default function CharacterBar({
                   </div>
                 )}
               </div>
-              <span className="text-xs text-[var(--accent)] font-semibold text-center max-w-[120px] truncate hover:opacity-80 transition-opacity">
+              {character.ai && (
+                <span
+                  title="Tuto postavu hraje AI"
+                  className="absolute top-1 right-1 px-1.5 py-0.5 rounded-md bg-cyan-500 text-black text-[10px] font-bold leading-none shadow pointer-events-none group-hover:opacity-0 transition-opacity"
+                >
+                  🤖 AI
+                </span>
+              )}
+              {/* Akce zobrazené při najetí myší: upravit / plovoucí portrét / odebrat ze scény */}
+              <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  type="button"
+                  title="Upravit postavu"
+                  onClick={(e) => { e.stopPropagation(); onCharacterClick(character.id) }}
+                  className="w-7 h-7 rounded-md border border-[var(--accent)]/70 bg-black/80 text-sm flex items-center justify-center hover:bg-black hover:border-[var(--accent)] transition-colors"
+                >
+                  ✏️
+                </button>
+                {character.image && onPortraitFloat && (
+                  <button
+                    type="button"
+                    title="Otevřít portrét v plovoucím okně"
+                    onClick={(e) => { e.stopPropagation(); onPortraitFloat(character.id) }}
+                    className="w-7 h-7 rounded-md border border-[var(--accent)]/70 bg-black/80 text-sm text-[var(--accent)] flex items-center justify-center hover:bg-black hover:border-[var(--accent)] transition-colors"
+                  >
+                    🗗
+                  </button>
+                )}
+                {character.inScene && onCharacterRemoveFromScene && (
+                  <button
+                    type="button"
+                    title="Odebrat ze scény (postava ve hře zůstává, její repliky také)"
+                    onClick={(e) => { e.stopPropagation(); onCharacterRemoveFromScene(character.id) }}
+                    className="w-7 h-7 rounded-md border border-red-400/70 bg-black/80 text-sm text-red-300 font-bold flex items-center justify-center hover:bg-black hover:border-red-400 transition-colors"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+              <span className={`text-xs font-semibold text-center max-w-[120px] truncate hover:opacity-80 transition-opacity ${character.ai ? 'text-cyan-300' : 'text-[var(--accent)]'}`}>
                 {showShortcutNumbers ? `${character.nickname} ${index + 1}` : character.nickname}
               </span>
             </div>
@@ -196,6 +305,17 @@ export default function CharacterBar({
           >
             {copied ? '✓' : '📋'}
           </button>
+          {onExportGame && (
+            <button
+              type="button"
+              onClick={handleExportGame}
+              disabled={exporting}
+              title="Exportovat celou hru do jednoho Markdown souboru (jen text – kontext pro AI chat)"
+              className={`w-8 h-8 rounded-md border border-[var(--accent)]/60 bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all ${exporting ? 'opacity-60 cursor-wait' : ''}`}
+            >
+              {feedback === 'exported' ? '✓' : feedback === 'export-failed' ? '✗' : exporting ? '⏳' : '📄'}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleRenameGame}
@@ -211,6 +331,51 @@ export default function CharacterBar({
             className="w-8 h-8 rounded-md border border-[var(--accent)]/60 bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all"
           >
             🎭
+          </button>
+          <button
+            type="button"
+            onClick={() => onOpenAi?.()}
+            title={aiEnabled ? 'AI vypravěč je pro tuto scénu zapnutý – nastavení' : 'AI vypravěč pro tuto scénu (vypnuto) – nastavení'}
+            className={`relative w-8 h-8 rounded-md border bg-black/50 flex items-center justify-center cursor-pointer text-sm hover:bg-black/80 transition-all ${
+              aiEnabled ? 'border-cyan-400 bg-cyan-500/20 text-cyan-300 hover:border-cyan-300' : 'border-[var(--accent)]/60 text-[var(--accent)] hover:border-[var(--accent)]'
+            } ${aiBusy ? 'animate-pulse' : ''}`}
+          >
+            🤖
+            {aiEnabled && (
+              <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(34,211,238,0.9)] pointer-events-none" />
+            )}
+          </button>
+          {onOpenRules && (
+            <button
+              type="button"
+              onClick={onOpenRules}
+              title={rulesInAi ? 'Kostky a pravidla pod příběhem (posílají se AI)' : 'Kostky a pravidla pod příběhem (AI se neposílají)'}
+              className={`relative w-8 h-8 rounded-md border bg-black/50 flex items-center justify-center cursor-pointer text-sm hover:bg-black/80 transition-all ${
+                rulesInAi ? 'border-cyan-400 bg-cyan-500/20 text-cyan-300 hover:border-cyan-300' : 'border-[var(--accent)]/60 text-[var(--accent)] hover:border-[var(--accent)]'
+              }`}
+            >
+              🎲
+              {rulesInAi && (
+                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(34,211,238,0.9)] pointer-events-none" />
+              )}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onOpenSession?.()}
+            title={sessionRunning ? 'Herní sezení běží – stopky a hodnocení' : sessionPaused ? 'Herní sezení pozastaveno – stopky a hodnocení' : 'Herní sezení – stopky a hodnocení'}
+            className={`relative w-8 h-8 rounded-md border bg-black/50 flex items-center justify-center cursor-pointer text-sm hover:bg-black/80 transition-all ${
+              sessionRunning
+                ? 'border-emerald-400 bg-emerald-500/20 text-emerald-300 hover:border-emerald-300'
+                : sessionPaused
+                  ? 'border-amber-400 bg-amber-500/20 text-amber-300 hover:border-amber-300'
+                  : 'border-[var(--accent)]/60 text-[var(--accent)] hover:border-[var(--accent)]'
+            }`}
+          >
+            ⏱️
+            {sessionRunning && (
+              <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)] animate-pulse pointer-events-none" />
+            )}
           </button>
           <button
             type="button"
@@ -270,6 +435,36 @@ export default function CharacterBar({
             {activeQuestCount > 0 && (
               <span className="absolute top-0 right-0 min-w-[1rem] h-4 px-1 rounded-full bg-[var(--accent)] text-white text-[10px] font-bold flex items-center justify-center leading-none pointer-events-none">
                 {activeQuestCount}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => onToggleLocations?.()}
+            title={locationsOpen ? 'Skrýt lokace' : 'Zobrazit lokace'}
+            className={`relative w-8 h-8 rounded-md border bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all ${
+              locationsOpen ? 'border-[var(--accent)] bg-[var(--accent)]/20' : 'border-[var(--accent)]/60'
+            }`}
+          >
+            📍
+            {locationCount > 0 && (
+              <span className="absolute top-0 right-0 min-w-[1rem] h-4 px-1 rounded-full bg-[var(--accent)] text-white text-[10px] font-bold flex items-center justify-center leading-none pointer-events-none">
+                {locationCount}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => onToggleLore?.()}
+            title={loreOpen ? 'Skrýt lore' : 'Zobrazit lore'}
+            className={`relative w-8 h-8 rounded-md border bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all ${
+              loreOpen ? 'border-[var(--accent)] bg-[var(--accent)]/20' : 'border-[var(--accent)]/60'
+            }`}
+          >
+            📖
+            {loreCount > 0 && (
+              <span className="absolute top-0 right-0 min-w-[1rem] h-4 px-1 rounded-full bg-[var(--accent)] text-white text-[10px] font-bold flex items-center justify-center leading-none pointer-events-none">
+                {loreCount}
               </span>
             )}
           </button>

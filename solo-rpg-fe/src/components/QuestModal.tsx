@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ObjectiveStatus, Quest, QuestInput, QuestObjectiveInput, QuestStatus, QuestType, StoryThread } from '@solo-rpg/shared'
+import type { LoreEntry, ObjectiveStatus, Quest, QuestInput, QuestObjectiveInput, QuestStatus, QuestType, StoryThread } from '@solo-rpg/shared'
 import { questProgress } from '@solo-rpg/shared'
 import ChipGroup from './ChipGroup'
 import EntityChecklist, { type EntityOption } from './EntityChecklist'
+import RelatedEntities from './RelatedEntities'
 import { ProgressBar } from './QuestsPanel'
 import { inputClass, selectAll } from '../utils/forms'
+import { LORE_KNOWLEDGE_LABELS, LORE_TYPE_ICONS } from '../utils/lore'
 import {
   OBJECTIVE_STATUSES,
   OBJECTIVE_STATUS_CLASS,
@@ -33,16 +35,19 @@ interface QuestModalProps {
   quest: Quest | null
   allCharacters: EntityOption[]
   allFactions: EntityOption[]
+  allLocations: EntityOption[]
   /** Nitě hry (checklist souvisejících nití) */
   allThreads: StoryThread[]
   /** Ostatní questy hry (bez upravovaného) – nabídka nadřazeného questu */
   otherQuests: Quest[]
-  /** Dopočítané: podřízené questy */
+  /** Dopočítané: podřízené questy a lore odkazující na quest */
   childQuests: Quest[]
+  relatedLore?: LoreEntry[]
   onSubmit: (input: QuestInput) => Promise<void>
   onDelete?: () => Promise<void>
   onOpenQuest?: (quest: Quest) => void
   onOpenThread?: (thread: StoryThread) => void
+  onOpenLore?: (lore: LoreEntry) => void
   onClose: () => void
 }
 
@@ -51,8 +56,8 @@ const nextKey = () => `draft-${++draftCounter}`
 
 /** Dialog pro vytvoření a úpravu questu */
 export default function QuestModal({
-  quest, allCharacters, allFactions, allThreads, otherQuests, childQuests,
-  onSubmit, onDelete, onOpenQuest, onOpenThread, onClose,
+  quest, allCharacters, allFactions, allLocations, allThreads, otherQuests, childQuests, relatedLore = [],
+  onSubmit, onDelete, onOpenQuest, onOpenThread, onOpenLore, onClose,
 }: QuestModalProps) {
   const isEdit = quest !== null
   const [title, setTitle] = useState(quest?.title ?? '')
@@ -69,6 +74,7 @@ export default function QuestModal({
   const [characters, setCharacters] = useState<string[]>(quest?.characters ?? [])
   const [threads, setThreads] = useState<string[]>(quest?.threads ?? [])
   const [factions, setFactions] = useState<string[]>(quest?.factions ?? [])
+  const [locations, setLocations] = useState<string[]>(quest?.locations ?? [])
   const [description, setDescription] = useState(quest?.description ?? '')
   const [outcome, setOutcome] = useState(quest?.outcome ?? '')
   const [notes, setNotes] = useState(quest?.notes ?? '')
@@ -169,6 +175,7 @@ export default function QuestModal({
         characters: characters.filter(n => allCharacters.some(c => c.name === n)),
         threads: threads.filter(n => allThreads.some(t => t.title === n)),
         factions: factions.filter(n => allFactions.some(f => f.name === n)),
+        locations: locations.filter(n => allLocations.some(l => l.name === n)),
         description,
         outcome,
         notes,
@@ -381,9 +388,10 @@ export default function QuestModal({
         <EntityChecklist legend="Související postavy" options={allCharacters} selected={characters} onToggle={toggleIn(setCharacters)} emptyText="Hra zatím nemá žádné postavy." />
         <EntityChecklist legend="Související dějové nitě" options={threadOptions} selected={threads} onToggle={toggleIn(setThreads)} emptyText="Hra zatím nemá žádné dějové nitě." columns={2} />
         <EntityChecklist legend="Související frakce" options={allFactions} selected={factions} onToggle={toggleIn(setFactions)} emptyText="Hra zatím nemá žádné frakce." />
+        <EntityChecklist legend="Odehrává se v lokacích" options={allLocations} selected={locations} onToggle={toggleIn(setLocations)} emptyText="Hra zatím nemá žádné lokace." />
 
         {/* Dopočítané vazby */}
-        {isEdit && (childQuests.length > 0 || linkedThreads.length > 0) && (
+        {isEdit && (childQuests.length > 0 || linkedThreads.length > 0 || relatedLore.length > 0) && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-[var(--text)]">
             {childQuests.length > 0 && (
               <div className="flex flex-col gap-1 text-left">
@@ -407,6 +415,10 @@ export default function QuestModal({
                 ))}
               </div>
             )}
+            <RelatedEntities
+              heading={<>Lore <span className="normal-case">(vazba se upravuje u záznamu)</span></>}
+              items={relatedLore.map(l => ({ key: l.id, icon: LORE_TYPE_ICONS[l.type], label: l.title, suffix: LORE_KNOWLEDGE_LABELS[l.knowledge], onOpen: onOpenLore ? () => onOpenLore(l) : undefined }))}
+            />
           </div>
         )}
 

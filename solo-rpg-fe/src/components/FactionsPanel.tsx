@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { Faction, FactionStance, FactionStatus, FactionType } from '@solo-rpg/shared'
+import FilterSelect from './FilterSelect'
 import { inputClass } from '../utils/forms'
 import {
   FACTION_STANCES,
@@ -27,22 +28,6 @@ interface FactionsPanelProps {
   onEdit: (faction: Faction) => void
   /** Rychlá změna postoje k družině přímo ze seznamu */
   onStanceChange: (faction: Faction, stance: FactionStance) => void
-}
-
-/** Filtrovací select: prázdná hodnota = vše */
-function FilterSelect<T extends string>({ value, options, labels, all, onChange }: {
-  value: T | ''
-  options: readonly T[]
-  labels: Record<T, string>
-  all: string
-  onChange: (value: T | '') => void
-}) {
-  return (
-    <select value={value} onChange={(e) => onChange(e.target.value as T | '')} className={`${inputClass} py-1 text-xs`}>
-      <option value="">{all}</option>
-      {options.map(o => <option key={o} value={o}>{labels[o]}</option>)}
-    </select>
-  )
 }
 
 function FactionRow({ faction, onEdit, onStanceChange }: {

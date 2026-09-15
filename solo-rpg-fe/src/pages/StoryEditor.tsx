@@ -1,12 +1,18 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Character, CharacterInput, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, Narrator, NarratorInput, Quest, QuestInput, QuestStatus, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
+import type { Character, CharacterInput, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, Quest, QuestInput, QuestStatus, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
+import { OPEN_THREAD_STATUSES, locationPath } from '@solo-rpg/shared'
 import CharacterBar from '../components/CharacterBar'
 import StoryPanel from '../components/StoryPanel'
 import InputArea from '../components/InputArea'
 import PortraitModal from '../components/PortraitModal'
+import FloatingPortrait from '../components/FloatingPortrait'
 import NarratorPickerModal from '../components/NarratorPickerModal'
 import NarratorModal, { type NarratorFormValues } from '../components/NarratorModal'
+import AiSceneModal, { type AiSceneSettings } from '../components/AiSceneModal'
+import RulesModal, { type RulesFormValues } from '../components/RulesModal'
+import SessionModal from '../components/SessionModal'
+import { useSessionTimer } from '../hooks/useSessionTimer'
 import CharacterModal, { type CharacterFormValues } from '../components/CharacterModal'
 import SceneModal, { type SceneFormValues } from '../components/SceneModal'
 import SceneBar from '../components/SceneBar'
@@ -16,11 +22,19 @@ import FactionsPanel, { type DisplayFaction } from '../components/FactionsPanel'
 import FactionModal, { type FactionFormValues, type IncomingRelation } from '../components/FactionModal'
 import QuestsPanel, { type DisplayQuest } from '../components/QuestsPanel'
 import QuestModal from '../components/QuestModal'
+import LocationsPanel, { type DisplayLocation } from '../components/LocationsPanel'
+import LocationModal, { type LocationFormValues } from '../components/LocationModal'
+import LorePanel from '../components/LorePanel'
+import LoreModal from '../components/LoreModal'
 import SidePanel, { type SidePanelTab } from '../components/SidePanel'
 import type { EntityOption } from '../components/EntityChecklist'
 import * as api from '../utils/api'
+import { buildGameMarkdown, downloadTextFile, exportFileName } from '../utils/exportGame'
 import { assetUrl, useAssetVersion } from '../utils/api'
 import { FACTION_TYPE_ICONS } from '../utils/factions'
+import { LOCATION_TYPE_ICONS } from '../utils/locations'
+import { QUEST_TYPE_ICONS } from '../utils/quests'
+import { THREAD_TYPE_ICONS } from '../utils/threads'
 
 /** Postava s obrázkem převedeným na URL použitelnou v <img> */
 interface DisplayCharacter {
@@ -28,6 +42,8 @@ interface DisplayCharacter {
   name: string
   nickname: string
   image: string | null
+  /** Postavu v aktuální scéně hraje AI */
+  ai?: boolean
 }
 
 interface StoryEntry {
@@ -47,6 +63,9 @@ type NarratorModalState = { mode: 'create' } | { mode: 'edit'; id: string }
 type ThreadModalState = { mode: 'create' } | { mode: 'edit'; id: string }
 type FactionModalState = { mode: 'create' } | { mode: 'edit'; id: string }
 type QuestModalState = { mode: 'create' } | { mode: 'edit'; id: string }
+/** Nová lokace může mít předvyplněného rodiče (z detailu rodiče) */
+type LocationModalState = { mode: 'create'; parent?: string | null } | { mode: 'edit'; id: string }
+type LoreModalState = { mode: 'create' } | { mode: 'edit'; id: string }
 
 const SETUP_AUTOSAVE_MS = 600
 
@@ -66,12 +85,25 @@ export default function StoryEditor() {
   const [currentSceneId, setCurrentSceneId] = useState<string | null>(null)
 
   const [selectedPortrait, setSelectedPortrait] = useState<{ image: string; character: string } | null>(null)
+  /** ID postav otevřených v plovoucích oknech (poslední v poli je nahoře) */
+  const [floatingPortraitIds, setFloatingPortraitIds] = useState<string[]>([])
   const [backgroundImage, setBackgroundImage] = useState<ImageRef>(null)
   const [brightBackground, setBrightBackground] = useState(true)
   /** Jméno aktuálního vypravěče; null = hra vypravěče nemá */
   const [narratorName, setNarratorName] = useState<string | null>(null)
   const [showNarratorPicker, setShowNarratorPicker] = useState(false)
   const [narratorModal, setNarratorModal] = useState<NarratorModalState | null>(null)
+  const [showAiModal, setShowAiModal] = useState(false)
+  const [showRulesModal, setShowRulesModal] = useState(false)
+  /** Pravidla pod příběhem (popis systému) a zda se posílají AI – součást nastavení hry */
+  const [rules, setRules] = useState('')
+  const [rulesInAi, setRulesInAi] = useState(false)
+  /** AI právě generuje odpověď (jen jedna najednou) */
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+  const [showSessionModal, setShowSessionModal] = useState(false)
+  /** Stopky herního sezení (persistované v localStorage, běží i se zavřeným dialogem) */
+  const sessionTimer = useSessionTimer(gameName)
   const [characterModal, setCharacterModal] = useState<CharacterModalState | null>(null)
   const [sceneModal, setSceneModal] = useState<SceneModalState | null>(null)
   const [threads, setThreads] = useState<StoryThread[]>([])
@@ -81,6 +113,10 @@ export default function StoryEditor() {
   const [factionModal, setFactionModal] = useState<FactionModalState | null>(null)
   const [quests, setQuests] = useState<Quest[]>([])
   const [questModal, setQuestModal] = useState<QuestModalState | null>(null)
+  const [locations, setLocations] = useState<StoryLocation[]>([])
+  const [locationModal, setLocationModal] = useState<LocationModalState | null>(null)
+  const [lore, setLore] = useState<LoreEntry[]>([])
+  const [loreModal, setLoreModal] = useState<LoreModalState | null>(null)
   const [showShortcutNumbers, setShowShortcutNumbers] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   /** Cesty souborů změněných mimo aplikaci; null = žádné nevyřízené změny */
@@ -103,11 +139,14 @@ export default function StoryEditor() {
     [gameName, assetVersion]
   )
   const currentScene = useMemo(() => scenes.find(s => s.id === currentSceneId) ?? null, [scenes, currentSceneId])
-  // V pásu a při psaní jen postavy aktuální scény (+ dočasní mluvčí, kteří v ní mluví)
+  // V pásu a při psaní jen postavy aktuální scény (+ dočasní mluvčí, kteří v ní mluví); AI postavy označené
   const displayCharacters = useMemo(() => {
     const inScene = new Set(currentScene?.characters ?? [])
+    const aiSet = new Set(currentScene?.ai ? currentScene.aiCharacters : [])
     const speaking = new Set(storyEntries.map(e => e.character?.id))
-    return characters.filter(c => inScene.has(c.name) || (isEphemeral(c) && speaking.has(c.id))).map(toDisplay)
+    return characters
+      .filter(c => inScene.has(c.name) || (isEphemeral(c) && speaking.has(c.id)))
+      .map(c => ({ ...toDisplay(c), ai: aiSet.has(c.name) || undefined, inScene: inScene.has(c.name) }))
   }, [characters, currentScene, storyEntries, toDisplay])
   const displayEntries = useMemo(
     () => storyEntries.map(e => ({
@@ -183,6 +222,50 @@ export default function StoryEditor() {
     () => (sceneModal?.mode === 'edit' ? scenes.find(s => s.id === sceneModal.id) ?? null : null),
     [sceneModal, scenes]
   )
+  // ---- lokace a lore (dopočítané) ----
+  const locationOptions = useMemo<EntityOption[]>(
+    () => [...locations]
+      .sort((a, b) => a.title.localeCompare(b.title, 'cs'))
+      .map(l => ({ name: l.title, label: l.title, image: assetUrl(gameName, l.image, assetVersion), icon: LOCATION_TYPE_ICONS[l.type] })),
+    [locations, gameName, assetVersion]
+  )
+  const questOptions = useMemo<EntityOption[]>(
+    () => quests.map(q => ({ name: q.title, label: q.title, image: null, icon: QUEST_TYPE_ICONS[q.type] })),
+    [quests]
+  )
+  const threadOptions = useMemo<EntityOption[]>(
+    () => threads.map(t => ({ name: t.title, label: t.title, image: null, icon: THREAD_TYPE_ICONS[t.type] })),
+    [threads]
+  )
+  const displayLocations = useMemo<DisplayLocation[]>(
+    () => locations.map(l => ({
+      ...l,
+      imageUrl: assetUrl(gameName, l.image, assetVersion),
+      path: locationPath(l, locations),
+      childCount: locations.filter(c => c.parentLocation === l.title).length,
+      openQuestCount: quests.filter(q => q.locations.includes(l.title) && q.status === 'active').length,
+      openThreadCount: threads.filter(t => t.locations.includes(l.title) && OPEN_THREAD_STATUSES.includes(t.status)).length,
+    })),
+    [locations, quests, threads, gameName, assetVersion]
+  )
+  const editingLocation = useMemo(
+    () => (locationModal?.mode === 'edit' ? locations.find(l => l.id === locationModal.id) ?? null : null),
+    [locationModal, locations]
+  )
+  const locationChildren = useMemo(() => (editingLocation ? locations.filter(l => l.parentLocation === editingLocation.title) : []), [locations, editingLocation])
+  const locationScenes = useMemo(() => (editingLocation ? scenes.filter(s => s.location === editingLocation.title) : []), [scenes, editingLocation])
+  const locationThreads = useMemo(() => (editingLocation ? threads.filter(t => t.locations.includes(editingLocation.title)) : []), [threads, editingLocation])
+  const locationQuests = useMemo(() => (editingLocation ? quests.filter(q => q.locations.includes(editingLocation.title)) : []), [quests, editingLocation])
+  const locationFactions = useMemo(() => (editingLocation ? factions.filter(f => f.locations.includes(editingLocation.title)) : []), [factions, editingLocation])
+  const locationLore = useMemo(() => (editingLocation ? lore.filter(l => l.locations.includes(editingLocation.title)) : []), [lore, editingLocation])
+  const editingLore = useMemo(
+    () => (loreModal?.mode === 'edit' ? lore.find(l => l.id === loreModal.id) ?? null : null),
+    [loreModal, lore]
+  )
+  // Lore odkazující na právě otevřenou nit / quest / frakci
+  const threadLore = useMemo(() => (editingThread ? lore.filter(l => l.threads.includes(editingThread.title)) : []), [lore, editingThread])
+  const questLore = useMemo(() => (editingQuest ? lore.filter(l => l.quests.includes(editingQuest.title)) : []), [lore, editingQuest])
+  const factionLore = useMemo(() => (editingFaction ? lore.filter(l => l.factions.includes(editingFaction.title)) : []), [lore, editingFaction])
   // Obrázek scény má přednost před pozadím hry
   const displayBackground = assetUrl(gameName, currentScene?.image ?? backgroundImage, assetVersion)
 
@@ -227,7 +310,9 @@ export default function StoryEditor() {
     setBrightBackground(setup.brightBackground)
     setNarrators(setup.narrators)
     setNarratorName(setup.narrator)
-    const settings: GameSettings = { backgroundImage: setup.backgroundImage, brightBackground: setup.brightBackground, narrator: setup.narrator }
+    setRules(setup.rules)
+    setRulesInAi(setup.rulesInAi)
+    const settings: GameSettings = { backgroundImage: setup.backgroundImage, brightBackground: setup.brightBackground, narrator: setup.narrator, rules: setup.rules, rulesInAi: setup.rulesInAi }
     lastSavedSetupRef.current = JSON.stringify(settings)
   }, [])
 
@@ -250,6 +335,8 @@ export default function StoryEditor() {
         setThreads(detail.threads)
         setFactions(detail.factions)
         setQuests(detail.quests)
+        setLocations(detail.locations)
+        setLore(detail.lore)
         setCurrentSceneId(scene?.id ?? null)
         // Hra bez scén → nejdřív vytvořit první scénu
         if (!scene) setSceneModal({ mode: 'create' })
@@ -265,8 +352,8 @@ export default function StoryEditor() {
   }, [gameName, resolveEntries, applySetup])
 
   const currentSettings = useMemo<GameSettings>(
-    () => ({ backgroundImage, brightBackground, narrator: narratorName }),
-    [backgroundImage, brightBackground, narratorName]
+    () => ({ backgroundImage, brightBackground, narrator: narratorName, rules, rulesInAi }),
+    [backgroundImage, brightBackground, narratorName, rules, rulesInAi]
   )
 
   // Automatické ukládání nastavení (pozadí, aktuální vypravěč) do vaultu – postavy a vypravěči mají vlastní endpointy
@@ -292,9 +379,9 @@ export default function StoryEditor() {
       markdown: e.markdown,
     }))
 
-  const persistStory = (entries: StoryEntry[]) => {
-    if (!currentSceneId) return
-    api.saveSceneEntries(gameName, currentSceneId, toApiEntries(entries))
+  const persistStory = (entries: StoryEntry[]): Promise<void> => {
+    if (!currentSceneId) return Promise.resolve()
+    return api.saveSceneEntries(gameName, currentSceneId, toApiEntries(entries))
       .catch(error => console.error('Uložení scény selhalo:', error))
   }
 
@@ -321,6 +408,19 @@ export default function StoryEditor() {
     setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))
   }
 
+  /** Odebere postavu jen z aktuální scény – postava, její repliky i vše ostatní ve hře zůstávají */
+  const removeCharacterFromCurrentScene = async (characterId: string) => {
+    const scene = currentScene
+    const character = characters.find(c => c.id === characterId)
+    if (!scene || !character || !scene.characters.includes(character.name)) return
+    const saved = await api.updateScene(gameName, scene.id, {
+      title: scene.title,
+      characters: scene.characters.filter(n => n !== character.name),
+      aiCharacters: scene.aiCharacters.filter(n => n !== character.name),
+    })
+    setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))
+  }
+
   /** Submit dialogu postavy: vytvoří/aktualizuje soubor postavy a uloží portrét */
   const handleCharacterSubmit = async (values: CharacterFormValues) => {
     const editing = editingCharacter
@@ -343,7 +443,11 @@ export default function StoryEditor() {
       if (!persisted) persistStory(updatedEntries)
       // BE přepsal jméno i v seznamech postav scén → promítnout do stavu
       if (persisted && editing.name !== saved.name) {
-        setScenes(prev => prev.map(s => ({ ...s, characters: s.characters.map(n => (n === editing.name ? saved.name : n)) })))
+        setScenes(prev => prev.map(s => ({
+          ...s,
+          characters: s.characters.map(n => (n === editing.name ? saved.name : n)),
+          aiCharacters: s.aiCharacters.map(n => (n === editing.name ? saved.name : n)),
+        })))
         setThreads(prev => prev.map(t => ({ ...t, characters: t.characters.map(n => (n === editing.name ? saved.name : n)) })))
         setFactions(prev => prev.map(f => ({
           ...f,
@@ -355,6 +459,7 @@ export default function StoryEditor() {
           questGiver: q.questGiver === editing.name ? saved.name : q.questGiver,
           characters: q.characters.map(n => (n === editing.name ? saved.name : n)),
         })))
+        setLore(prev => prev.map(l => ({ ...l, characters: l.characters.map(n => (n === editing.name ? saved.name : n)) })))
       }
     } else {
       setCharacters(prev => [...prev, saved])
@@ -380,7 +485,11 @@ export default function StoryEditor() {
     if (!character) return
     if (!isEphemeral(character)) await api.deleteCharacter(gameName, characterId)
     setCharacters(prev => prev.filter(c => c.id !== characterId))
-    setScenes(prev => prev.map(s => ({ ...s, characters: s.characters.filter(n => n !== character.name) })))
+    setScenes(prev => prev.map(s => ({
+      ...s,
+      characters: s.characters.filter(n => n !== character.name),
+      aiCharacters: s.aiCharacters.filter(n => n !== character.name),
+    })))
     setThreads(prev => prev.map(t => ({ ...t, characters: t.characters.filter(n => n !== character.name) })))
     setFactions(prev => prev.map(f => ({
       ...f,
@@ -392,6 +501,7 @@ export default function StoryEditor() {
       questGiver: q.questGiver === character.name ? null : q.questGiver,
       characters: q.characters.filter(n => n !== character.name),
     })))
+    setLore(prev => prev.map(l => ({ ...l, characters: l.characters.filter(n => n !== character.name) })))
   }
 
   const handleCharacterImageDrop = async (characterId: string, file: File) => {
@@ -416,6 +526,34 @@ export default function StoryEditor() {
     }
   }
 
+  // Aktuální scéna a postavy v ref – odpověď AI přijde po dlouhé době a nesmí se připsat do jiné, mezitím otevřené scény
+  const currentSceneIdRef = useRef<string | null>(null)
+  const charactersRef = useRef<Character[]>(characters)
+  useEffect(() => {
+    currentSceneIdRef.current = currentSceneId
+    charactersRef.current = characters
+  }, [currentSceneId, characters])
+
+  /** Nechá AI vypravěče odpovědět ve scéně; nové záznamy BE už uložil, tady je jen přidáme do stavu */
+  const runAi = useCallback(async (sceneId: string): Promise<void> => {
+    if (aiBusy) return
+    setAiBusy(true)
+    setAiError(null)
+    try {
+      const result = await api.generateAiReply(gameName, sceneId)
+      if (currentSceneIdRef.current !== sceneId) return
+      const resolved = resolveEntries(result.entries, charactersRef.current, narrators)
+      setCharacters(resolved.characters)
+      setStoryEntries(prev => [...prev, ...resolved.entries])
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Odpověď AI selhala.'
+      setAiError(message)
+      throw error
+    } finally {
+      setAiBusy(false)
+    }
+  }, [aiBusy, gameName, narrators, resolveEntries])
+
   const handleAddEntry = (text: string, selectedCharacterId: string | null, markdown?: boolean) => {
     const selectedCharacter = selectedCharacterId
       ? characters.find(c => c.id === selectedCharacterId)
@@ -434,7 +572,12 @@ export default function StoryEditor() {
 
     const newEntries = [...storyEntries, newEntry]
     setStoryEntries(newEntries)
-    persistStory(newEntries)
+    const saved = persistStory(newEntries)
+    // V AI módu odpoví po každém záznamu hráče aktuální vypravěč (až po uložení, BE čte scénu z vaultu)
+    if (currentScene?.ai && currentSceneId) {
+      const sceneId = currentSceneId
+      void saved.then(() => runAi(sceneId)).catch(() => { /* chyba je v aiError */ })
+    }
   }
 
   const handleCharacterDelete = (characterId: string) => {
@@ -459,10 +602,23 @@ export default function StoryEditor() {
     setSelectedPortrait({ image, character: characterName })
   }
 
+  /** Otevře (nebo přenese nahoru) plovoucí okno s portrétem postavy */
+  const handlePortraitFloat = (characterId: string) => {
+    setFloatingPortraitIds(prev => [...prev.filter(id => id !== characterId), characterId])
+  }
+  const floatingPortraits = useMemo(
+    () => floatingPortraitIds
+      .map(id => characters.find(c => c.id === id))
+      .filter((c): c is Character => Boolean(c && c.image))
+      .map(toDisplay)
+      .filter((c): c is typeof c & { image: string } => c.image !== null),
+    [floatingPortraitIds, characters, toDisplay]
+  )
+
   /** Submit dialogu vypravěče: vytvoří/aktualizuje soubor vypravěče a uloží portrét pod jeho jménem */
   const handleNarratorSubmit = async (values: NarratorFormValues) => {
     const editing = editingNarrator
-    const base: NarratorInput = { name: values.name, description: values.description }
+    const base: NarratorInput = { name: values.name, description: values.description, aiPrompt: values.aiPrompt }
 
     // Nejdřív vypravěč (kontrola duplicitního jména), teprve pak portrét pod jeho jménem
     let saved = editing
@@ -507,11 +663,56 @@ export default function StoryEditor() {
     setShowNarratorPicker(false)
   }
 
+  /** Uloží nastavení AI aktuální scény (zapnuto + postavy hrané AI) do frontmatteru scény */
+  const handleAiSettingsSave = async (settings: AiSceneSettings) => {
+    if (!currentScene) return
+    const saved = await api.updateScene(gameName, currentScene.id, { title: currentScene.title, ai: settings.enabled, aiCharacters: settings.aiCharacters, aiPrompt: settings.aiPrompt })
+    setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))
+  }
+
+  /** Uloží pravidla pod příběhem ihned a zapíše je i do stavu, aby autosave nastavení nic nepřepsal */
+  const handleRulesSave = async (values: RulesFormValues) => {
+    const next: GameSettings = { ...currentSettings, rules: values.rules, rulesInAi: values.rulesInAi }
+    await api.saveSetup(gameName, next)
+    lastSavedSetupRef.current = JSON.stringify(next)
+    setRules(values.rules)
+    setRulesInAi(values.rulesInAi)
+  }
+
   const handleExportMarkdown = () =>
     storyEntries
       // U víceřádkového markdownu začíná text na novém řádku pod jménem mluvčího
       .map(entry => `**${entry.character ? entry.character.nickname : entry.narrator?.name ?? 'Vypravěč'}**:${entry.markdown ? '\n' : ' '}${entry.text}`)
       .join('\n\n')
+
+  /** Export celé hry do jednoho textového .md souboru (čerstvá data z vaultu včetně záznamů všech scén) */
+  const handleExportGame = async (): Promise<boolean> => {
+    try {
+      const detail = await api.getGame(gameName)
+      const entriesByScene: Record<string, ApiStoryEntry[]> = {}
+      for (const scene of detail.scenes) {
+        entriesByScene[scene.id] = await api.getSceneEntries(gameName, scene.id)
+      }
+      const markdown = buildGameMarkdown({
+        gameName: detail.meta.name,
+        settings: { narrator: detail.setup.narrator, rules: detail.setup.rules },
+        characters: detail.setup.characters,
+        narrators: detail.setup.narrators,
+        scenes: detail.scenes,
+        entriesByScene,
+        threads: detail.threads,
+        factions: detail.factions,
+        quests: detail.quests,
+        locations: detail.locations,
+        lore: detail.lore,
+      })
+      downloadTextFile(exportFileName(detail.meta.name), markdown)
+      return true
+    } catch (error) {
+      console.error('Export hry selhal:', error)
+      return false
+    }
+  }
 
   /** Znovu načte celou hru z vaultu (nastavení, postavy, scény i záznamy aktuální scény) – po změnách v Obsidianu */
   const reloadFromVault = async (): Promise<boolean> => {
@@ -526,6 +727,8 @@ export default function StoryEditor() {
       setThreads(detail.threads)
       setFactions(detail.factions)
       setQuests(detail.quests)
+      setLocations(detail.locations)
+      setLore(detail.lore)
       setCurrentSceneId(scene?.id ?? null)
       applySetup({ ...detail.setup, characters: resolved.characters })
       setVaultChanges(null)
@@ -585,7 +788,7 @@ export default function StoryEditor() {
   /** Submit dialogu scény: vytvoří/aktualizuje soubor scény a uloží její obrázek pod jejím názvem */
   const handleSceneSubmit = async (values: SceneFormValues) => {
     const editing = editingScene
-    const base: SceneInput = { title: values.title, description: values.description, characters: values.characters }
+    const base: SceneInput = { title: values.title, description: values.description, summary: values.summary, characters: values.characters, location: values.location }
 
     // Nejdřív scéna (kontrola duplicitního názvu), teprve pak obrázek pojmenovaný podle ní
     let saved = editing
@@ -635,9 +838,10 @@ export default function StoryEditor() {
       ? await api.updateThread(gameName, editing.id, input)
       : await api.createThread(gameName, input)
     upsertThread(saved)
-    // BE přepsal název nitě v questech → promítnout do stavu
+    // BE přepsal název nitě v questech a lore → promítnout do stavu
     if (editing && editing.title !== saved.title) {
       setQuests(prev => prev.map(q => ({ ...q, threads: q.threads.map(n => (n === editing.title ? saved.title : n)) })))
+      setLore(prev => prev.map(l => ({ ...l, threads: l.threads.map(n => (n === editing.title ? saved.title : n)) })))
     }
   }
 
@@ -645,7 +849,10 @@ export default function StoryEditor() {
     const thread = threads.find(t => t.id === threadId)
     await api.deleteThread(gameName, threadId)
     setThreads(prev => prev.filter(t => t.id !== threadId))
-    if (thread) setQuests(prev => prev.map(q => ({ ...q, threads: q.threads.filter(n => n !== thread.title) })))
+    if (thread) {
+      setQuests(prev => prev.map(q => ({ ...q, threads: q.threads.filter(n => n !== thread.title) })))
+      setLore(prev => prev.map(l => ({ ...l, threads: l.threads.filter(n => n !== thread.title) })))
+    }
   }
 
   /** Částečná úprava nitě přímo ze seznamu (stav, hodiny) – posílá se celá nit, BE ukládá soubor jako celek */
@@ -681,6 +888,7 @@ export default function StoryEditor() {
     })))
     setThreads(prev => prev.map(t => ({ ...t, factions: t.factions.map(n => (n === oldTitle ? newTitle : n)) })))
     setQuests(prev => prev.map(q => ({ ...q, factions: q.factions.map(n => (n === oldTitle ? newTitle : n)) })))
+    setLore(prev => prev.map(l => ({ ...l, factions: l.factions.map(n => (n === oldTitle ? newTitle : n)) })))
   }
 
   const handleFactionSubmit = async (values: FactionFormValues) => {
@@ -694,6 +902,7 @@ export default function StoryEditor() {
       parentFaction: values.parentFaction,
       goals: values.goals,
       characters: values.characters,
+      locations: values.locations,
       relations: values.relations,
       description: values.description,
       secrets: values.secrets,
@@ -722,6 +931,7 @@ export default function StoryEditor() {
       } : f)))
     if (faction) setThreads(prev => prev.map(t => ({ ...t, factions: t.factions.filter(n => n !== faction.title) })))
     if (faction) setQuests(prev => prev.map(q => ({ ...q, factions: q.factions.filter(n => n !== faction.title) })))
+    if (faction) setLore(prev => prev.map(l => ({ ...l, factions: l.factions.filter(n => n !== faction.title) })))
   }
 
   const handleFactionStanceChange = async (faction: Faction, stance: FactionStance) => {
@@ -733,10 +943,14 @@ export default function StoryEditor() {
     }
   }
 
-  /** Z detailu frakce / questu přeskočit na jinou entitu (zavře aktuální dialog) */
-  const openFaction = (faction: Faction) => { setThreadModal(null); setQuestModal(null); setFactionModal({ mode: 'edit', id: faction.id }) }
-  const openThread = (thread: StoryThread) => { setFactionModal(null); setQuestModal(null); setThreadModal({ mode: 'edit', id: thread.id }) }
-  const openQuest = (quest: Quest) => { setFactionModal(null); setThreadModal(null); setQuestModal({ mode: 'edit', id: quest.id }) }
+  /** Z detailu entity přeskočit na jinou entitu (zavře aktuální dialog) */
+  const closeEntityModals = () => { setThreadModal(null); setQuestModal(null); setFactionModal(null); setLocationModal(null); setLoreModal(null); setSceneModal(null) }
+  const openFaction = (faction: Faction) => { closeEntityModals(); setFactionModal({ mode: 'edit', id: faction.id }) }
+  const openThread = (thread: StoryThread) => { closeEntityModals(); setThreadModal({ mode: 'edit', id: thread.id }) }
+  const openQuest = (quest: Quest) => { closeEntityModals(); setQuestModal({ mode: 'edit', id: quest.id }) }
+  const openLocation = (location: StoryLocation) => { closeEntityModals(); setLocationModal({ mode: 'edit', id: location.id }) }
+  const openLore = (entry: LoreEntry) => { closeEntityModals(); setLoreModal({ mode: 'edit', id: entry.id }) }
+  const openScene = (scene: SceneMeta) => { closeEntityModals(); setSceneModal({ mode: 'edit', id: scene.id }) }
 
   // ---------- questy ----------
 
@@ -749,9 +963,10 @@ export default function StoryEditor() {
       ? await api.updateQuest(gameName, editing.id, input)
       : await api.createQuest(gameName, input)
     upsertQuest(saved)
-    // BE přepsal název v nadřazených vazbách ostatních questů → promítnout do stavu
+    // BE přepsal název v nadřazených vazbách ostatních questů a v lore → promítnout do stavu
     if (editing && editing.title !== saved.title) {
       setQuests(prev => prev.map(q => (q.parentQuest === editing.title ? { ...q, parentQuest: saved.title } : q)))
+      setLore(prev => prev.map(l => ({ ...l, quests: l.quests.map(n => (n === editing.title ? saved.title : n)) })))
     }
   }
 
@@ -761,6 +976,7 @@ export default function StoryEditor() {
     setQuests(prev => prev
       .filter(q => q.id !== questId)
       .map(q => (quest && q.parentQuest === quest.title ? { ...q, parentQuest: null } : q)))
+    if (quest) setLore(prev => prev.map(l => ({ ...l, quests: l.quests.filter(n => n !== quest.title) })))
   }
 
   /** Rychlá změna stavu ze seznamu – posílá se celý quest, BE ukládá soubor jako celek */
@@ -772,6 +988,99 @@ export default function StoryEditor() {
       console.error('Úprava questu selhala:', error)
     }
   }
+
+  // ---------- lokace ----------
+
+  const upsertLocation = (saved: StoryLocation) =>
+    setLocations(prev => (prev.some(l => l.id === saved.id) ? prev.map(l => (l.id === saved.id ? saved : l)) : [...prev, saved]))
+
+  /** Po přejmenování lokace promítnout nový název do všech vazeb (BE to udělal v souborech) */
+  const renameLocationLocally = (oldTitle: string, newTitle: string) => {
+    const rename = (n: string) => (n === oldTitle ? newTitle : n)
+    setLocations(prev => prev.map(l => (l.parentLocation === oldTitle ? { ...l, parentLocation: newTitle } : l)))
+    setScenes(prev => prev.map(s => (s.location === oldTitle ? { ...s, location: newTitle } : s)))
+    setThreads(prev => prev.map(t => ({ ...t, locations: t.locations.map(rename) })))
+    setQuests(prev => prev.map(q => ({ ...q, locations: q.locations.map(rename) })))
+    setFactions(prev => prev.map(f => ({ ...f, locations: f.locations.map(rename) })))
+    setLore(prev => prev.map(l => ({ ...l, locations: l.locations.map(rename) })))
+  }
+
+  const handleLocationSubmit = async (values: LocationFormValues) => {
+    const editing = editingLocation
+    const base: LocationInput = {
+      title: values.title,
+      type: values.type,
+      status: values.status,
+      parentLocation: values.parentLocation,
+      description: values.description,
+      secrets: values.secrets,
+    }
+    // Nejdřív lokace (kontrola duplicitního názvu a cyklu v hierarchii), teprve pak obrázek pojmenovaný podle ní
+    let saved = editing
+      ? await api.updateLocation(gameName, editing.id, { ...base, image: values.image === null ? null : undefined })
+      : await api.createLocation(gameName, base)
+    if (values.image) {
+      const ref = await api.storeImage(gameName, 'location', values.image, saved.title)
+      saved = await api.updateLocation(gameName, saved.id, { ...base, image: ref })
+    }
+    upsertLocation(saved)
+    if (editing && editing.title !== saved.title) renameLocationLocally(editing.title, saved.title)
+  }
+
+  const deleteLocation = async (locationId: string) => {
+    const location = locations.find(l => l.id === locationId)
+    await api.deleteLocation(gameName, locationId)
+    setLocations(prev => prev
+      .filter(l => l.id !== locationId)
+      .map(l => (location && l.parentLocation === location.title ? { ...l, parentLocation: null } : l)))
+    if (!location) return
+    const without = (names: string[]) => names.filter(n => n !== location.title)
+    setScenes(prev => prev.map(s => (s.location === location.title ? { ...s, location: null } : s)))
+    setThreads(prev => prev.map(t => ({ ...t, locations: without(t.locations) })))
+    setQuests(prev => prev.map(q => ({ ...q, locations: without(q.locations) })))
+    setFactions(prev => prev.map(f => ({ ...f, locations: without(f.locations) })))
+    setLore(prev => prev.map(l => ({ ...l, locations: without(l.locations) })))
+  }
+
+  /** Rychlá změna stavu ze seznamu – posílá se celá lokace, BE ukládá soubor jako celek */
+  const handleLocationStatusChange = async (location: StoryLocation, status: LocationStatus) => {
+    const { id: _id, createdAt: _c, updatedAt: _u, image: _i, ...rest } = location
+    try {
+      upsertLocation(await api.updateLocation(gameName, location.id, { ...rest, status }))
+    } catch (error) {
+      console.error('Úprava lokace selhala:', error)
+    }
+  }
+
+  // ---------- lore ----------
+
+  const upsertLore = (saved: LoreEntry) =>
+    setLore(prev => (prev.some(l => l.id === saved.id) ? prev.map(l => (l.id === saved.id ? saved : l)) : [saved, ...prev]))
+
+  const handleLoreSubmit = async (input: LoreInput) => {
+    const editing = editingLore
+    const saved = editing
+      ? await api.updateLore(gameName, editing.id, input)
+      : await api.createLore(gameName, input)
+    upsertLore(saved)
+  }
+
+  const deleteLore = async (loreId: string) => {
+    await api.deleteLore(gameName, loreId)
+    setLore(prev => prev.filter(l => l.id !== loreId))
+  }
+
+  /** Rychlá změna osy znalost / pravdivost ze seznamu */
+  const patchLore = async (entry: LoreEntry, patch: Partial<LoreInput>) => {
+    const { id: _id, createdAt: _c, updatedAt: _u, ...rest } = entry
+    try {
+      upsertLore(await api.updateLore(gameName, entry.id, { ...rest, ...patch }))
+    } catch (error) {
+      console.error('Úprava záznamu lore selhala:', error)
+    }
+  }
+  const handleLoreKnowledgeChange = (entry: LoreEntry, knowledge: LoreKnowledge) => void patchLore(entry, { knowledge })
+  const handleLoreTruthChange = (entry: LoreEntry, truth: LoreTruth) => void patchLore(entry, { truth })
 
   return (
     <div className="flex flex-col h-screen bg-black relative">
@@ -791,20 +1100,38 @@ export default function StoryEditor() {
         showShortcutNumbers={showShortcutNumbers}
         onAddCharacter={handleAddCharacter}
         onCharacterClick={(id) => setCharacterModal({ mode: 'edit', id })}
+        onPortraitClick={handlePortraitClick}
+        onPortraitFloat={handlePortraitFloat}
         onCharacterImageDrop={handleCharacterImageDrop}
+        onCharacterRemoveFromScene={(id) => void removeCharacterFromCurrentScene(id).catch(error => console.error('Odebrání postavy ze scény selhalo:', error))}
         onCharacterDelete={handleCharacterDelete}
         onExportMarkdown={handleExportMarkdown}
+        onExportGame={handleExportGame}
         onRenameGame={handleRenameGame}
         onSelectNarrator={() => setShowNarratorPicker(true)}
+        onOpenAi={() => { if (currentScene) setShowAiModal(true) }}
+        onOpenRules={() => setShowRulesModal(true)}
+        rulesInAi={rulesInAi}
+        aiEnabled={currentScene?.ai ?? false}
+        aiBusy={aiBusy}
+        onOpenSession={() => setShowSessionModal(true)}
+        sessionRunning={sessionTimer.running}
+        sessionPaused={!sessionTimer.running && sessionTimer.elapsed > 0}
         onToggleThreads={() => setSidePanel(p => (p === 'threads' ? null : 'threads'))}
         onToggleFactions={() => setSidePanel(p => (p === 'factions' ? null : 'factions'))}
         onToggleQuests={() => setSidePanel(p => (p === 'quests' ? null : 'quests'))}
+        onToggleLocations={() => setSidePanel(p => (p === 'locations' ? null : 'locations'))}
+        onToggleLore={() => setSidePanel(p => (p === 'lore' ? null : 'lore'))}
         threadsOpen={sidePanel === 'threads'}
         factionsOpen={sidePanel === 'factions'}
         questsOpen={sidePanel === 'quests'}
+        locationsOpen={sidePanel === 'locations'}
+        loreOpen={sidePanel === 'lore'}
         openThreadCount={openThreadCount}
         activeFactionCount={activeFactionCount}
         activeQuestCount={activeQuestCount}
+        locationCount={locations.length}
+        loreCount={lore.length}
         onClearStory={handleClearStory}
         onShowBackground={() => {
           if (displayBackground) {
@@ -858,8 +1185,34 @@ export default function StoryEditor() {
       {/* Panel příběhu */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Obsah */}
-        <div className="relative w-full flex flex-col">
+        <div className="relative flex-1 min-w-0 flex flex-col">
           <StoryPanel entries={displayEntries} onPortraitClick={handlePortraitClick} onEntryDelete={handleEntryDelete} onEntryEdit={handleEntryEdit} darkenEntries={brightBackground} />
+          {/* Stav AI vypravěče: generování / chyba */}
+          {(aiBusy || aiError) && (
+            <div
+              className={`flex-shrink-0 mx-4 mb-2 px-4 py-2 rounded-lg border text-sm flex items-center gap-3 ${
+                aiError ? 'bg-red-900/70 border-red-500 text-red-100' : 'bg-cyan-950/80 border-cyan-500 text-cyan-100'
+              }`}
+            >
+              <span className={`flex-1 ${aiBusy ? 'animate-pulse' : ''}`}>
+                {aiBusy ? `🤖 ${currentNarrator?.name ?? 'Vypravěč'} píše…` : `🤖 AI: ${aiError}`}
+              </span>
+              {aiError && currentSceneId && (
+                <button
+                  type="button"
+                  onClick={() => void runAi(currentSceneId).catch(() => { /* chyba je v aiError */ })}
+                  className="px-3 py-1 rounded-md border border-red-300/60 hover:border-red-200 transition-colors"
+                >
+                  Zkusit znovu
+                </button>
+              )}
+              {aiError && (
+                <button type="button" onClick={() => setAiError(null)} title="Skrýt" className="px-2 py-1 rounded-md border border-red-300/60 hover:border-red-200 transition-colors">
+                  ✕
+                </button>
+              )}
+            </div>
+          )}
           <InputArea
             characters={displayCharacters}
             showShortcutNumbers={showShortcutNumbers}
@@ -871,9 +1224,14 @@ export default function StoryEditor() {
           />
         </div>
 
-        {/* Postranní panel kampaně: dějové nitě | frakce | questy */}
+        {/* Postranní panel kampaně: dějové nitě | frakce | questy | lokace | lore */}
         {sidePanel && (
-          <SidePanel tab={sidePanel} onTabChange={setSidePanel} counts={{ threads: openThreadCount, factions: activeFactionCount, quests: activeQuestCount }} onClose={() => setSidePanel(null)}>
+          <SidePanel
+            tab={sidePanel}
+            onTabChange={setSidePanel}
+            counts={{ threads: openThreadCount, factions: activeFactionCount, quests: activeQuestCount, locations: locations.length, lore: lore.length }}
+            onClose={() => setSidePanel(null)}
+          >
             {sidePanel === 'threads' ? (
               <ThreadsPanel
                 threads={threads}
@@ -889,7 +1247,7 @@ export default function StoryEditor() {
                 onEdit={(f) => setFactionModal({ mode: 'edit', id: f.id })}
                 onStanceChange={handleFactionStanceChange}
               />
-            ) : (
+            ) : sidePanel === 'quests' ? (
               <QuestsPanel
                 quests={displayQuests}
                 characterOptions={characterOptions}
@@ -897,10 +1255,39 @@ export default function StoryEditor() {
                 onEdit={(q) => setQuestModal({ mode: 'edit', id: q.id })}
                 onStatusChange={handleQuestStatusChange}
               />
+            ) : sidePanel === 'locations' ? (
+              <LocationsPanel
+                locations={displayLocations}
+                onCreate={() => setLocationModal({ mode: 'create' })}
+                onEdit={(l) => setLocationModal({ mode: 'edit', id: l.id })}
+                onStatusChange={handleLocationStatusChange}
+              />
+            ) : (
+              <LorePanel
+                lore={lore}
+                onCreate={() => setLoreModal({ mode: 'create' })}
+                onEdit={(l) => setLoreModal({ mode: 'edit', id: l.id })}
+                onKnowledgeChange={handleLoreKnowledgeChange}
+                onTruthChange={handleLoreTruthChange}
+              />
             )}
           </SidePanel>
         )}
       </div>
+
+      {/* Plovoucí okna s portréty */}
+      {floatingPortraits.map((c, i) => (
+        <FloatingPortrait
+          key={c.id}
+          image={c.image}
+          name={c.name}
+          index={i}
+          active={i === floatingPortraits.length - 1}
+          onFocus={() => setFloatingPortraitIds(prev => (prev[prev.length - 1] === c.id ? prev : [...prev.filter(id => id !== c.id), c.id]))}
+          onClose={() => setFloatingPortraitIds(prev => prev.filter(id => id !== c.id))}
+          onFullscreen={() => handlePortraitClick(c.image, c.name)}
+        />
+      ))}
 
       {/* Portrait Modal */}
       {selectedPortrait && (
@@ -909,6 +1296,11 @@ export default function StoryEditor() {
           character={selectedPortrait.character}
           onClose={() => setSelectedPortrait(null)}
         />
+      )}
+
+      {/* Herní sezení: stopky, hodnocení, historie */}
+      {showSessionModal && (
+        <SessionModal game={gameName} timer={sessionTimer} onClose={() => setShowSessionModal(false)} />
       )}
 
       {/* Výběr aktuálního vypravěče */}
@@ -935,6 +1327,33 @@ export default function StoryEditor() {
         />
       )}
 
+      {/* Pravidla pod příběhem – uloží se hned (ne přes debounce autosave), aby zavření dialogu potvrdilo zápis */}
+      {showRulesModal && (
+        <RulesModal
+          rules={rules}
+          rulesInAi={rulesInAi}
+          onSubmit={handleRulesSave}
+          onClose={() => setShowRulesModal(false)}
+        />
+      )}
+
+      {/* AI vypravěč pro aktuální scénu */}
+      {showAiModal && currentScene && (
+        <AiSceneModal
+          key={currentScene.id}
+          sceneTitle={currentScene.title}
+          characters={displayCharacters.filter(c => !c.id.startsWith('tmp-')).map(c => ({ name: c.name, nickname: c.nickname, image: c.image }))}
+          settings={{ enabled: currentScene.ai, aiCharacters: currentScene.aiCharacters, aiPrompt: currentScene.aiPrompt }}
+          narrator={currentNarrator ? { name: currentNarrator.name, image: assetUrl(gameName, currentNarrator.image, assetVersion), hasPrompt: currentNarrator.aiPrompt.trim().length > 0 } : null}
+          onSave={handleAiSettingsSave}
+          onSelectNarrator={() => setShowNarratorPicker(true)}
+          onEditNarrator={() => { if (currentNarrator) setNarratorModal({ mode: 'edit', id: currentNarrator.id }) }}
+          onGenerate={() => runAi(currentScene.id)}
+          busy={aiBusy}
+          onClose={() => setShowAiModal(false)}
+        />
+      )}
+
       {/* Vytvoření / úprava postavy */}
       {characterModal && (
         <CharacterModal
@@ -953,10 +1372,13 @@ export default function StoryEditor() {
           thread={editingThread}
           allCharacters={characterOptions}
           allFactions={factionOptions}
+          allLocations={locationOptions}
           sceneTitles={scenes.map(s => s.title)}
           defaultScene={currentScene?.title ?? null}
           relatedQuests={threadQuests}
+          relatedLore={threadLore}
           onOpenQuest={openQuest}
+          onOpenLore={openLore}
           onSubmit={handleThreadSubmit}
           onDelete={editingThread ? () => deleteThread(editingThread.id) : undefined}
           onClose={() => setThreadModal(null)}
@@ -969,13 +1391,16 @@ export default function StoryEditor() {
           quest={editingQuest}
           allCharacters={characterOptions}
           allFactions={factionOptions}
+          allLocations={locationOptions}
           allThreads={threads}
           otherQuests={quests.filter(q => q.id !== editingQuest?.id)}
           childQuests={questChildren}
+          relatedLore={questLore}
           onSubmit={handleQuestSubmit}
           onDelete={editingQuest ? () => deleteQuest(editingQuest.id) : undefined}
           onOpenQuest={openQuest}
           onOpenThread={openThread}
+          onOpenLore={openLore}
           onClose={() => setQuestModal(null)}
         />
       )}
@@ -986,15 +1411,59 @@ export default function StoryEditor() {
           faction={editingFaction}
           emblem={editingFaction ? assetUrl(gameName, editingFaction.emblem, assetVersion) : null}
           allCharacters={characterOptions}
+          allLocations={locationOptions}
           otherFactions={factions.filter(f => f.id !== editingFaction?.id)}
           subfactions={factionSubfactions}
           incomingRelations={factionIncomingRelations}
           relatedThreads={factionThreads}
+          relatedLore={factionLore}
           onSubmit={handleFactionSubmit}
           onDelete={editingFaction ? () => deleteFaction(editingFaction.id) : undefined}
           onOpenFaction={openFaction}
           onOpenThread={openThread}
+          onOpenLore={openLore}
           onClose={() => setFactionModal(null)}
+        />
+      )}
+      {/* Vytvoření / úprava lokace */}
+      {locationModal && (
+        <LocationModal
+          key={locationModal.mode === 'edit' ? locationModal.id : 'new'}
+          location={editingLocation}
+          image={editingLocation ? assetUrl(gameName, editingLocation.image, assetVersion) : null}
+          defaultParent={locationModal.mode === 'create' ? locationModal.parent ?? null : null}
+          otherLocations={locations.filter(l => l.id !== editingLocation?.id)}
+          childLocations={locationChildren}
+          relatedScenes={locationScenes}
+          relatedThreads={locationThreads}
+          relatedQuests={locationQuests}
+          relatedFactions={locationFactions}
+          relatedLore={locationLore}
+          onSubmit={handleLocationSubmit}
+          onDelete={editingLocation ? () => deleteLocation(editingLocation.id) : undefined}
+          onCreateChild={editingLocation ? () => setLocationModal({ mode: 'create', parent: editingLocation.title }) : undefined}
+          onOpenLocation={openLocation}
+          onOpenScene={openScene}
+          onOpenThread={openThread}
+          onOpenQuest={openQuest}
+          onOpenFaction={openFaction}
+          onOpenLore={openLore}
+          onClose={() => setLocationModal(null)}
+        />
+      )}
+      {/* Vytvoření / úprava záznamu lore */}
+      {loreModal && (
+        <LoreModal
+          key={loreModal.mode === 'edit' ? loreModal.id : 'new'}
+          entry={editingLore}
+          allCharacters={characterOptions}
+          allLocations={locationOptions}
+          allFactions={factionOptions}
+          allQuests={questOptions}
+          allThreads={threadOptions}
+          onSubmit={handleLoreSubmit}
+          onDelete={editingLore ? () => deleteLore(editingLore.id) : undefined}
+          onClose={() => setLoreModal(null)}
         />
       )}
       {/* Vytvoření / úprava scény; bez scén je dialog povinný */}
@@ -1005,10 +1474,13 @@ export default function StoryEditor() {
           image={editingScene ? assetUrl(gameName, editingScene.image, assetVersion) : null}
           defaultTitle={`Scéna ${scenes.length + 1}`}
           defaultCharacters={scenes.length > 0 ? scenes[scenes.length - 1].characters : sceneCharacterOptions.map(c => c.name)}
+          defaultLocation={scenes.length > 0 ? scenes[scenes.length - 1].location : null}
           allCharacters={sceneCharacterOptions}
+          allLocations={locations}
           required={scenes.length === 0}
           onSubmit={handleSceneSubmit}
           onCreateCharacter={createCharacterFromSceneModal}
+          onSummarize={editingScene ? () => api.summarizeScene(gameName, editingScene.id).then(r => r.summary) : undefined}
           onDelete={editingScene ? () => deleteScene(editingScene.id) : undefined}
           onClose={() => setSceneModal(null)}
         />

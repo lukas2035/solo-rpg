@@ -1,16 +1,14 @@
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import multipart from '@fastify/multipart'
-import fastifyStatic from '@fastify/static'
 import { loadConfig } from './config.js'
-import { ObsidianVaultProvider } from './vault/ObsidianVaultProvider.js'
-import { GameWatcher } from './vault/GameWatcher.js'
+import { VaultManager } from './vault/VaultManager.js'
 import { registerGameRoutes } from './routes/games.js'
+import { registerVaultRoutes } from './routes/vault.js'
 
 const config = loadConfig()
-const storage = new ObsidianVaultProvider(config.vaultPath)
-await storage.init()
-const watcher = new GameWatcher(config.vaultPath)
+// Výchozí složka s hrami z konfigurace; FE ji může přepnout na složku uloženou v prohlížeči
+const vault = await VaultManager.create(config.vaultPath)
 
 const app = Fastify({
   logger: { level: 'info', transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss', ignore: 'pid,hostname' } } },
@@ -20,24 +18,15 @@ const app = Fastify({
 await app.register(cors, { origin: true })
 await app.register(multipart)
 
-// Obrázky a soubory z vaultu: /vault/<Hra>/portraits/Aria.png
-await app.register(fastifyStatic, {
-  root: config.vaultPath,
-  prefix: '/vault/',
-  decorateReply: false,
-  index: false,
-  list: false,
-  cacheControl: false,
-})
+app.get('/api/health', async () => ({ ok: true, vaultPath: vault.path }))
 
-app.get('/api/health', async () => ({ ok: true, vaultPath: config.vaultPath }))
-
-await registerGameRoutes(app, storage, watcher)
-app.addHook('onClose', async () => watcher.closeAll())
+await registerGameRoutes(app, vault, config)
+await registerVaultRoutes(app, vault)
+app.addHook('onClose', async () => vault.close())
 
 try {
   await app.listen({ port: config.port, host: '127.0.0.1' })
-  app.log.info(`Vault: ${config.vaultPath}`)
+  app.log.info(`Vault: ${vault.path}`)
 } catch (error) {
   app.log.error(error)
   process.exit(1)

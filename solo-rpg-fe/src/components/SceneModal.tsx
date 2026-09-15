@@ -1,16 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
-import type { SceneMeta } from '@solo-rpg/shared'
+import type { SceneMeta, StoryLocation } from '@solo-rpg/shared'
 import ImageDropField from './ImageDropField'
 import CharacterModal, { type CharacterFormValues } from './CharacterModal'
 import { inputClass, selectAll } from '../utils/forms'
+import { LOCATION_TYPE_ICONS } from '../utils/locations'
 
 /** Hodnoty formuláře; `image` = undefined → obrázek beze změny, null → odstranit, string → nový (data:/http URL) */
 export interface SceneFormValues {
   title: string
   description: string
+  /** Celkové zhodnocení / shrnutí děje scény (markdown) */
+  summary: string
   image: string | null | undefined
   /** Celá jména postav přítomných ve scéně */
   characters: string[]
+  /** Název lokace, kde se scéna odehrává */
+  location: string | null
 }
 
 /** Postava hry nabízená v checklistu */
@@ -30,24 +35,33 @@ interface SceneModalProps {
   defaultTitle?: string
   /** Předvybrané postavy pro novou scénu (typicky postavy poslední scény) */
   defaultCharacters?: string[]
+  /** Předvybraná lokace pro novou scénu (typicky lokace poslední scény) */
+  defaultLocation?: string | null
   /** Všechny postavy hry, ze kterých scéna vybírá */
   allCharacters: SceneCharacterOption[]
+  /** Lokace hry (výběr „odehrává se v“) */
+  allLocations?: StoryLocation[]
   /** Hra nemá žádnou scénu – dialog nelze zavřít bez vytvoření */
   required?: boolean
   /** Uloží scénu; při chybě (např. duplicitní název) vyhodí výjimku s hláškou pro uživatele */
   onSubmit: (values: SceneFormValues) => Promise<void>
   /** Vytvoří novou postavu hry (z vnořeného dialogu postavy); vrátí ji pro checklist */
   onCreateCharacter?: (values: CharacterFormValues) => Promise<SceneCharacterOption>
+  /** Nechá AI shrnout děj scény (jen u existující scény); vrací markdown shrnutí, které se vloží do pole */
+  onSummarize?: () => Promise<string>
   onDelete?: () => Promise<void>
   onClose: () => void
 }
 
-/** Dialog pro vytvoření a úpravu scény (název, obrázek = pozadí scény, markdown popis, přítomné postavy) */
-export default function SceneModal({ scene, image, defaultTitle = '', defaultCharacters = [], allCharacters, required = false, onSubmit, onCreateCharacter, onDelete, onClose }: SceneModalProps) {
+/** Dialog pro vytvoření a úpravu scény (název, obrázek = pozadí scény, markdown popis, shrnutí děje, přítomné postavy) */
+export default function SceneModal({ scene, image, defaultTitle = '', defaultCharacters = [], defaultLocation = null, allCharacters, allLocations = [], required = false, onSubmit, onCreateCharacter, onSummarize, onDelete, onClose }: SceneModalProps) {
   const isEdit = scene !== null
   const [title, setTitle] = useState(scene?.title ?? defaultTitle)
   const [description, setDescription] = useState(scene?.description ?? '')
+  const [summary, setSummary] = useState(scene?.summary ?? '')
+  const [summarizing, setSummarizing] = useState(false)
   const [selected, setSelected] = useState<string[]>(scene?.characters ?? defaultCharacters)
+  const [location, setLocation] = useState<string | null>(scene ? scene.location : defaultLocation)
   const [creatingCharacter, setCreatingCharacter] = useState(false)
   const [editImage, setEditImage] = useState<string | null>(image)
   const [imageChanged, setImageChanged] = useState(false)
@@ -79,6 +93,20 @@ export default function SceneModal({ scene, image, defaultTitle = '', defaultCha
   const toggleCharacter = (name: string) =>
     setSelected(prev => (prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]))
 
+  const handleSummarize = async () => {
+    if (!onSummarize || summarizing) return
+    if (summary.trim() && !window.confirm('Nahradit stávající shrnutí novým od AI?')) return
+    setSummarizing(true)
+    setError(null)
+    try {
+      setSummary(await onSummarize())
+    } catch (err) {
+      setError(err instanceof Error ? `AI shrnutí selhalo: ${err.message}` : 'AI shrnutí selhalo.')
+    } finally {
+      setSummarizing(false)
+    }
+  }
+
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault()
     if (saving) return
@@ -91,7 +119,14 @@ export default function SceneModal({ scene, image, defaultTitle = '', defaultCha
     setSaving(true)
     setError(null)
     try {
-      await onSubmit({ title: trimmed, description, image: imageChanged ? editImage : undefined, characters: selected.filter(n => allCharacters.some(c => c.name === n)) })
+      await onSubmit({
+        title: trimmed,
+        description,
+        summary,
+        image: imageChanged ? editImage : undefined,
+        characters: selected.filter(n => allCharacters.some(c => c.name === n)),
+        location: location && allLocations.some(l => l.title === location) ? location : null,
+      })
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Uložení scény selhalo.')
@@ -142,6 +177,17 @@ export default function SceneModal({ scene, image, defaultTitle = '', defaultCha
                 className={inputClass}
               />
             </label>
+            {allLocations.length > 0 && (
+              <label className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">
+                Odehrává se v
+                <select value={location ?? ''} onChange={(e) => setLocation(e.target.value || null)} className={inputClass}>
+                  <option value="">— neuvedeno —</option>
+                  {[...allLocations].sort((a, b) => a.title.localeCompare(b.title, 'cs')).map(l => (
+                    <option key={l.id} value={l.title}>{LOCATION_TYPE_ICONS[l.type]} {l.title}</option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label className="flex flex-col gap-1 text-left text-sm text-[var(--text)] flex-1">
               Popis <span className="opacity-60">(markdown, uloží se do souboru scény nad záznamy)</span>
               <textarea
@@ -169,6 +215,38 @@ export default function SceneModal({ scene, image, defaultTitle = '', defaultCha
             className="sm:w-56"
           />
         </div>
+
+        <label className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">
+          <span className="flex items-center gap-3">
+            <span>
+              Shrnutí děje scény <span className="opacity-60">(markdown – rychlý kontext pro tebe i AI, uloží se za značku <code>&lt;!-- summary --&gt;</code>)</span>
+            </span>
+            {isEdit && onSummarize && (
+              <button
+                type="button"
+                onClick={handleSummarize}
+                disabled={summarizing || saving}
+                title="Nechat AI (OpenRouter) shrnout dosavadní záznamy scény – výsledek můžeš před uložením upravit"
+                className="ml-auto px-2 py-1 rounded-md border border-dashed border-[var(--accent)]/70 text-xs text-[var(--accent)] hover:border-solid hover:bg-black/40 transition-all disabled:opacity-50 whitespace-nowrap"
+              >
+                {summarizing ? '🤖 Shrnuji…' : '🤖 Shrnout pomocí AI'}
+              </button>
+            )}
+          </span>
+          <textarea
+            rows={6}
+            value={summary}
+            onChange={(e) => setSummary(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && e.ctrlKey) {
+                e.preventDefault()
+                void handleSubmit()
+              }
+            }}
+            placeholder="Co se ve scéně stalo, klíčová rozhodnutí, odhalení, otevřené otázky…"
+            className={`${inputClass} font-mono text-sm resize-y whitespace-pre-wrap ${summarizing ? 'animate-pulse' : ''}`}
+          />
+        </label>
 
         <fieldset className="flex flex-col gap-2 text-left text-sm text-[var(--text)]">
           <legend className="mb-1 flex items-center gap-3 w-full">

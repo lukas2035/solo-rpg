@@ -12,8 +12,13 @@ import {
   type FactionRelation,
   type GameDetail,
   type GameMeta,
+  type GameSession,
+  type GameSessionInput,
   type GameSettings,
   type GameSetup,
+  type LocationInput,
+  type LoreEntry,
+  type LoreInput,
   type Narrator,
   type NarratorInput,
   type Quest,
@@ -22,12 +27,18 @@ import {
   type SceneInput,
   type SceneMeta,
   type StoryEntry,
+  type StoryLocation,
   type StoryThread,
   type ThreadClock,
   type ThreadInput,
   FactionStanceSchema,
   FactionStatusSchema,
   FactionTypeSchema,
+  LocationStatusSchema,
+  LocationTypeSchema,
+  LoreKnowledgeSchema,
+  LoreTruthSchema,
+  LoreTypeSchema,
   ObjectiveStatusSchema,
   QuestStatusSchema,
   QuestTypeSchema,
@@ -55,8 +66,10 @@ import {
   writeFileAtomic,
 } from './fsUtils.js'
 import { parseEntries, renameSpeaker, serializeEntries } from './sceneMarkdown.js'
+import { parseSessions, serializeSessions, sessionId } from './sessionsMarkdown.js'
 
 const GAME_FILE = 'game.md'
+const SESSIONS_FILE = 'sessions.md'
 const CHARACTER_DIR = 'characters'
 /** Původní název složky postav – při čtení se automaticky přejmenuje na `characters` */
 const LEGACY_CHARACTER_DIR = 'npcs'
@@ -71,13 +84,23 @@ const FACTION_DIR = 'factions'
 /** Emblémy frakcí odděleně od portrétů postav */
 const FACTION_EMBLEM_DIR = `${PORTRAIT_DIR}/factions`
 const QUEST_DIR = 'quests'
+const LOCATION_DIR = 'locations'
+/** Obrázky lokací odděleně od portrétů postav */
+const LOCATION_IMAGE_DIR = `${PORTRAIT_DIR}/locations`
+const LORE_DIR = 'lore'
 /** Odděluje markdown popis scény (před) od záznamů příběhu (za) */
 const ENTRIES_MARKER = /<!--\s*entries\s*-->/
+/** Odděluje popis scény (před) od jejího shrnutí děje (za); leží před `<!-- entries -->` */
+const SUMMARY_MARKER = /<!--\s*summary\s*-->/
 /** Odděluje veřejný popis frakce (před) od jejích tajemství (za) */
 const SECRETS_MARKER = /<!--\s*secrets\s*-->/
+/** Odděluje popis vypravěče (před) od jeho doplňkového AI promptu (za) */
+const AI_PROMPT_MARKER = /<!--\s*ai-prompt\s*-->/
 /** Tělo questu: popis, pak `<!-- outcome -->` výsledek, pak `<!-- notes -->` poznámky (značky chybí, když je sekce prázdná) */
 const OUTCOME_MARKER = /<!--\s*outcome\s*-->/
 const NOTES_MARKER = /<!--\s*notes\s*-->/
+/** Tělo `game.md`: volné poznámky hráče (aplikace je nemění), za značkou popis herních pravidel pod příběhem */
+const RULES_MARKER = /<!--\s*rules\s*-->/
 
 type Frontmatter = Record<string, unknown>
 
@@ -127,6 +150,18 @@ interface QuestFile {
   quest: Quest
 }
 
+interface LocationFile {
+  fileName: string
+  data: Frontmatter
+  location: StoryLocation
+}
+
+interface LoreFile {
+  fileName: string
+  data: Frontmatter
+  lore: LoreEntry
+}
+
 function toTimestamp(value: unknown, fallback: number): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (value instanceof Date) return value.getTime()
@@ -157,27 +192,48 @@ function nameKey(name: string): string {
   return safeFileName(name).toLocaleLowerCase('cs')
 }
 
-/** Tělo scény = markdown popis + `<!-- entries -->` + záznamy. Bez značky je celé tělo záznamy (starý formát). */
-function splitSceneBody(body: string): { description: string; entries: string } {
+/**
+ * Tělo scény = markdown popis + volitelně `<!-- summary -->` shrnutí + `<!-- entries -->` + záznamy.
+ * Bez značky entries je celé tělo záznamy (starý formát).
+ */
+function splitSceneBody(body: string): { description: string; summary: string; entries: string } {
   const match = body.match(ENTRIES_MARKER)
-  if (!match || match.index === undefined) return { description: '', entries: body }
-  return {
-    description: body.slice(0, match.index).replace(/^\n+/, '').trimEnd(),
-    entries: body.slice(match.index + match[0].length),
-  }
+  if (!match || match.index === undefined) return { description: '', summary: '', entries: body }
+  const { description, summary } = splitByMarker(body.slice(0, match.index), SUMMARY_MARKER, 'summary')
+  return { description, summary, entries: body.slice(match.index + match[0].length) }
 }
 
-function joinSceneBody(description: string, entriesMd: string): string {
-  const head = description.trim() ? `\n${description.trimEnd()}\n\n` : '\n'
+function joinSceneBody(description: string, summary: string, entriesMd: string): string {
+  const parts: string[] = []
+  if (description.trim()) parts.push(description.trimEnd())
+  if (summary.trim()) parts.push(`<!-- summary -->\n\n${summary.trimEnd()}`)
+  const head = parts.length ? `\n${parts.join('\n\n')}\n\n` : '\n'
   return `${head}<!-- entries -->\n${entriesMd}`
 }
 
-/** Tělo frakce = veřejný popis + volitelně `<!-- secrets -->` + tajemství */
+/** Tělo frakce / lokace / lore = veřejný popis + volitelně `<!-- secrets -->` + tajemství */
 function splitFactionBody(body: string): { description: string; secrets: string } {
-  const match = body.match(SECRETS_MARKER)
+  return splitByMarker(body, SECRETS_MARKER, 'secrets')
+}
+
+/** Tělo `game.md` = poznámky hráče + volitelně `<!-- rules -->` + popis pravidel */
+function splitGameBody(body: string): { notes: string; rules: string } {
+  const { description, rules } = splitByMarker(body, RULES_MARKER, 'rules')
+  return { notes: description, rules }
+}
+
+function joinGameBody(notes: string, rules: string): string {
+  const head = notes.trimEnd()
+  if (!rules.trim()) return `${head}\n`
+  return `${head}\n\n<!-- rules -->\n\n${rules.trimEnd()}\n`
+}
+
+/** Rozdělí tělo na část před značkou a za ní; bez značky je vše `description` */
+function splitByMarker<K extends string>(body: string, marker: RegExp, key: K): { description: string } & Record<K, string> {
+  const match = body.match(marker)
   const clean = (s: string) => s.replace(/^\n+/, '').trimEnd()
-  if (!match || match.index === undefined) return { description: clean(body), secrets: '' }
-  return { description: clean(body.slice(0, match.index)), secrets: clean(body.slice(match.index + match[0].length)) }
+  if (!match || match.index === undefined) return { description: clean(body), [key]: '' } as { description: string } & Record<K, string>
+  return { description: clean(body.slice(0, match.index)), [key]: clean(body.slice(match.index + match[0].length)) } as { description: string } & Record<K, string>
 }
 
 /** Tělo questu = popis + volitelně `<!-- outcome -->` výsledek + volitelně `<!-- notes -->` poznámky (v tomto pořadí) */
@@ -253,6 +309,11 @@ function toCharacterLinks(names: string[]): string[] {
   return names.map(n => `[[${n}]]`)
 }
 
+/** Nahradí (newName) nebo odebere (null) název v seznamu wikilinků */
+function replaceRef(list: string[], oldName: string, newName: string | null): string[] {
+  return list.flatMap(n => (n === oldName ? (newName ? [newName] : []) : [n]))
+}
+
 /** Hodiny nitě z frontmatteru; neplatný tvar = vypnuto */
 function parseClock(value: unknown): ThreadClock | null {
   if (typeof value !== 'object' || value === null) return null
@@ -265,7 +326,7 @@ function parseClock(value: unknown): ThreadClock | null {
 /**
  * Úložiště her ve struktuře čitelné Obsidianem:
  *
- * <vault>/<Hra>/game.md, characters/*.md, narrators/*.md, threads/*.md, portraits/, backgrounds/, scenes/*.md
+ * <vault>/<Hra>/game.md, characters/*.md, narrators/*.md, threads/*.md, factions/*.md, quests/*.md, locations/*.md, lore/*.md, portraits/, backgrounds/, scenes/*.md
  */
 export class ObsidianVaultProvider implements StorageProvider {
   constructor(private readonly vaultPath: string) {}
@@ -320,6 +381,8 @@ export class ObsidianVaultProvider implements StorageProvider {
       brightBackground: file.data.brightBackground !== false,
       // Aktuální vypravěč musí existovat jako soubor; jinak žádný
       narrator: narrators.find(n => nameKey(n.name) === nameKey(narratorName ?? ''))?.name ?? null,
+      rules: splitGameBody(file.body).rules,
+      rulesInAi: file.data.rulesInAi === true,
     }
   }
 
@@ -354,7 +417,7 @@ export class ObsidianVaultProvider implements StorageProvider {
 
     const now = toIso(Date.now())
     await ensureDir(dir)
-    await Promise.all([CHARACTER_DIR, NARRATOR_DIR, THREAD_DIR, FACTION_DIR, QUEST_DIR, PORTRAIT_DIR, BACKGROUND_DIR, SCENE_DIR].map(sub => ensureDir(path.join(dir, sub))))
+    await Promise.all([CHARACTER_DIR, NARRATOR_DIR, THREAD_DIR, FACTION_DIR, QUEST_DIR, LOCATION_DIR, LORE_DIR, PORTRAIT_DIR, BACKGROUND_DIR, SCENE_DIR].map(sub => ensureDir(path.join(dir, sub))))
     await this.writeGameFile(dir, {
       data: {
         name: trimmed,
@@ -363,6 +426,7 @@ export class ObsidianVaultProvider implements StorageProvider {
         background: null,
         brightBackground: true,
         narrator: null,
+        rulesInAi: false,
       },
       body: `# ${trimmed}\n\nPoznámky ke hře (volný text, aplikace jej nemění).\n`,
     })
@@ -388,6 +452,8 @@ export class ObsidianVaultProvider implements StorageProvider {
     const threads = await this.readThreads(dir)
     const factions = await this.readFactions(dir)
     const quests = await this.readQuests(dir)
+    const locations = await this.readLocations(dir)
+    const lore = await this.readLore(dir)
     return {
       meta: this.metaFromGameFile(name.trim(), file, stat),
       setup: this.setupFromGameFile(file, characters.map(c => c.character), narrators.map(n => n.narrator)),
@@ -395,6 +461,8 @@ export class ObsidianVaultProvider implements StorageProvider {
       threads: threads.map(t => t.thread),
       factions: factions.map(f => f.faction),
       quests: quests.map(q => q.quest),
+      locations: locations.map(l => l.location),
+      lore: lore.map(l => l.lore),
     }
   }
 
@@ -500,24 +568,29 @@ export class ObsidianVaultProvider implements StorageProvider {
     if (!used) await removeIfExists(path.join(dir, portrait))
   }
 
-  /** Po přejmenování postavy / změně nicku přepsat hlavičky mluvčího i seznam postav ve všech scénách. */
+  /** Po přejmenování postavy / změně nicku přepsat hlavičky mluvčího i seznamy postav (vč. AI postav) ve všech scénách. */
   private async renameSpeakerInScenes(dir: string, oldName: string, newName: string, nickname: string): Promise<void> {
     for (const scene of await this.readScenes(dir)) {
       const body = renameSpeaker(scene.body, oldName, newName, nickname)
       const inScene = scene.meta.characters.includes(oldName)
-      if (body === null && !inScene) continue
-      const data: Frontmatter = inScene
-        ? { ...scene.data, characters: toCharacterLinks(scene.meta.characters.map(n => (n === oldName ? newName : n))) }
-        : scene.data
+      const inAi = scene.meta.aiCharacters.includes(oldName)
+      if (body === null && !inScene && !inAi) continue
+      const data: Frontmatter = { ...scene.data }
+      if (inScene) data.characters = toCharacterLinks(scene.meta.characters.map(n => (n === oldName ? newName : n)))
+      if (inAi) data.aiCharacters = toCharacterLinks(scene.meta.aiCharacters.map(n => (n === oldName ? newName : n)))
       await writeFileAtomic(path.join(dir, SCENE_DIR, scene.fileName), matter.stringify(body ?? scene.body, data))
     }
   }
 
-  /** Po smazání postavy ji odebrat ze seznamů postav scén. */
+  /** Po smazání postavy ji odebrat ze seznamů postav (vč. AI postav) scén. */
   private async removeCharacterFromScenes(dir: string, name: string): Promise<void> {
     for (const scene of await this.readScenes(dir)) {
-      if (!scene.meta.characters.includes(name)) continue
-      const data: Frontmatter = { ...scene.data, characters: toCharacterLinks(scene.meta.characters.filter(n => n !== name)) }
+      const inScene = scene.meta.characters.includes(name)
+      const inAi = scene.meta.aiCharacters.includes(name)
+      if (!inScene && !inAi) continue
+      const data: Frontmatter = { ...scene.data }
+      if (inScene) data.characters = toCharacterLinks(scene.meta.characters.filter(n => n !== name))
+      if (inAi) data.aiCharacters = toCharacterLinks(scene.meta.aiCharacters.filter(n => n !== name))
       await writeFileAtomic(path.join(dir, SCENE_DIR, scene.fileName), matter.stringify(scene.body, data))
     }
   }
@@ -591,6 +664,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     if (name !== previous.name) await this.renameCharacterInThreads(dir, previous.name, name)
     if (name !== previous.name) await this.renameCharacterInFactions(dir, previous.name, name)
     if (name !== previous.name) await this.renameCharacterInQuests(dir, previous.name, name)
+    if (name !== previous.name) await this.renameRefInLore(dir, 'characters', previous.name, name)
     await this.touchGame(dir)
     return character
   }
@@ -607,6 +681,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     await this.renameCharacterInThreads(dir, current.character.name, null)
     await this.renameCharacterInFactions(dir, current.character.name, null)
     await this.renameCharacterInQuests(dir, current.character.name, null)
+    await this.renameRefInLore(dir, 'characters', current.character.name, null)
     await this.touchGame(dir)
   }
 
@@ -614,10 +689,12 @@ export class ObsidianVaultProvider implements StorageProvider {
 
   private narratorFromFrontmatter(data: Frontmatter, baseName: string, body: string): Narrator {
     const name = stringOrNull(data.name) ?? baseName
+    const { description, aiPrompt } = splitByMarker(body, AI_PROMPT_MARKER, 'aiPrompt')
     return {
       id: stringOrNull(data.id) ?? baseName,
       name,
-      description: body.replace(/^\n+/, '').trimEnd(),
+      description,
+      aiPrompt,
       image: stringOrNull(data.portrait),
     }
   }
@@ -657,7 +734,8 @@ export class ObsidianVaultProvider implements StorageProvider {
       order,
     }
     const body = narrator.description.trim() ? `\n${narrator.description.trimEnd()}\n` : ''
-    await writeFileAtomic(path.join(dir, NARRATOR_DIR, `${safeFileName(narrator.name)}.md`), matter.stringify(body, data))
+    const aiPrompt = narrator.aiPrompt.trim() ? `\n<!-- ai-prompt -->\n\n${narrator.aiPrompt.trimEnd()}\n` : ''
+    await writeFileAtomic(path.join(dir, NARRATOR_DIR, `${safeFileName(narrator.name)}.md`), matter.stringify(body + aiPrompt, data))
   }
 
   /** Smaže portrét vypravěče ve vaultu, pokud ho nepoužívá jiný vypravěč. */
@@ -701,7 +779,7 @@ export class ObsidianVaultProvider implements StorageProvider {
         portrait = null
       }
     }
-    const narrator: Narrator = { id: `narrator-${Date.now()}`, name, description: '', image: portrait }
+    const narrator: Narrator = { id: `narrator-${Date.now()}`, name, description: '', aiPrompt: '', image: portrait }
     await this.writeNarratorFile(dir, narrator, {}, existing.length)
     await this.touchGame(dir, f => { delete f.data.dm; f.data.narrator = `[[${name}]]` })
     return true
@@ -728,6 +806,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       id: `narrator-${Date.now()}`,
       name,
       description: input.description ?? '',
+      aiPrompt: input.aiPrompt ?? '',
       image: input.image ?? null,
     }
     await this.writeNarratorFile(dir, narrator, {}, order)
@@ -766,6 +845,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       id: narratorId,
       name,
       description: input.description ?? previous.description,
+      aiPrompt: input.aiPrompt ?? previous.aiPrompt,
       image,
     }
     const order = typeof current.data.order === 'number' ? current.data.order : existing.indexOf(current)
@@ -806,6 +886,9 @@ export class ObsidianVaultProvider implements StorageProvider {
       file.data.background = settings.backgroundImage
       file.data.brightBackground = settings.brightBackground
       file.data.narrator = narrator ? `[[${narrator.narrator.name}]]` : null
+      file.data.rulesInAi = settings.rulesInAi
+      // Poznámky hráče v těle zůstávají, mění se jen sekce pravidel
+      file.body = joinGameBody(splitGameBody(file.body).notes, settings.rules)
     })
     const characters = await this.readCharacters(dir)
     const file = await this.readGameFile(dir)
@@ -843,6 +926,12 @@ export class ObsidianVaultProvider implements StorageProvider {
         const base = safeFileName(asset.ownerName ?? '', 'frakce')
         relPath = `${FACTION_EMBLEM_DIR}/${base}${ext}`
         await this.removeSiblingsWithOtherExt(path.join(dir, FACTION_EMBLEM_DIR), base, ext)
+        break
+      }
+      case 'location': {
+        const base = safeFileName(asset.ownerName ?? '', 'lokace')
+        relPath = `${LOCATION_IMAGE_DIR}/${base}${ext}`
+        await this.removeSiblingsWithOtherExt(path.join(dir, LOCATION_IMAGE_DIR), base, ext)
         break
       }
       case 'background': {
@@ -901,7 +990,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       const stat = await fs.stat(path.join(sceneDir, fileName))
       const baseName = fileName.replace(/\.md$/i, '')
       const orderFromName = parseInt(baseName, 10)
-      const { description, entries } = splitSceneBody(parsed.content)
+      const { description, summary, entries } = splitSceneBody(parsed.content)
       scenes.push({
         fileName,
         data,
@@ -912,8 +1001,13 @@ export class ObsidianVaultProvider implements StorageProvider {
           title: stringOrNull(data.title) ?? baseName.replace(/^\d+\s*-\s*/, ''),
           order: typeof data.order === 'number' ? data.order : Number.isFinite(orderFromName) ? orderFromName : index + 1,
           description,
+          summary,
           image: stringOrNull(data.image),
           characters: data.characters === undefined ? (allCharacterNames ?? []) : parseCharacterLinks(data.characters),
+          location: parseLink(data.location),
+          ai: data.ai === true,
+          aiCharacters: parseCharacterLinks(data.aiCharacters),
+          aiPrompt: stringOrNull(data.aiPrompt) ?? '',
           createdAt: toTimestamp(data.createdAt, stat.birthtimeMs),
           updatedAt: toTimestamp(data.updatedAt, stat.mtimeMs),
         },
@@ -953,11 +1047,15 @@ export class ObsidianVaultProvider implements StorageProvider {
       order: meta.order,
       image: meta.image,
       characters: toCharacterLinks(meta.characters),
+      location: meta.location ? `[[${meta.location}]]` : null,
+      ai: meta.ai,
+      aiCharacters: toCharacterLinks(meta.aiCharacters),
+      aiPrompt: meta.aiPrompt.trim() ? meta.aiPrompt.trim() : null,
       createdAt: toIso(meta.createdAt),
       updatedAt: toIso(meta.updatedAt),
     }
     const filePath = path.join(dir, SCENE_DIR, this.sceneFileName(meta.order, meta.title))
-    await writeFileAtomic(filePath, matter.stringify(joinSceneBody(meta.description, entriesBody), data))
+    await writeFileAtomic(filePath, matter.stringify(joinSceneBody(meta.description, meta.summary, entriesBody), data))
   }
 
   /** Smaže obrázek scény ve vaultu, pokud ho nepoužívá jiná scéna ani pozadí hry. */
@@ -982,14 +1080,23 @@ export class ObsidianVaultProvider implements StorageProvider {
     // Bez explicitního seznamu převzít postavy z poslední scény
     const last = scenes[scenes.length - 1]
     const characters = await this.normalizeSceneCharacters(dir, input.characters ?? last?.meta.characters ?? [])
+    // AI nastavení se do nové scény přenáší z poslední (stejně jako postavy), jen pro postavy, které v nové scéně jsou
+    const ai = input.ai ?? last?.meta.ai ?? false
+    const aiCharacters = (input.aiCharacters ?? last?.meta.aiCharacters ?? []).filter(n => characters.includes(n))
     const now = Date.now()
     const meta: SceneMeta = {
       id: `scene-${now}`,
       title,
       order,
       description: input.description ?? '',
+      summary: input.summary ?? '',
       image: input.image ?? null,
       characters,
+      location: await this.normalizeLocationRef(dir, input.location ?? null),
+      ai,
+      aiCharacters: await this.normalizeSceneCharacters(dir, aiCharacters),
+      // Doplňující popis situace je specifický pro scénu – nedědí se
+      aiPrompt: input.aiPrompt ?? '',
       createdAt: now,
       updatedAt: now,
     }
@@ -1025,12 +1132,20 @@ export class ObsidianVaultProvider implements StorageProvider {
       await this.removeSceneImageIfUnused(dir, previous.image, scenes, sceneId)
     }
 
+    const characters = input.characters ? await this.normalizeSceneCharacters(dir, input.characters) : previous.characters
+    const aiCharacters = input.aiCharacters ? await this.normalizeSceneCharacters(dir, input.aiCharacters) : previous.aiCharacters
     const meta: SceneMeta = {
       ...previous,
       title,
       description: input.description ?? previous.description,
+      summary: input.summary ?? previous.summary,
       image,
-      characters: input.characters ? await this.normalizeSceneCharacters(dir, input.characters) : previous.characters,
+      characters,
+      location: input.location === undefined ? previous.location : await this.normalizeLocationRef(dir, input.location),
+      ai: input.ai ?? previous.ai,
+      // AI může hrát jen postavy, které ve scéně jsou
+      aiCharacters: aiCharacters.filter(n => characters.includes(n)),
+      aiPrompt: input.aiPrompt ?? previous.aiPrompt,
       updatedAt: Date.now(),
     }
     await this.writeSceneFile(dir, meta, current.entriesBody, current.data)
@@ -1099,6 +1214,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       characters: parseCharacterLinks(data.characters),
       scene: parseLink(data.scene),
       factions: parseCharacterLinks(data.factions),
+      locations: parseCharacterLinks(data.locations),
       description: body.replace(/^\n+/, '').trimEnd(),
       createdAt: toTimestamp(data.createdAt, stat.birthtimeMs),
       updatedAt: toTimestamp(data.updatedAt, stat.mtimeMs),
@@ -1142,6 +1258,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       characters: toCharacterLinks(thread.characters),
       scene: thread.scene ? `[[${thread.scene}]]` : null,
       factions: toCharacterLinks(thread.factions),
+      locations: toCharacterLinks(thread.locations),
       createdAt: toIso(thread.createdAt),
       updatedAt: toIso(thread.updatedAt),
     }
@@ -1188,6 +1305,14 @@ export class ObsidianVaultProvider implements StorageProvider {
     }
   }
 
+  /** Po přejmenování (newTitle) / smazání (null) lokace upravit vazby ve všech nitích. */
+  private async renameLocationInThreads(dir: string, oldTitle: string, newTitle: string | null): Promise<void> {
+    for (const file of await this.readThreads(dir)) {
+      if (!file.thread.locations.includes(oldTitle)) continue
+      await this.writeThreadFile(dir, { ...file.thread, locations: replaceRef(file.thread.locations, oldTitle, newTitle) }, file.data)
+    }
+  }
+
   async listThreads(name: string): Promise<StoryThread[]> {
     const dir = await this.requireGameDir(name)
     return (await this.readThreads(dir)).map(t => t.thread)
@@ -1212,6 +1337,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       characters: await this.normalizeSceneCharacters(dir, input.characters ?? []),
       scene: await this.normalizeThreadScene(dir, input.scene ?? null),
       factions: await this.normalizeThreadFactions(dir, input.factions ?? []),
+      locations: await this.normalizeLocationRefs(dir, input.locations ?? []),
       description: input.description ?? '',
       createdAt: now,
       updatedAt: now,
@@ -1245,11 +1371,13 @@ export class ObsidianVaultProvider implements StorageProvider {
       characters: input.characters ? await this.normalizeSceneCharacters(dir, input.characters) : previous.characters,
       scene: input.scene === undefined ? previous.scene : await this.normalizeThreadScene(dir, input.scene),
       factions: input.factions ? await this.normalizeThreadFactions(dir, input.factions) : previous.factions,
+      locations: input.locations ? await this.normalizeLocationRefs(dir, input.locations) : previous.locations,
       description: input.description ?? previous.description,
       updatedAt: Date.now(),
     }
     await this.writeThreadFile(dir, thread, current.data)
     if (title !== previous.title) await this.renameThreadInQuests(dir, previous.title, title)
+    if (title !== previous.title) await this.renameRefInLore(dir, 'threads', previous.title, title)
     await this.touchGame(dir)
     return thread
   }
@@ -1261,6 +1389,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     if (!current) throw new NotFoundError(`Dějová nit „${threadId}“ neexistuje.`)
     await removeIfExists(path.join(dir, THREAD_DIR, current.fileName))
     await this.renameThreadInQuests(dir, current.thread.title, null)
+    await this.renameRefInLore(dir, 'threads', current.thread.title, null)
     await this.touchGame(dir)
   }
 
@@ -1282,6 +1411,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       parentFaction: parseLink(data.parentFaction),
       goals: Array.isArray(data.goals) ? data.goals.filter((g): g is string => typeof g === 'string' && g.trim() !== '').map(g => g.trim()) : [],
       characters: parseCharacterLinks(data.characters),
+      locations: parseCharacterLinks(data.locations),
       relations: parseFactionRelations(data.relations),
       emblem: stringOrNull(data.emblem),
       description,
@@ -1325,6 +1455,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       parentFaction: faction.parentFaction ? `[[${faction.parentFaction}]]` : null,
       goals: faction.goals,
       characters: toCharacterLinks(faction.characters),
+      locations: toCharacterLinks(faction.locations),
       relations: faction.relations.map(r => ({ faction: `[[${r.faction}]]`, stance: r.stance, ...(r.note ? { note: r.note } : {}) })),
       emblem: faction.emblem,
       createdAt: toIso(faction.createdAt),
@@ -1421,6 +1552,14 @@ export class ObsidianVaultProvider implements StorageProvider {
     if (!used) await removeIfExists(path.join(dir, emblem))
   }
 
+  /** Po přejmenování (newTitle) / smazání (null) lokace upravit vazby ve všech frakcích. */
+  private async renameLocationInFactions(dir: string, oldTitle: string, newTitle: string | null): Promise<void> {
+    for (const file of await this.readFactions(dir)) {
+      if (!file.faction.locations.includes(oldTitle)) continue
+      await this.writeFactionFile(dir, { ...file.faction, locations: replaceRef(file.faction.locations, oldTitle, newTitle) }, file.data)
+    }
+  }
+
   async listFactions(name: string): Promise<Faction[]> {
     const dir = await this.requireGameDir(name)
     return (await this.readFactions(dir)).map(f => f.faction)
@@ -1443,6 +1582,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       parentFaction: this.resolveParentFaction(existing, undefined, title, input.parentFaction ?? null),
       goals: (input.goals ?? []).map(g => g.trim()).filter(Boolean),
       characters: await this.normalizeSceneCharacters(dir, input.characters ?? []),
+      locations: await this.normalizeLocationRefs(dir, input.locations ?? []),
       relations: this.normalizeFactionRelations(existing, input.relations),
       emblem: input.emblem ?? null,
       description: input.description ?? '',
@@ -1495,6 +1635,7 @@ export class ObsidianVaultProvider implements StorageProvider {
         : this.resolveParentFaction(existing, factionId, title, input.parentFaction),
       goals: input.goals ? input.goals.map(g => g.trim()).filter(Boolean) : previous.goals,
       characters: input.characters ? await this.normalizeSceneCharacters(dir, input.characters) : previous.characters,
+      locations: input.locations ? await this.normalizeLocationRefs(dir, input.locations) : previous.locations,
       relations: input.relations ? this.normalizeFactionRelations(existing, input.relations, factionId) : previous.relations,
       emblem,
       description: input.description ?? previous.description,
@@ -1506,6 +1647,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       await this.renameFactionInFactions(dir, previous.title, title)
       await this.renameFactionInThreads(dir, previous.title, title)
       await this.renameFactionInQuests(dir, previous.title, title)
+      await this.renameRefInLore(dir, 'factions', previous.title, title)
     }
     await this.touchGame(dir)
     return faction
@@ -1521,6 +1663,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     await this.renameFactionInFactions(dir, current.faction.title, null)
     await this.renameFactionInThreads(dir, current.faction.title, null)
     await this.renameFactionInQuests(dir, current.faction.title, null)
+    await this.renameRefInLore(dir, 'factions', current.faction.title, null)
     await this.touchGame(dir)
   }
 
@@ -1543,6 +1686,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       characters: parseCharacterLinks(data.characters),
       threads: parseCharacterLinks(data.threads),
       factions: parseCharacterLinks(data.factions),
+      locations: parseCharacterLinks(data.locations),
       description,
       outcome,
       notes,
@@ -1589,6 +1733,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       characters: toCharacterLinks(quest.characters),
       threads: toCharacterLinks(quest.threads),
       factions: toCharacterLinks(quest.factions),
+      locations: toCharacterLinks(quest.locations),
       createdAt: toIso(quest.createdAt),
       updatedAt: toIso(quest.updatedAt),
     }
@@ -1689,6 +1834,14 @@ export class ObsidianVaultProvider implements StorageProvider {
     }
   }
 
+  /** Po přejmenování (newTitle) / smazání (null) lokace upravit vazby ve všech questech. */
+  private async renameLocationInQuests(dir: string, oldTitle: string, newTitle: string | null): Promise<void> {
+    for (const file of await this.readQuests(dir)) {
+      if (!file.quest.locations.includes(oldTitle)) continue
+      await this.writeQuestFile(dir, { ...file.quest, locations: replaceRef(file.quest.locations, oldTitle, newTitle) }, file.data)
+    }
+  }
+
   async listQuests(name: string): Promise<Quest[]> {
     const dir = await this.requireGameDir(name)
     return (await this.readQuests(dir)).map(q => q.quest)
@@ -1713,6 +1866,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       characters: await this.normalizeSceneCharacters(dir, input.characters ?? []),
       threads: await this.normalizeQuestThreads(dir, input.threads ?? []),
       factions: await this.normalizeThreadFactions(dir, input.factions ?? []),
+      locations: await this.normalizeLocationRefs(dir, input.locations ?? []),
       description: input.description ?? '',
       outcome: input.outcome ?? '',
       notes: input.notes ?? '',
@@ -1750,6 +1904,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       characters: input.characters ? await this.normalizeSceneCharacters(dir, input.characters) : previous.characters,
       threads: input.threads ? await this.normalizeQuestThreads(dir, input.threads) : previous.threads,
       factions: input.factions ? await this.normalizeThreadFactions(dir, input.factions) : previous.factions,
+      locations: input.locations ? await this.normalizeLocationRefs(dir, input.locations) : previous.locations,
       description: input.description ?? previous.description,
       outcome: input.outcome ?? previous.outcome,
       notes: input.notes ?? previous.notes,
@@ -1757,6 +1912,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     }
     await this.writeQuestFile(dir, quest, current.data)
     if (title !== previous.title) await this.renameQuestInQuests(dir, previous.title, title)
+    if (title !== previous.title) await this.renameRefInLore(dir, 'quests', previous.title, title)
     await this.touchGame(dir)
     return quest
   }
@@ -1769,6 +1925,454 @@ export class ObsidianVaultProvider implements StorageProvider {
     await removeIfExists(path.join(dir, QUEST_DIR, current.fileName))
     // Podřízené questy zůstávají, jen ztratí rodiče; nitě a frakce se nemění
     await this.renameQuestInQuests(dir, current.quest.title, null)
+    await this.renameRefInLore(dir, 'quests', current.quest.title, null)
+    await this.touchGame(dir)
+  }
+
+  // ---------- lokace (locations) ----------
+
+  private locationFromFrontmatter(data: Frontmatter, baseName: string, body: string, stat: { birthtimeMs: number; mtimeMs: number }): StoryLocation {
+    const type = LocationTypeSchema.safeParse(data.type)
+    const status = LocationStatusSchema.safeParse(data.status)
+    const { description, secrets } = splitFactionBody(body)
+    return {
+      id: stringOrNull(data.id) ?? baseName,
+      title: stringOrNull(data.title) ?? baseName,
+      // Neznámá hodnota ručně zapsaná v Obsidianu → rozumný výchozí stav, soubor se nepřepisuje, dokud ho uživatel neuloží
+      type: type.success ? type.data : 'other',
+      status: status.success ? status.data : 'known',
+      parentLocation: parseLink(data.parentLocation),
+      image: stringOrNull(data.image),
+      description,
+      secrets,
+      createdAt: toTimestamp(data.createdAt, stat.birthtimeMs),
+      updatedAt: toTimestamp(data.updatedAt, stat.mtimeMs),
+    }
+  }
+
+  private async readLocations(dir: string): Promise<LocationFile[]> {
+    const locationDir = path.join(dir, LOCATION_DIR)
+    const files = await listFiles(locationDir, '.md')
+    const locations: LocationFile[] = []
+    for (const fileName of files) {
+      const raw = await readTextIfExists(path.join(locationDir, fileName))
+      if (raw === null) continue
+      const parsed = matter(raw)
+      const stat = await fs.stat(path.join(locationDir, fileName))
+      const baseName = fileName.replace(/\.md$/i, '')
+      locations.push({ fileName, data: parsed.data as Frontmatter, location: this.locationFromFrontmatter(parsed.data as Frontmatter, baseName, parsed.content, stat) })
+    }
+    return locations.sort((a, b) => a.location.title.localeCompare(b.location.title, 'cs'))
+  }
+
+  private assertLocationTitleFree(existing: LocationFile[], title: string, exceptId?: string): void {
+    const key = nameKey(title)
+    if (existing.some(l => l.location.id !== exceptId && nameKey(l.location.title) === key)) {
+      throw new ConflictError(`Lokace „${title}“ už existuje. Zvol jiný název.`)
+    }
+  }
+
+  private async writeLocationFile(dir: string, location: StoryLocation, extra: Frontmatter): Promise<void> {
+    const data: Frontmatter = {
+      ...extra,
+      id: location.id,
+      title: location.title,
+      type: location.type,
+      status: location.status,
+      parentLocation: location.parentLocation ? `[[${location.parentLocation}]]` : null,
+      image: location.image,
+      createdAt: toIso(location.createdAt),
+      updatedAt: toIso(location.updatedAt),
+    }
+    const description = location.description.trim() ? `\n${location.description.trimEnd()}\n` : ''
+    const secrets = location.secrets.trim() ? `\n<!-- secrets -->\n\n${location.secrets.trimEnd()}\n` : ''
+    await writeFileAtomic(path.join(dir, LOCATION_DIR, `${safeFileName(location.title)}.md`), matter.stringify(description + secrets, data))
+  }
+
+  /** Názvy lokací: jen existující (kanonický zápis), bez duplicit */
+  private async normalizeLocationRefs(dir: string, titles: string[]): Promise<string[]> {
+    const locations = await this.readLocations(dir)
+    const result: string[] = []
+    for (const title of titles) {
+      const found = locations.find(l => nameKey(l.location.title) === nameKey(title))
+      if (found && !result.includes(found.location.title)) result.push(found.location.title)
+    }
+    return result
+  }
+
+  /** Jedna lokace: jen existující (kanonický zápis), jinak null */
+  private async normalizeLocationRef(dir: string, title: string | null): Promise<string | null> {
+    if (!title) return null
+    return (await this.normalizeLocationRefs(dir, [title]))[0] ?? null
+  }
+
+  /** Nadřazená lokace: musí existovat, nesmí být lokace sama a nesmí vytvořit cyklus */
+  private resolveParentLocation(locations: LocationFile[], selfId: string | undefined, selfTitle: string, title: string | null): string | null {
+    if (!title) return null
+    const parent = locations.find(l => nameKey(l.location.title) === nameKey(title))
+    if (!parent) return null
+    if (parent.location.id === selfId || nameKey(parent.location.title) === nameKey(selfTitle)) {
+      throw new ValidationError('Lokace nemůže být nadřazená sama sobě.')
+    }
+    const seen = new Set<string>()
+    let cursor: LocationFile | undefined = parent
+    while (cursor?.location.parentLocation) {
+      if (seen.has(cursor.location.id)) break
+      seen.add(cursor.location.id)
+      const next = locations.find(l => l.location.title === cursor!.location.parentLocation)
+      if (next && next.location.id === selfId) {
+        throw new ValidationError(`Lokace „${parent.location.title}“ leží uvnitř této lokace – vznikl by cyklus.`)
+      }
+      cursor = next
+    }
+    return parent.location.title
+  }
+
+  /** Po přejmenování (newTitle) / smazání (null) lokace upravit nadřazenou lokaci v ostatních lokacích. */
+  private async renameLocationInLocations(dir: string, oldTitle: string, newTitle: string | null): Promise<void> {
+    for (const file of await this.readLocations(dir)) {
+      if (file.location.parentLocation !== oldTitle) continue
+      await this.writeLocationFile(dir, { ...file.location, parentLocation: newTitle }, file.data)
+    }
+  }
+
+  /** Po přejmenování (newTitle) / smazání (null) lokace upravit vazbu ve všech scénách. */
+  private async renameLocationInScenes(dir: string, oldTitle: string, newTitle: string | null): Promise<void> {
+    for (const scene of await this.readScenes(dir)) {
+      if (scene.meta.location !== oldTitle) continue
+      await this.writeSceneFile(dir, { ...scene.meta, location: newTitle }, scene.entriesBody, scene.data)
+    }
+  }
+
+  /** Přejmenování/smazání lokace promítnout do všech entit, které na ni odkazují */
+  private async renameLocationEverywhere(dir: string, oldTitle: string, newTitle: string | null): Promise<void> {
+    await this.renameLocationInLocations(dir, oldTitle, newTitle)
+    await this.renameLocationInScenes(dir, oldTitle, newTitle)
+    await this.renameLocationInThreads(dir, oldTitle, newTitle)
+    await this.renameLocationInFactions(dir, oldTitle, newTitle)
+    await this.renameLocationInQuests(dir, oldTitle, newTitle)
+    await this.renameRefInLore(dir, 'locations', oldTitle, newTitle)
+  }
+
+  /** Smaže obrázek lokace ve vaultu, pokud ho nepoužívá jiná lokace. */
+  private async removeLocationImageIfUnused(dir: string, image: string, locations: LocationFile[], exceptId: string): Promise<void> {
+    if (isRemoteImage(image) || !image.startsWith(`${LOCATION_IMAGE_DIR}/`)) return
+    const used = locations.some(l => l.location.id !== exceptId && l.location.image === image)
+    if (!used) await removeIfExists(path.join(dir, image))
+  }
+
+  async listLocations(name: string): Promise<StoryLocation[]> {
+    const dir = await this.requireGameDir(name)
+    return (await this.readLocations(dir)).map(l => l.location)
+  }
+
+  async createLocation(gameName: string, input: LocationInput): Promise<StoryLocation> {
+    const dir = await this.requireGameDir(gameName)
+    await ensureDir(path.join(dir, LOCATION_DIR))
+    const existing = await this.readLocations(dir)
+    const title = input.title.trim()
+    this.assertLocationTitleFree(existing, title)
+    const now = Date.now()
+    const location: StoryLocation = {
+      id: `location-${now}`,
+      title,
+      type: input.type,
+      status: input.status ?? 'known',
+      parentLocation: this.resolveParentLocation(existing, undefined, title, input.parentLocation ?? null),
+      image: input.image ?? null,
+      description: input.description ?? '',
+      secrets: input.secrets ?? '',
+      createdAt: now,
+      updatedAt: now,
+    }
+    await this.writeLocationFile(dir, location, {})
+    await this.touchGame(dir)
+    return location
+  }
+
+  async updateLocation(gameName: string, locationId: string, input: LocationInput): Promise<StoryLocation> {
+    const dir = await this.requireGameDir(gameName)
+    const existing = await this.readLocations(dir)
+    const current = existing.find(l => l.location.id === locationId)
+    if (!current) throw new NotFoundError(`Lokace „${locationId}“ neexistuje.`)
+    const previous = current.location
+    const title = input.title.trim()
+    this.assertLocationTitleFree(existing, title, locationId)
+
+    let image = input.image === undefined ? previous.image : input.image
+
+    // Název = název souboru; id zůstává
+    if (title !== previous.title) {
+      await removeIfExists(path.join(dir, LOCATION_DIR, current.fileName))
+      // Obrázek ve vaultu nese název → přejmenovat spolu s lokací
+      if (previous.image && image === previous.image && previous.image.startsWith(`${LOCATION_IMAGE_DIR}/`) && (await exists(path.join(dir, previous.image)))) {
+        const ext = path.extname(previous.image)
+        const base = safeFileName(title, 'lokace')
+        await this.removeSiblingsWithOtherExt(path.join(dir, LOCATION_IMAGE_DIR), base, ext)
+        const target = `${LOCATION_IMAGE_DIR}/${base}${ext}`
+        await fs.rename(path.join(dir, previous.image), path.join(dir, target))
+        image = target
+      }
+    }
+    if (previous.image && image !== previous.image) {
+      await this.removeLocationImageIfUnused(dir, previous.image, existing, locationId)
+    }
+
+    const location: StoryLocation = {
+      ...previous,
+      title,
+      type: input.type,
+      status: input.status ?? previous.status,
+      parentLocation: input.parentLocation === undefined
+        ? previous.parentLocation
+        : this.resolveParentLocation(existing, locationId, title, input.parentLocation),
+      image,
+      description: input.description ?? previous.description,
+      secrets: input.secrets ?? previous.secrets,
+      updatedAt: Date.now(),
+    }
+    await this.writeLocationFile(dir, location, current.data)
+    if (title !== previous.title) await this.renameLocationEverywhere(dir, previous.title, title)
+    await this.touchGame(dir)
+    return location
+  }
+
+  async deleteLocation(gameName: string, locationId: string): Promise<void> {
+    const dir = await this.requireGameDir(gameName)
+    const existing = await this.readLocations(dir)
+    const current = existing.find(l => l.location.id === locationId)
+    if (!current) throw new NotFoundError(`Lokace „${locationId}“ neexistuje.`)
+    await removeIfExists(path.join(dir, LOCATION_DIR, current.fileName))
+    if (current.location.image) await this.removeLocationImageIfUnused(dir, current.location.image, existing, locationId)
+    // Podřízené lokace zůstávají, jen ztratí rodiče; vazby v ostatních entitách se odeberou
+    await this.renameLocationEverywhere(dir, current.location.title, null)
+    await this.touchGame(dir)
+  }
+
+  // ---------- lore ----------
+
+  private loreFromFrontmatter(data: Frontmatter, baseName: string, body: string, stat: { birthtimeMs: number; mtimeMs: number }): LoreEntry {
+    const type = LoreTypeSchema.safeParse(data.type)
+    const truth = LoreTruthSchema.safeParse(data.truth)
+    const knowledge = LoreKnowledgeSchema.safeParse(data.knowledge)
+    const { description, secrets } = splitFactionBody(body)
+    return {
+      id: stringOrNull(data.id) ?? baseName,
+      title: stringOrNull(data.title) ?? baseName,
+      // Neznámá hodnota ručně zapsaná v Obsidianu → rozumný výchozí stav, soubor se nepřepisuje, dokud ho uživatel neuloží
+      type: type.success ? type.data : 'other',
+      truth: truth.success ? truth.data : 'unknown',
+      knowledge: knowledge.success ? knowledge.data : 'known',
+      characters: parseCharacterLinks(data.characters),
+      locations: parseCharacterLinks(data.locations),
+      factions: parseCharacterLinks(data.factions),
+      quests: parseCharacterLinks(data.quests),
+      threads: parseCharacterLinks(data.threads),
+      content: description,
+      secrets,
+      createdAt: toTimestamp(data.createdAt, stat.birthtimeMs),
+      updatedAt: toTimestamp(data.updatedAt, stat.mtimeMs),
+    }
+  }
+
+  private async readLore(dir: string): Promise<LoreFile[]> {
+    const loreDir = path.join(dir, LORE_DIR)
+    const files = await listFiles(loreDir, '.md')
+    const entries: LoreFile[] = []
+    for (const fileName of files) {
+      const raw = await readTextIfExists(path.join(loreDir, fileName))
+      if (raw === null) continue
+      const parsed = matter(raw)
+      const stat = await fs.stat(path.join(loreDir, fileName))
+      const baseName = fileName.replace(/\.md$/i, '')
+      entries.push({ fileName, data: parsed.data as Frontmatter, lore: this.loreFromFrontmatter(parsed.data as Frontmatter, baseName, parsed.content, stat) })
+    }
+    return entries.sort((a, b) => a.lore.title.localeCompare(b.lore.title, 'cs'))
+  }
+
+  private assertLoreTitleFree(existing: LoreFile[], title: string, exceptId?: string): void {
+    const key = nameKey(title)
+    if (existing.some(l => l.lore.id !== exceptId && nameKey(l.lore.title) === key)) {
+      throw new ConflictError(`Záznam lore „${title}“ už existuje. Zvol jiný název.`)
+    }
+  }
+
+  private async writeLoreFile(dir: string, lore: LoreEntry, extra: Frontmatter): Promise<void> {
+    const data: Frontmatter = {
+      ...extra,
+      id: lore.id,
+      title: lore.title,
+      type: lore.type,
+      truth: lore.truth,
+      knowledge: lore.knowledge,
+      characters: toCharacterLinks(lore.characters),
+      locations: toCharacterLinks(lore.locations),
+      factions: toCharacterLinks(lore.factions),
+      quests: toCharacterLinks(lore.quests),
+      threads: toCharacterLinks(lore.threads),
+      createdAt: toIso(lore.createdAt),
+      updatedAt: toIso(lore.updatedAt),
+    }
+    const content = lore.content.trim() ? `\n${lore.content.trimEnd()}\n` : ''
+    const secrets = lore.secrets.trim() ? `\n<!-- secrets -->\n\n${lore.secrets.trimEnd()}\n` : ''
+    await writeFileAtomic(path.join(dir, LORE_DIR, `${safeFileName(lore.title)}.md`), matter.stringify(content + secrets, data))
+  }
+
+  /** Názvy questů: jen existující (kanonický zápis), bez duplicit */
+  private async normalizeQuestRefs(dir: string, titles: string[]): Promise<string[]> {
+    const quests = await this.readQuests(dir)
+    const result: string[] = []
+    for (const title of titles) {
+      const found = quests.find(q => nameKey(q.quest.title) === nameKey(title))
+      if (found && !result.includes(found.quest.title)) result.push(found.quest.title)
+    }
+    return result
+  }
+
+  /** Po přejmenování (newTitle) / smazání (null) entity upravit daný seznam vazeb ve všech záznamech lore. */
+  private async renameRefInLore(dir: string, field: 'characters' | 'locations' | 'factions' | 'quests' | 'threads', oldTitle: string, newTitle: string | null): Promise<void> {
+    for (const file of await this.readLore(dir)) {
+      if (!file.lore[field].includes(oldTitle)) continue
+      await this.writeLoreFile(dir, { ...file.lore, [field]: replaceRef(file.lore[field], oldTitle, newTitle) }, file.data)
+    }
+  }
+
+  async listLore(name: string): Promise<LoreEntry[]> {
+    const dir = await this.requireGameDir(name)
+    return (await this.readLore(dir)).map(l => l.lore)
+  }
+
+  async createLore(gameName: string, input: LoreInput): Promise<LoreEntry> {
+    const dir = await this.requireGameDir(gameName)
+    await ensureDir(path.join(dir, LORE_DIR))
+    const existing = await this.readLore(dir)
+    const title = input.title.trim()
+    this.assertLoreTitleFree(existing, title)
+    const now = Date.now()
+    const lore: LoreEntry = {
+      id: `lore-${now}`,
+      title,
+      type: input.type,
+      truth: input.truth ?? 'unknown',
+      knowledge: input.knowledge ?? 'known',
+      characters: await this.normalizeSceneCharacters(dir, input.characters ?? []),
+      locations: await this.normalizeLocationRefs(dir, input.locations ?? []),
+      factions: await this.normalizeThreadFactions(dir, input.factions ?? []),
+      quests: await this.normalizeQuestRefs(dir, input.quests ?? []),
+      threads: await this.normalizeQuestThreads(dir, input.threads ?? []),
+      content: input.content ?? '',
+      secrets: input.secrets ?? '',
+      createdAt: now,
+      updatedAt: now,
+    }
+    await this.writeLoreFile(dir, lore, {})
+    await this.touchGame(dir)
+    return lore
+  }
+
+  async updateLore(gameName: string, loreId: string, input: LoreInput): Promise<LoreEntry> {
+    const dir = await this.requireGameDir(gameName)
+    const existing = await this.readLore(dir)
+    const current = existing.find(l => l.lore.id === loreId)
+    if (!current) throw new NotFoundError(`Záznam lore „${loreId}“ neexistuje.`)
+    const previous = current.lore
+    const title = input.title.trim()
+    this.assertLoreTitleFree(existing, title, loreId)
+
+    // Název = název souboru; id zůstává
+    if (title !== previous.title) await removeIfExists(path.join(dir, LORE_DIR, current.fileName))
+
+    const lore: LoreEntry = {
+      ...previous,
+      title,
+      type: input.type,
+      truth: input.truth ?? previous.truth,
+      knowledge: input.knowledge ?? previous.knowledge,
+      characters: input.characters ? await this.normalizeSceneCharacters(dir, input.characters) : previous.characters,
+      locations: input.locations ? await this.normalizeLocationRefs(dir, input.locations) : previous.locations,
+      factions: input.factions ? await this.normalizeThreadFactions(dir, input.factions) : previous.factions,
+      quests: input.quests ? await this.normalizeQuestRefs(dir, input.quests) : previous.quests,
+      threads: input.threads ? await this.normalizeQuestThreads(dir, input.threads) : previous.threads,
+      content: input.content ?? previous.content,
+      secrets: input.secrets ?? previous.secrets,
+      updatedAt: Date.now(),
+    }
+    await this.writeLoreFile(dir, lore, current.data)
+    await this.touchGame(dir)
+    return lore
+  }
+
+  async deleteLore(gameName: string, loreId: string): Promise<void> {
+    const dir = await this.requireGameDir(gameName)
+    const existing = await this.readLore(dir)
+    const current = existing.find(l => l.lore.id === loreId)
+    if (!current) throw new NotFoundError(`Záznam lore „${loreId}“ neexistuje.`)
+    // Na lore nic neodkazuje (vazby vlastní záznam sám) – stačí smazat soubor
+    await removeIfExists(path.join(dir, LORE_DIR, current.fileName))
+    await this.touchGame(dir)
+  }
+
+  // ---------- herní sezení (sessions.md) ----------
+
+  private async readSessions(dir: string): Promise<GameSession[]> {
+    const raw = await readTextIfExists(path.join(dir, SESSIONS_FILE))
+    return raw === null ? [] : parseSessions(raw)
+  }
+
+  private async writeSessions(dir: string, sessions: GameSession[]): Promise<void> {
+    await writeFileAtomic(path.join(dir, SESSIONS_FILE), serializeSessions(sessions))
+  }
+
+  async listSessions(name: string): Promise<GameSession[]> {
+    const dir = await this.requireGameDir(name)
+    return this.readSessions(dir)
+  }
+
+  async createSession(gameName: string, input: GameSessionInput): Promise<GameSession> {
+    const dir = await this.requireGameDir(gameName)
+    const existing = await this.readSessions(dir)
+    // Id = začátek v ms; při kolizi (dvě sezení ve stejné ms) posunout o 1 ms
+    let startedAt = input.startedAt
+    while (existing.some(s => s.startedAt === startedAt)) startedAt++
+    const session: GameSession = {
+      id: sessionId(startedAt),
+      startedAt,
+      endedAt: Date.now(),
+      durationSeconds: input.durationSeconds,
+      fun: input.fun,
+      description: input.description?.trim() ?? '',
+    }
+    await this.writeSessions(dir, [...existing, session])
+    await this.touchGame(dir)
+    return session
+  }
+
+  async updateSession(gameName: string, id: string, input: GameSessionInput): Promise<GameSession> {
+    const dir = await this.requireGameDir(gameName)
+    const existing = await this.readSessions(dir)
+    const current = existing.find(s => s.id === id)
+    if (!current) throw new NotFoundError(`Sezení „${id}“ neexistuje.`)
+    if (input.startedAt !== current.startedAt && existing.some(s => s.startedAt === input.startedAt)) {
+      throw new ConflictError('Sezení se stejným začátkem už existuje.')
+    }
+    const session: GameSession = {
+      ...current,
+      id: sessionId(input.startedAt),
+      startedAt: input.startedAt,
+      durationSeconds: input.durationSeconds,
+      fun: input.fun,
+      description: input.description?.trim() ?? current.description,
+    }
+    await this.writeSessions(dir, existing.map(s => (s.id === id ? session : s)))
+    await this.touchGame(dir)
+    return session
+  }
+
+  async deleteSession(gameName: string, id: string): Promise<void> {
+    const dir = await this.requireGameDir(gameName)
+    const existing = await this.readSessions(dir)
+    if (!existing.some(s => s.id === id)) throw new NotFoundError(`Sezení „${id}“ neexistuje.`)
+    await this.writeSessions(dir, existing.filter(s => s.id !== id))
     await this.touchGame(dir)
   }
 }

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { Quest, QuestStatus, QuestType } from '@solo-rpg/shared'
 import { OPEN_QUEST_STATUSES, QUEST_STATUS_ORDER, questProgress } from '@solo-rpg/shared'
 import type { EntityOption } from './EntityChecklist'
+import FilterSelect from './FilterSelect'
 import { inputClass } from '../utils/forms'
 import {
   OBJECTIVE_STATUS_CLASS,
@@ -32,22 +33,6 @@ interface QuestsPanelProps {
 
 const OPEN_SET = new Set<QuestStatus>(OPEN_QUEST_STATUSES)
 const STATUS_RANK = new Map(QUEST_STATUS_ORDER.map((s, i) => [s, i]))
-
-/** Filtrovací select: prázdná hodnota = vše */
-function FilterSelect<T extends string>({ value, options, labels, all, onChange }: {
-  value: T | ''
-  options: readonly T[]
-  labels: Record<T, string>
-  all: string
-  onChange: (value: T | '') => void
-}) {
-  return (
-    <select value={value} onChange={(e) => onChange(e.target.value as T | '')} className={`${inputClass} py-1 text-xs`}>
-      <option value="">{all}</option>
-      {options.map(o => <option key={o} value={o}>{labels[o]}</option>)}
-    </select>
-  )
-}
 
 /** Postup podle povinných cílů: proužek + `2/5` */
 export function ProgressBar({ objectives, className = '' }: { objectives: Quest['objectives']; className?: string }) {

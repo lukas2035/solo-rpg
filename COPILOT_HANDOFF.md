@@ -15,10 +15,9 @@ komunikuje **česky**, je fullstack (React i Java/Spring Boot na stejné úrovni
 - **Teď:** vše běží **lokálně na localhostu** a ukládá se do složky, kterou umí otevřít **Obsidian** jako vault
   (Markdown + YAML frontmatter + obrázky). Lukáš chce soubory ručně editovat v Obsidianu a appka to musí přežít
   (zachovat jeho poznámky/frontmatter klíče, načíst ručně dopsané repliky).
-- **Později:** generování textů přes **OpenRouter** (BE endpoint `POST /api/generate`, klíč v `.env`;
-  přepínání modelů – běžný model např. ChatGPT, pro explicitní 18+ scény přepnout na Mistral Large; řešit modulem
-  `ModelRouter` s konfigurací, flag mature na úrovni hry/uživatele, defaultně vypnuto, uživatelský přepínač
-  režimu scény, ne regex klasifikace).
+- **AI vypravěč přes OpenRouter – první verze HOTOVÁ** (viz §3 „AI vypravěč“). Další plán: SSE streaming odpovědi,
+  přepínání modelů (`ModelRouter`, běžný model vs. Mistral Large pro explicitní 18+ scény; flag mature na úrovni hry/uživatele,
+  defaultně vypnuto, uživatelský přepínač režimu scény, ne regex klasifikace), strukturované návrhy změn nití/questů.
 - **Ještě později (možná):** cloud, více uživatelů, monetizace. Proto: doménový model nezávislý na úložišti,
   `StorageProvider` interface → dnes `ObsidianVaultProvider`, později Postgres/S3.
 
@@ -43,25 +42,36 @@ solo-rpg/
 │                           StoryThread (+ ThreadType/Status/Horizon/Certainty/Clock, ThreadInput, OPEN_THREAD_STATUSES),
 │                           Faction (+ FactionType/Status/Stance, FactionRelation, FactionInput),
 │                           AssetKind/AssetResponse, isValidGameName, INVALID_GAME_NAME_CHARS, isRemoteImage
-├── solo-rpg-be/            Fastify 5 + TS; .env: VAULT_PATH=../vault, PORT=3001
+├── solo-rpg-be/            Fastify 5 + TS; .env: VAULT_PATH=../vault (výchozí, FE ho může přepnout), PORT=3001
 │   └── src/
 │       ├── server.ts, config.ts
-│       ├── routes/games.ts
+│       ├── routes/games.ts, routes/vault.ts (GET/PUT /api/vault, nativní dialogy, /vault/* statické soubory z aktuálního vaultu)
+│       ├── system/dialogs.ts (Windows dialogy výběr složky / Uložit jako přes powershell.exe -STA + WinForms; jinde 501)
 │       └── vault/StorageProvider.ts (interface + NotFound/Conflict/ValidationError)
+│                 VaultManager.ts (aktuální složka s hrami → provider + watcher; `use(path)` přepne, hook čte `x-vault-path` / `?vault=`)
+│                 backup.ts (zip celé složky hry přes `archiver`, zápis do .tmp + rename)
 │                 ObsidianVaultProvider.ts (fs + gray-matter; CRUD postav, migrace npcs/ → characters/)
 │                 sceneMarkdown.ts (parseEntries / serializeEntries / renameSpeaker)
+│                 sessionsMarkdown.ts (parseSessions / serializeSessions – herní sezení v `sessions.md`)
 │                 GameWatcher.ts (fs.watch recursive na složku otevřené hry → SSE `change` události)
 │                 fsUtils.ts (assertInside, writeFileAtomic, safeFileName…)
 ├── solo-rpg-fe/            Vite + React 19 + react-router + Tailwind, lint = oxlint
 │   └── src/
-│       ├── pages/Home.tsx (seznam her přes API)
+│       ├── pages/Home.tsx (seznam her přes API, „Zálohovat hru“, zápatí s aktuální složkou her + „Změnit složku“)
 │       ├── pages/StoryEditor.tsx (přepnuto na API, scény, autosave nastavení s debounce)
-│       ├── components/ CharacterBar, CharacterModal, SceneBar, SceneModal, ImageDropField (sdílené pole obrázku),
+│       ├── components/ VaultGate (při startu: bez uložené cesty zobrazí VaultSetup, jinak PUT /api/vault a teprve pak app),
+│       │               VaultSetup (pole cesty + 📂 nativní výběr + „Vytvořit složku a použít“ když neexistuje),
+│       │               CharacterBar, CharacterModal, SceneBar, SceneModal, ImageDropField (sdílené pole obrázku),
 │       │               NarratorPickerModal (výběr aktuálního vypravěče), NarratorModal (formulář vypravěče),
 │       │               SidePanel (aside se záložkami Nitě | Frakce), ThreadsPanel + ThreadModal (dějové nitě),
 │       │               FactionsPanel + FactionModal (frakce), ChipGroup (chipy pro výčty), EntityChecklist (checklist entit),
-│       │               InputArea, PortraitModal, StoryPanel
-│       └── utils/ api.ts (API klient, ApiError), forms.ts (selectAll, inputClass), threads.ts / factions.ts (české popisky/barvy výčtů)
+│       │               InputArea, PortraitModal, FloatingPortrait (plovoucí okno portrétu), StoryPanel, SessionModal (stopky + hodnocení + historie sezení)
+│       ├── hooks/ useSessionTimer.ts (stav stopek v localStorage per hra)
+│       └── utils/ api.ts (API klient, ApiError; každý request nese `x-vault-path`), vaultPath.ts (cesta k hrám v localStorage `solo-rpg:vault-path` + useVaultPath),
+│                  forms.ts (selectAll, inputClass), threads.ts / factions.ts (české popisky/barvy výčtů),
+│                  exportGame.ts (buildGameMarkdown – celá hra do jednoho textového .md bez obrázků; toPlainMarkdown ruší obrázky
+│                  a wikilinky; downloadTextFile přes Blob; volá se z CharacterBar 📄 → StoryEditor.handleExportGame, který
+│                  si čerstvě stáhne getGame + getSceneEntries všech scén)
 │                  (bývalý import z IndexedDB – legacyBrowserStorage/importLegacyGames – byl odstraněn, data jsou jen ve vaultu)
 └── vault/                  výchozí VAULT_PATH (gitignored jako `/vault/` – POZOR, ne `vault/`, to by ignorovalo i src/vault) – otevřít v Obsidianu „Open folder as vault“
 ```
@@ -69,12 +79,16 @@ solo-rpg/
 ### Layout vaultu (na hru)
 ```
 vault/<Název hry>/
-  game.md                 frontmatter: name, createdAt, updatedAt, background, brightBackground, narrator (wikilink `[[Jméno]]` aktuálního vypravěče | null)
+  game.md                 frontmatter: name, createdAt, updatedAt, background, brightBackground, narrator (wikilink `[[Jméno]]` aktuálního vypravěče | null),
+                          rulesInAi (bool); tělo = volné poznámky hráče + volitelně `<!-- rules -->` + popis pravidel pod příběhem
+                          (`GameSettings.rules`; `splitGameBody`/`joinGameBody`, saveSetup poznámky zachová). UI: `RulesModal` přes 🎲 v CharacterBar,
+                          StoryEditor.handleRulesSave ukládá hned (ne debounce) a synchronizuje `lastSavedSetupRef`.
   characters/<Celé jméno>.md  frontmatter: id, name (celé), firstName, lastName, nickname, portrait, order;
                           tělo = markdown poznámky (editovatelné v modalu i v Obsidianu). PC i NPC bez rozlišení.
                           (stará složka npcs/ se při prvním čtení automaticky přejmenuje, `name` se rozdělí na jméno/příjmení)
-  narrators/<Jméno>.md    frontmatter: id, name, portrait, order; tělo = markdown popis (description). Vypravěč = narrator,
-                          do budoucna napojený na AI (OpenRouter). Nová hra nemá žádného; starý `dm{name,portrait}` v game.md
+  narrators/<Jméno>.md    frontmatter: id, name, portrait, order; tělo = markdown popis (description), za značkou `<!-- ai-prompt -->`
+                          doplňkový AI prompt vypravěče (aiPrompt; značka chybí, když je prázdný). Vypravěč = narrator,
+                          napojený na AI (OpenRouter). Nová hra nemá žádného; starý `dm{name,portrait}` v game.md
                           se při getGame automaticky migruje (soubor + přesun `_dm.*` → portraits/narrators/, výchozí „DM“ bez portrétu se zahodí).
   portraits/<Celé jméno>.png   portréty postav; portraits/narrators/<Jméno>.ext vypravěči (`narrator`); portraits/factions/<Název>.ext emblémy (`faction`)
   threads/<Název>.md      frontmatter: id (thread-<ts>, stabilní i při přejmenování), title, type, status, horizon, certainty,
@@ -89,7 +103,9 @@ vault/<Název hry>/
                           tělo = popis, pak `<!-- outcome -->` výsledek, pak `<!-- notes -->` poznámky (značky chybí, když prázdné).
   backgrounds/<soubor>    obrázky scén jako backgrounds/<Název scény>.ext (+ případné staré pozadí hry `background` v game.md;
                           v UI se už nenastavuje ani nemaže, slouží jen jako fallback pro scény bez obrázku)
-  scenes/001 - Název.md   frontmatter: id, title, order, image, characters (wikilinky `[[Celé jméno]]` postav ve scéně), createdAt, updatedAt
+  scenes/001 - Název.md   frontmatter: id, title, order, image, characters (wikilinky `[[Celé jméno]]` postav ve scéně), location,
+                          ai (bool – AI vypravěč zapnutý), aiCharacters (wikilinky postav hraných AI), aiPrompt (volitelný doplňující popis
+                          situace jen pro AI; null když prázdný, nedědí se do nové scény), createdAt, updatedAt
                           tělo: markdown popis scény, pak značka `<!-- entries -->`, pak záznamy
                           záznamy: <!-- entry id="..." ts="..." --> + **[[Celé jméno|nickname]]**: text  |  **[[Jméno vypravěče]]**:\n víceřádkový text
                           (soubor bez značky = starý formát, celé tělo jsou záznamy; `**DM**:`/`**Vypravěč**:` = vypravěč bez souboru)
@@ -196,6 +212,64 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
   ↑↓✕, Enter přidá), zadavatel, nadřazený quest (+ ↗), odměny CRUD + pořadí, checklisty postav/nití/frakcí, dopočítané
   navazující questy, Výsledek, sbalitelné Poznámky, Smazat s confirm.
 
+### Herní sezení / stopky (FE + BE)
+- **Účel (Lukáš):** měřit reálný čas každého sezení, ohodnotit zábavnost 0–10 po 0,5 a připsat popis – pro pozdější analýzu,
+  co na sólo hraní baví; přehled celkového času ve hře. Sezení **není vázané na scénu**.
+- **Shared:** `GameSession {id, startedAt, endedAt, durationSeconds, fun, description}`, `GameSessionInput`, `FunRatingSchema`
+  (0–10, `v*2` celé číslo). `id` = `String(startedAt)`.
+- **BE:** `vault/sessionsMarkdown.ts` – jeden soubor `<Hra>/sessions.md`: `# Herní sezení`, řádek „Celkem: N sezení · čas · průměr“
+  (jen pro čtení, přepisuje se), pak bloky `## <datum> · <délka> · <fun>/10` + odrážky `Začátek` (ISO, zdroj id), `Konec`,
+  `Délka (s)`, `Zábavnost` (tečka), prázdný řádek, popis (volný markdown až k dalšímu `## `). Parser bere odrážky jen do prvního
+  ne-odrážkového řádku, takže odrážky v popisu nevadí. `ObsidianVaultProvider.list/create/update/deleteSession` (create posune
+  `startedAt` o 1 ms při kolizi, `touchGame`), routy `GET/POST/PUT/DELETE /api/games/:game/sessions[/:session]`.
+- **FE:** `hooks/useSessionTimer(game)` – stav `{startedAt, accumulatedMs, runningSince, fun, description}` v localStorage
+  `solo-rpg:session-timer:<hra>` (přežije zavření dialogu i reload; běžící úsek se dopočítá z `runningSince`), tik 1 s jen za běhu,
+  `start/pause/reset/clear/setFun/setDescription`; stav vázaný na hru bez efektu (derivace v renderu kvůli oxlint react rules).
+  `SessionModal` – velké hodiny, ▶/⏸/↺, `FunRating` (10 hvězd s klikatelnými půlkami + range 0–10 step 0,5), textarea popisu,
+  „💾 Uložit sezení“ (POST, pak `timer.clear()`), historie (řazená od nejnovější, celkem/průměr, inline ✏️ úprava fun+popisu, ✕ smazání).
+  `CharacterBar` tlačítko ⏱️ (`onOpenSession`, `sessionRunning` = zelené + pulzující tečka, `sessionPaused` = oranžové).
+
+### AI vypravěč / OpenRouter (FE + BE) – první verze
+- **Rozhodnutí Lukáše:** samostatné tlačítko 🤖 + dialog scény (ne v NarratorPickeru); AI řádky za hráčovy postavy i neznámá
+  jména se **ukládají** (neznámé jméno → záznam vypravěče s prefixem `Jméno: `), uživatel si je smaže; AI odpoví po **každém**
+  záznamu hráče v AI módu (i za vypravěče). Bez streamování (zatím jen indikátor „🤖 <vypravěč> píše…“).
+- **Konfigurace** (`solo-rpg-be/.env`, `config.ts` → `config.ai`): `OPENROUTER_API_KEY` (bez něj endpoint vrací 503),
+  `OPENROUTER_MODEL` (default `mistralai/mistral-large-2512`), `AI_PROMPT_PATH` (default `prompts/scene-prompt.md`),
+  `AI_MAX_TOKENS` (1500), `AI_TEMPERATURE` (0.9). **`solo-rpg-be/prompts/scene-prompt.md`** = výchozí prompt pro vedení scény
+  (Lukáš tam vloží svůj text z ChatGPT; je verzovaný v gitu).
+- **Datový model:** `Narrator.aiPrompt` (tělo souboru za `<!-- ai-prompt -->`, `NarratorInput.aiPrompt?`), `SceneMeta.ai` +
+  `SceneMeta.aiCharacters` (frontmatter `ai`, `aiCharacters` wikilinky; `SceneInput.ai?/aiCharacters?`, undefined = beze změny).
+  BE: `aiCharacters` jen z postav scény (filtr i při změně `characters`), nová scéna dědí `ai`+`aiCharacters` z poslední,
+  rename/delete postavy propisuje i `aiCharacters` (`renameSpeakerInScenes`, `removeCharacterFromScenes`). Helper `splitByMarker`.
+- **BE modul `src/ai/`:** `openRouter.ts` (`chatCompletion`, `AiError{status}` – sendError ji mapuje na HTTP stav),
+  `scenePrompt.ts` (`buildMessages` – system = soubor promptu, user = Vypravěč → Postavy hráče → Postavy AI (s `notes`) →
+  Scéna (title, location, description) → volitelně „Doplňující popis situace“ (`scene.aiPrompt`) → Dosavadní průběh (`formatTranscript`, stejný formát jako 📋 export: `**Nick**: text`,
+  víceřádkové `**Jméno**:\ntext`) → Pokyny vypravěče (`aiPrompt`) → Úkol; `parseAiReply` – řádky `Jméno: text` i `**Jméno**:`,
+  vypravěč = jeho jméno, Narrator/Vypravěč/GM/DM/Storyteller nebo jméno předchozího vypravěče scény (`previousNarratorNames`
+  z `entries.narratorName`; sekce Vypravěč v promptu na přepnutí upozorní, parser tyto řádky uloží pod aktuálního vypravěče),
+  postava podle celého jména či nicku, řádky bez mluvčího =
+  pokračování (markdown), code fence se odstraní, „neznámé jméno“ jen ≤ 3 slova bez uvozovek, jinak pokračování),
+  `sceneAi.ts` (`generateSceneReply`: getGame → aktuální vypravěč (400 bez něj) → postavy scény rozdělené podle `aiCharacters`
+  → entries → prompt → OpenRouter → parse → **připojí k aktuálnímu stavu scény** (znovu načte, kdyby hráč mezitím psal) →
+  vrací `{ entries: nové, raw }`). Route `POST /api/games/:game/scenes/:scene/ai` (+ `watcher.noteOwnChange` těsně před odpovědí).
+- **FE:** `AiSceneModal` (zapnout/vypnout, karta vypravěče s „✏️ Prompt“/„🎭 Vybrat“, řádek na postavu s přepínačem 🧑 Já / 🤖 AI,
+  „Nechat AI pokračovat“ = uložit + `runAi`), `NarratorModal` má textarea „🤖 AI prompt“, `CharacterBar` má 🤖 (cyan zvýraznění +
+  tečka při zapnuté AI, pulz při generování) a odznak „🤖 AI“ + cyan rámeček u AI postav (`DisplayCharacter.ai`), `InputArea`
+  taby AI postav s prefixem 🤖. `CharacterBar` karta postavy: klik na portrét = `PortraitModal` (celá obrazovka; bez portrétu = editace),
+  při hoveru ikony ✏️ (editace), 🗗 (`onPortraitFloat` → `FloatingPortrait`: plovoucí okno v stránce, `fixed` z-40/41, přetažení za
+  titulek, změna velikosti rohovými úchyty se zamčeným poměrem stran obrázku (`naturalWidth/naturalHeight`, výška se dopočítává
+  z šířky), clamp do viewportu, více oken najednou – `StoryEditor.floatingPortraitIds`, poslední = nahoře; ⛶/dvojklik = `PortraitModal`)
+  a ✕ (`onCharacterRemoveFromScene` → `removeCharacterFromCurrentScene`: PATCH scény bez postavy
+  v `characters` i `aiCharacters`, postava ve hře i její záznamy zůstávají; jen pro `DisplayCharacter.inScene`, ne dočasné mluvčí),
+  pravý klik = smazání z celé hry. `StoryEditor`: `persistStory` vrací Promise; `handleAddEntry` → po uložení `runAi(sceneId)`
+  (guard přes `currentSceneIdRef` – odpověď se nepřipíše do jiné scény; `charactersRef` pro resolve); banner pod StoryPanelem
+  „🤖 X píše…“ / chyba se „Zkusit znovu“; `handleAiSettingsSave` = `PATCH /scenes/:id {title, ai, aiCharacters}`; lokální rename/delete
+  postavy aktualizuje i `aiCharacters` ve `scenes`.
+- **Ověřeno:** build + lint (jen pre-existující warning), API smoke test (aiPrompt roundtrip/zachování/vymazání sekce, ai +
+  aiCharacters PATCH s filtrem neznámé a mimo-scénové postavy, dědění do nové scény, rename/delete postavy, 503 bez klíče),
+  unit test parseru a pořadí částí promptu. **Reálné volání OpenRouteru neproběhlo** (Lukáš teprve doplní klíč) – první věc
+  k ověření v další session; případně doladit `SPEAKER_LINE`/prompt podle skutečných odpovědí Mistralu.
+
 ### Změny ve vaultu zvenčí (Obsidian)
 - Tlačítka „znovu načíst“ (📂/💬) jsou pryč. FE se při otevření hry připojí na `GET /api/games/:name/events` (SSE,
   `api.subscribeVaultChanges`). BE `GameWatcher` sleduje složku hry přes `fs.watch({recursive})` – jen dokud je někdo
@@ -211,17 +285,50 @@ GET  /api/health
 GET/POST /api/games            GET/PATCH(rename)/DELETE /api/games/:name
 PUT  /api/games/:name/setup    (jen backgroundImage, brightBackground, narrator = jméno | null; 404 pro neznámého vypravěče)
 POST /api/games/:name/characters             PUT/DELETE /api/games/:name/characters/:id
-POST /api/games/:name/narrators              PUT/DELETE /api/games/:name/narrators/:id   ({ name, description?, image? })
+POST /api/games/:name/narrators              PUT/DELETE /api/games/:name/narrators/:id   ({ name, description?, aiPrompt?, image? })
 GET/POST /api/games/:name/threads            PUT/DELETE /api/games/:name/threads/:id     (ThreadInput; title+type povinné)
 GET/POST /api/games/:name/factions           PUT/DELETE /api/games/:name/factions/:id    (FactionInput; title+type povinné)
 GET/POST /api/games/:name/quests             PUT/DELETE /api/games/:name/quests/:id      (QuestInput; title+type povinné)
 POST /api/games/:name/assets (multipart: kind portrait|narrator|faction|background|scene, ownerName?, file)
 POST /api/games/:name/assets/from-url ({ kind, url, ownerName? })
-GET/POST /api/games/:name/scenes ({title, description?, image?, characters?})
+GET/POST /api/games/:name/scenes ({title, description?, image?, characters?, location?, ai?, aiCharacters?})
 GET(záznamy)/PUT(záznamy)/PATCH(meta)/DELETE /api/games/:name/scenes/:id
+POST /api/games/:name/scenes/:id/ai  (AI vypravěč odpoví a záznamy uloží; → { entries, raw }; 503 bez klíče, 400 bez vypravěče, 502 chyba OpenRouteru)
+POST /api/games/:name/scenes/:id/summary (AI shrnutí děje scény – `ai/sceneSummary.ts`, prompt `prompts/scene-summary-prompt.md`, teplota max 0.3; nic neukládá → { summary, raw }; 400 bez záznamů)
+  Oba AI endpointy (ai i summary) připojují k system promptu `ai/rulesPrompt.ts#buildRulesSection` – jen při
+  `rulesInAi`, jinak vrací '' a neposílá se nic (příběhové scény bez kostek AI nemate). Se zapnutým přepínačem: obsah
+  `prompts/rules-prompt.md` (`AI_RULES_PROMPT_PATH` – orákulum, hody zapsané v textu jsou fakta, AI nehází) +
+  `## Herní pravidla pod příběhem` = `setup.rules` (nebo věta „žádný konkrétní systém“, když je prázdné).
+  FE export (`utils/exportGame.ts`) má sekci „Kostky a pravidla“ vždy, s `rules` bez ohledu na `rulesInAi`.
 GET  /api/games/:name/events  (SSE: event `change`, data `{paths: string[]}` – změny souborů hry mimo BE)
-GET  /vault/*  (statické soubory vaultu)
+POST /api/games/:name/backup  ({ targetPath: absolutní .zip } → 201 { path, bytes }; 400 pro cíl uvnitř hry / špatnou příponu / chybějící složku)
+GET/PUT /api/vault            (→ { path, defaultPath, nativeDialogs }; PUT { path, create? } přepne složku s hrami, 400 když neexistuje)
+POST /api/system/pick-folder, /api/system/pick-save-file  (nativní dialogy; → { path | null }; 501 mimo Windows, 409 když už jeden běží)
+GET  /vault/*  (statické soubory z aktuálně otevřené složky s hrami)
 ```
+
+### Složka s hrami volitelná per prohlížeč (VaultManager)
+- BE už nemá jeden pevný vault: `VaultManager` drží aktuální `{ path, storage, watcher }`; `use(path)` přepne (složka musí
+  existovat, nebo `create`). Hook `onRequest` v `routes/vault.ts` čte hlavičku `x-vault-path` (URL-encoded, kvůli ne-ASCII
+  znakům) nebo query `vault` a když se liší, přepne. FE (`utils/api.ts`) posílá hlavičku s každým requestem, `?vault=` u
+  EventSource a `assetUrl`. `/vault/*` se servíruje ručně přes `reply.sendFile(rel, vault.path)` (`@fastify/static` se `serve:false`).
+- FE: `VaultGate` v `App.tsx` – bez uložené cesty (localStorage `solo-rpg:vault-path`) zobrazí `VaultSetup`; s cestou zavolá
+  `PUT /api/vault`, při 400 (složka zmizela) znovu nabídne výběr, při nedostupném BE pustí app dál (Home ukáže hlášku).
+- Nativní dialogy (`system/dialogs.ts`): `powershell.exe -STA -EncodedCommand`, WinForms `OpenFileDialog` (trik s fiktivním
+  názvem souboru → rodičovská složka; moderní vzhled s adresním řádkem) a `SaveFileDialog`; neviditelný TopMost owner form,
+  aby dialog vyskočil před prohlížeč. Jen jeden dialog naráz (`DialogBusyError` → 409). Ověřeno: oba dialogy se otevřou se
+  správným titulkem, zrušení vrací `{ path: null }`.
+- Záloha (`vault/backup.ts`): `archiver` 8 (ESM, `new ZipArchive(...)`, default export není), složka hry jako kořenová položka
+  zipu, zápis do `<cíl>.tmp` + rename. Ověřeno smoke testem vč. českého názvu hry.
+
+### Shrnutí děje scény (`SceneMeta.summary`)
+- Nové pole scény `summary` (markdown). V souboru scény leží mezi popisem a záznamy za značkou `<!-- summary -->`
+  (`splitSceneBody`/`joinSceneBody` v `ObsidianVaultProvider.ts`; značka se nezapisuje, když je shrnutí prázdné).
+  `SceneInput.summary` volitelný – PATCH bez něj shrnutí zachová, `""` ho smaže.
+- FE: `SceneModal` má textarea „Shrnutí děje scény“ + tlačítko „🤖 Shrnout pomocí AI“ (jen u existující scény, prop
+  `onSummarize`); výsledek se vloží do pole a uloží až „Uložit“ (`api.summarizeScene`). Při neprázdném poli se ptá na přepsání.
+- Ověřeno reálným voláním OpenRouteru (Mistral Large): odstavec + Klíčové body + Otevřené otázky podle promptu.
+- Nápad na příště: shrnutí předchozích scén přidat do promptu AI vypravěče (`scenePrompt.ts`) jako kontext kampaně.
 
 ### Ověřeno
 - `npm.cmd run build` (shared, BE, FE) prochází; `npm.cmd run lint` – jen 1 pre-existující warning v `InputArea.tsx`.
@@ -256,8 +363,9 @@ npm.cmd run dev          # BE http://127.0.0.1:3001 + FE http://localhost:5173
 ```
 
 ## 5. Co je DALŠÍ na řadě (Lukáš ještě nevybral, zeptej se)
-1. **OpenRouter endpoint** `POST /api/generate` (+ `ModelRouter`, SSE streaming, klíč v `.env`, mature flag) – napojit na
-   vypravěče (`narrators/*.md`, description = systémový prompt / styl), aby AI vypravěč mohl řídit hru.
+1. **AI vypravěč – další kroky:** ověřit s reálným klíčem OpenRouteru a doladit prompt/parser; SSE streaming odpovědi;
+   `ModelRouter` (přepínání modelů, mature flag); AI context builder pro nitě/frakce/questy/lokace/lore (oddělit `description`
+   od `secrets` – tajemství zná jen AI vypravěč); strukturované návrhy změn cílů/stavu questů a nití po scéně.
 2. **Další typy poznámek ve vaultu:** lokace (`locations/*.md`) – vazby na nitě, frakce (sídlo `headquarters`, území) a questy
    (přidat pole + hooky rename/delete jako u postav/scén). Rozšíření postav (typ PC/NPC, vztahy, backlinky „frakce/questy postavy“).
    **Quests – další krok:** vazba scéna → quest (Related Scenes), AI návrhy změn cílů/stavu po scéně (strukturované akce).

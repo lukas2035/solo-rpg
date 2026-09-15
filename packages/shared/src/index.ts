@@ -51,8 +51,10 @@ export const NarratorSchema = z.object({
   id: z.string().min(1),
   /** Jméno = identita vypravěče, název souboru */
   name: z.string().min(1),
-  /** Volný markdown popis – tělo souboru vypravěče */
+  /** Volný markdown popis – tělo souboru vypravěče před značkou `<!-- ai-prompt -->` */
   description: z.string(),
+  /** Doplňkový prompt pro AI (styl, pravidla tohoto vypravěče) – tělo za značkou `<!-- ai-prompt -->`; připojí se na konec požadavku */
+  aiPrompt: z.string(),
   image: ImageRefSchema,
 })
 export type Narrator = z.infer<typeof NarratorSchema>
@@ -61,6 +63,7 @@ export type Narrator = z.infer<typeof NarratorSchema>
 export const NarratorInputSchema = z.object({
   name: z.string().trim().min(1).max(100),
   description: z.string().optional(),
+  aiPrompt: z.string().optional(),
   image: ImageRefSchema.optional(),
 })
 export type NarratorInput = z.infer<typeof NarratorInputSchema>
@@ -71,6 +74,10 @@ export const GameSettingsSchema = z.object({
   brightBackground: z.boolean(),
   /** Jméno aktuálního vypravěče; null = žádný (nová hra vypravěče nemá, uživatel ho musí vytvořit) */
   narrator: z.string().nullable(),
+  /** Popis herních pravidel běžících pod příběhem (VtM 5e, D&D 5e, Fate…; markdown, tělo `game.md` za `<!-- rules -->`); prázdné = bez pravidel */
+  rules: z.string().max(20000),
+  /** Posílat popis pravidel AI (vypravěč i shrnutí scény); frontmatter `rulesInAi` */
+  rulesInAi: z.boolean(),
 })
 export type GameSettings = z.infer<typeof GameSettingsSchema>
 
@@ -97,6 +104,16 @@ export const SceneMetaSchema = z.object({
   image: ImageRefSchema,
   /** Celá jména postav přítomných ve scéně (frontmatter `characters` jako wikilinky) */
   characters: z.array(z.string()),
+  /** Název lokace, kde se scéna odehrává (frontmatter `location` jako wikilink); null = neuvedeno */
+  location: z.string().nullable(),
+  /** AI vypravěč zapnutý pro tuto scénu (frontmatter `ai`) – po každém záznamu hráče odpoví aktuální vypravěč přes OpenRouter */
+  ai: z.boolean(),
+  /** Celá jména postav scény hraných AI (frontmatter `aiCharacters` jako wikilinky); ostatní postavy scény hraje hráč */
+  aiCharacters: z.array(z.string()),
+  /** Volitelný doplňující/shrnující popis situace jen pro AI (frontmatter `aiPrompt`); vloží se za popis scény */
+  aiPrompt: z.string(),
+  /** Celkové zhodnocení / shrnutí děje scény (markdown; tělo souboru za značkou `<!-- summary -->`) – rychlý kontext pro hráče i AI */
+  summary: z.string(),
   createdAt: z.number(),
   updatedAt: z.number(),
 })
@@ -108,6 +125,11 @@ export const SceneInputSchema = z.object({
   description: z.string().optional(),
   image: ImageRefSchema.optional(),
   characters: z.array(z.string().trim().min(1)).optional(),
+  location: z.string().trim().min(1).nullable().optional(),
+  ai: z.boolean().optional(),
+  aiCharacters: z.array(z.string().trim().min(1)).optional(),
+  aiPrompt: z.string().max(5000).optional(),
+  summary: z.string().max(20000).optional(),
 })
 export type SceneInput = z.infer<typeof SceneInputSchema>
 
@@ -158,6 +180,8 @@ export const StoryThreadSchema = z.object({
   scene: z.string().nullable(),
   /** Názvy frakcí, kterých se nit týká (frontmatter `factions` jako wikilinky) */
   factions: z.array(z.string()),
+  /** Názvy lokací, kterých se nit týká (frontmatter `locations` jako wikilinky) */
+  locations: z.array(z.string()),
   /** Markdown popis – tělo souboru */
   description: z.string(),
   createdAt: z.number(),
@@ -177,6 +201,7 @@ export const ThreadInputSchema = z.object({
   characters: z.array(z.string().trim().min(1)).optional(),
   scene: z.string().trim().min(1).nullable().optional(),
   factions: z.array(z.string().trim().min(1)).optional(),
+  locations: z.array(z.string().trim().min(1)).optional(),
   description: z.string().optional(),
 })
 export type ThreadInput = z.infer<typeof ThreadInputSchema>
@@ -184,8 +209,9 @@ export type ThreadInput = z.infer<typeof ThreadInputSchema>
 /**
  * Faction = organizovaná skupina ve světě kampaně (stát, cech, kult, gang…).
  * Soubor `factions/<Název>.md`; vazby jsou wikilinky podle názvu, podfrakce a související nitě se dopočítávají.
+ * Typ `group` = volná parta bez organizační struktury (kamarádi, sousedé); UI u ní skrývá vůdce, hierarchii, cíle a vztahy.
  */
-export const FactionTypeSchema = z.enum(['political', 'military', 'religious', 'criminal', 'commercial', 'clan', 'secret', 'supernatural', 'other'])
+export const FactionTypeSchema = z.enum(['political', 'military', 'religious', 'criminal', 'commercial', 'clan', 'secret', 'supernatural', 'group', 'other'])
 export type FactionType = z.infer<typeof FactionTypeSchema>
 
 export const FactionStatusSchema = z.enum(['active', 'dormant', 'disbanded', 'destroyed', 'unknown'])
@@ -220,6 +246,8 @@ export const FactionSchema = z.object({
   goals: z.array(z.string()),
   /** Celá jména důležitých postav (členové i jiné) */
   characters: z.array(z.string()),
+  /** Názvy lokací – sídlo, území, působiště (wikilinky) */
+  locations: z.array(z.string()),
   relations: z.array(FactionRelationSchema),
   emblem: ImageRefSchema,
   /** Markdown popis – tělo souboru před značkou `<!-- secrets -->` */
@@ -247,6 +275,7 @@ export const FactionInputSchema = z.object({
   parentFaction: z.string().trim().min(1).nullable().optional(),
   goals: z.array(z.string().max(300)).max(50).optional(),
   characters: z.array(z.string().trim().min(1)).optional(),
+  locations: z.array(z.string().trim().min(1)).optional(),
   relations: z.array(FactionRelationInputSchema).max(50).optional(),
   emblem: ImageRefSchema.optional(),
   description: z.string().optional(),
@@ -302,6 +331,8 @@ export const QuestSchema = z.object({
   threads: z.array(z.string()),
   /** Názvy souvisejících frakcí (wikilinky) */
   factions: z.array(z.string()),
+  /** Názvy lokací, kde se quest odehrává (wikilinky) */
+  locations: z.array(z.string()),
   /** Markdown popis – cíl questu, proč vznikl, co o něm postavy vědí */
   description: z.string(),
   /** Jak quest skutečně dopadl (hlavně u ukončených) */
@@ -334,6 +365,7 @@ export const QuestInputSchema = z.object({
   characters: z.array(z.string().trim().min(1)).optional(),
   threads: z.array(z.string().trim().min(1)).optional(),
   factions: z.array(z.string().trim().min(1)).optional(),
+  locations: z.array(z.string().trim().min(1)).optional(),
   description: z.string().optional(),
   outcome: z.string().optional(),
   notes: z.string().optional(),
@@ -344,6 +376,154 @@ export type QuestInput = z.infer<typeof QuestInputSchema>
 export function questProgress(objectives: readonly QuestObjective[]): { done: number; total: number } {
   const required = objectives.filter(o => !o.optional)
   return { done: required.filter(o => o.status === 'completed').length, total: required.length }
+}
+
+/**
+ * StoryLocation = fyzické místo ve světě kampaně (kontinent, město, budova, dungeon…), hierarchické přes `parentLocation`.
+ * Soubor `locations/<Název>.md`; vazby na lokaci vlastní ostatní entity (nit, quest, frakce, scéna) jako wikilinky,
+ * lokace sama drží jen rodiče. Podřízené lokace a zpětné vazby se dopočítávají.
+ * Tělo = popis, za značkou `<!-- secrets -->` tajemství místa (pravda, kterou postavy nemusí znát).
+ * Název `StoryLocation` (ne `Location`) kvůli kolizi s DOM typem `Location`.
+ */
+export const LocationTypeSchema = z.enum(['continent', 'region', 'island', 'city', 'town', 'village', 'district', 'building', 'dungeon', 'wilderness', 'landmark', 'other'])
+export type LocationType = z.infer<typeof LocationTypeSchema>
+
+/** Vztah postav k místu i jeho stav; `unknown` = lokace existuje, ale postavy ji ještě neobjevily */
+export const LocationStatusSchema = z.enum(['unknown', 'known', 'visited', 'abandoned', 'destroyed'])
+export type LocationStatus = z.infer<typeof LocationStatusSchema>
+
+export const StoryLocationSchema = z.object({
+  id: z.string().min(1),
+  /** Název = identita lokace, název souboru */
+  title: z.string().min(1),
+  type: LocationTypeSchema,
+  status: LocationStatusSchema,
+  /** Název nadřazené lokace (wikilink), null = nejvyšší úroveň */
+  parentLocation: z.string().nullable(),
+  /** Obrázek místa (`portraits/locations/<Název>.<ext>`) */
+  image: ImageRefSchema,
+  /** Markdown popis – tělo souboru před značkou `<!-- secrets -->` */
+  description: z.string(),
+  /** Tajemství místa – tělo za značkou */
+  secrets: z.string(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+})
+export type StoryLocation = z.infer<typeof StoryLocationSchema>
+
+/** Vstup pro vytvoření/úpravu lokace; nevyplněná pole při úpravě zůstávají beze změny (`image: null` = odebrat) */
+export const LocationInputSchema = z.object({
+  title: z.string().trim().min(1).max(100),
+  type: LocationTypeSchema,
+  status: LocationStatusSchema.optional(),
+  parentLocation: z.string().trim().min(1).nullable().optional(),
+  image: ImageRefSchema.optional(),
+  description: z.string().optional(),
+  secrets: z.string().optional(),
+})
+export type LocationInput = z.infer<typeof LocationInputSchema>
+
+/**
+ * LoreEntry = záznam encyklopedie světa (historie, legenda, náboženství, magie…) – informace, ne úkol ani hrozba.
+ * Soubor `lore/<Název>.md`; vazby na ostatní entity vlastní záznam (wikilinky), zpětné vazby se dopočítávají.
+ * Dvě nezávislé osy: `truth` (je to skutečně pravda?) a `knowledge` (jak dobře to postavy znají?).
+ * Tělo = obsah, jak je znám ve světě; za značkou `<!-- secrets -->` skutečná pravda (co se opravdu stalo).
+ */
+export const LoreTypeSchema = z.enum(['history', 'legend', 'religion', 'culture', 'magic', 'cosmology', 'politics', 'event', 'prophecy', 'other'])
+export type LoreType = z.infer<typeof LoreTypeSchema>
+
+/** Pravdivost – hodnoty záměrně nejsou `true`/`false`, aby je YAML nečetl jako boolean */
+export const LoreTruthSchema = z.enum(['unknown', 'confirmed', 'partial', 'debunked'])
+export type LoreTruth = z.infer<typeof LoreTruthSchema>
+
+export const LoreKnowledgeSchema = z.enum(['unknown', 'rumored', 'known'])
+export type LoreKnowledge = z.infer<typeof LoreKnowledgeSchema>
+
+export const LoreEntrySchema = z.object({
+  id: z.string().min(1),
+  /** Název = identita záznamu, název souboru */
+  title: z.string().min(1),
+  type: LoreTypeSchema,
+  truth: LoreTruthSchema,
+  knowledge: LoreKnowledgeSchema,
+  /** Celá jména souvisejících postav (wikilinky) */
+  characters: z.array(z.string()),
+  /** Názvy souvisejících lokací, frakcí, questů a nití (wikilinky) */
+  locations: z.array(z.string()),
+  factions: z.array(z.string()),
+  quests: z.array(z.string()),
+  threads: z.array(z.string()),
+  /** Markdown – obsah záznamu tak, jak je znám ve světě */
+  content: z.string(),
+  /** Skutečná pravda (tělo za značkou `<!-- secrets -->`) */
+  secrets: z.string(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+})
+export type LoreEntry = z.infer<typeof LoreEntrySchema>
+
+/** Vstup pro vytvoření/úpravu záznamu; nevyplněná pole při úpravě zůstávají beze změny */
+export const LoreInputSchema = z.object({
+  title: z.string().trim().min(1).max(100),
+  type: LoreTypeSchema,
+  truth: LoreTruthSchema.optional(),
+  knowledge: LoreKnowledgeSchema.optional(),
+  characters: z.array(z.string().trim().min(1)).optional(),
+  locations: z.array(z.string().trim().min(1)).optional(),
+  factions: z.array(z.string().trim().min(1)).optional(),
+  quests: z.array(z.string().trim().min(1)).optional(),
+  threads: z.array(z.string().trim().min(1)).optional(),
+  content: z.string().optional(),
+  secrets: z.string().optional(),
+})
+export type LoreInput = z.infer<typeof LoreInputSchema>
+
+/**
+ * GameSession = jedno reálné herní sezení (měřené stopkami), nezávislé na scénách.
+ * Slouží k přehledu, kolik času hra zabrala a jak jednotlivá sezení bavila.
+ */
+export const FunRatingSchema = z
+  .number()
+  .min(0)
+  .max(10)
+  .refine(v => Number.isInteger(v * 2), { message: 'Zábavnost musí být v krocích po 0,5.' })
+
+export const GameSessionSchema = z.object({
+  id: z.string().min(1),
+  /** Začátek sezení (ms) – datum, kdy bylo odehráno */
+  startedAt: z.number(),
+  /** Uložení záznamu (ms) */
+  endedAt: z.number(),
+  /** Čistý herní čas bez pauz (s) */
+  durationSeconds: z.number().int().min(0),
+  /** Zábavnost 0–10 po půl stupních */
+  fun: FunRatingSchema,
+  description: z.string(),
+})
+export type GameSession = z.infer<typeof GameSessionSchema>
+
+export const GameSessionInputSchema = z.object({
+  startedAt: z.number().int().positive(),
+  durationSeconds: z.number().int().min(0),
+  fun: FunRatingSchema,
+  description: z.string().max(10000).optional(),
+})
+export type GameSessionInput = z.infer<typeof GameSessionInputSchema>
+
+/** Řetězec rodičů lokace od kořene k lokaci samotné (breadcrumb); cyklus/chybějící rodič řetězec ukončí */
+export function locationPath(location: StoryLocation, all: readonly StoryLocation[]): StoryLocation[] {
+  const chain: StoryLocation[] = [location]
+  const seen = new Set<string>([location.id])
+  let cursor: StoryLocation | undefined = location
+  while (cursor?.parentLocation) {
+    const parentTitle: string = cursor.parentLocation
+    const parent = all.find(l => l.title === parentTitle)
+    if (!parent || seen.has(parent.id)) break
+    seen.add(parent.id)
+    chain.unshift(parent)
+    cursor = parent
+  }
+  return chain
 }
 
 export const StoryEntrySchema = z.object({
@@ -366,6 +546,8 @@ export const GameDetailSchema = z.object({
   threads: z.array(StoryThreadSchema),
   factions: z.array(FactionSchema),
   quests: z.array(QuestSchema),
+  locations: z.array(StoryLocationSchema),
+  lore: z.array(LoreEntrySchema),
 })
 export type GameDetail = z.infer<typeof GameDetailSchema>
 
@@ -380,13 +562,13 @@ export type RenameGameRequest = z.infer<typeof RenameGameRequestSchema>
 export const CreateSceneRequestSchema = SceneInputSchema
 export type CreateSceneRequest = SceneInput
 
-export const AssetKindSchema = z.enum(['portrait', 'background', 'narrator', 'scene', 'faction'])
+export const AssetKindSchema = z.enum(['portrait', 'background', 'narrator', 'scene', 'faction', 'location'])
 export type AssetKind = z.infer<typeof AssetKindSchema>
 
 export const AssetFromUrlRequestSchema = z.object({
   kind: AssetKindSchema,
   url: z.url(),
-  /** Celé jméno postavy (portrait), jméno vypravěče (narrator) nebo název scény (scene) – určuje název souboru */
+  /** Celé jméno postavy (portrait), jméno vypravěče (narrator), název scény (scene), frakce (faction) či lokace (location) – určuje název souboru */
   ownerName: z.string().optional(),
 })
 export type AssetFromUrlRequest = z.infer<typeof AssetFromUrlRequestSchema>
@@ -396,6 +578,73 @@ export type AssetResponse = z.infer<typeof AssetResponseSchema>
 
 export const ApiErrorSchema = z.object({ error: z.string() })
 export type ApiError = z.infer<typeof ApiErrorSchema>
+
+/** Odpověď `POST /api/games/:game/scenes/:scene/ai` – záznamy, které AI připsala na konec scény (už uložené ve vaultu) */
+export const AiGenerateResponseSchema = z.object({
+  entries: z.array(StoryEntrySchema),
+  /** Surová odpověď modelu (pro ladění promptu) */
+  raw: z.string(),
+})
+export type AiGenerateResponse = z.infer<typeof AiGenerateResponseSchema>
+
+/** Odpověď `POST /api/games/:game/scenes/:scene/summary` – AI shrnutí děje scény (neukládá se, FE ho vloží do dialogu scény) */
+export const SceneSummaryResponseSchema = z.object({
+  summary: z.string(),
+  /** Surová odpověď modelu (pro ladění promptu) */
+  raw: z.string(),
+})
+export type SceneSummaryResponse = z.infer<typeof SceneSummaryResponseSchema>
+
+// ---------- složka s hrami (vault) ----------
+
+/** Odpověď `GET /api/vault` a `PUT /api/vault` – aktuálně otevřená složka s hrami */
+export const VaultInfoSchema = z.object({
+  /** Absolutní cesta ke složce s hrami, kterou BE právě používá */
+  path: z.string().min(1),
+  /** Výchozí cesta z konfigurace BE (VAULT_PATH) */
+  defaultPath: z.string().min(1),
+  /** Umí BE otevřít nativní dialog pro výběr složky / souboru? (jen Windows) */
+  nativeDialogs: z.boolean(),
+})
+export type VaultInfo = z.infer<typeof VaultInfoSchema>
+
+export const SetVaultRequestSchema = z.object({
+  path: z.string().trim().min(1),
+  /** Vytvořit složku, pokud neexistuje */
+  create: z.boolean().optional(),
+})
+export type SetVaultRequest = z.infer<typeof SetVaultRequestSchema>
+
+// ---------- nativní dialogy ----------
+
+export const PickFolderRequestSchema = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  initialPath: z.string().trim().min(1).optional(),
+})
+export type PickFolderRequest = z.infer<typeof PickFolderRequestSchema>
+
+export const PickSaveFileRequestSchema = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  fileName: z.string().trim().min(1).max(255),
+  initialDir: z.string().trim().min(1).optional(),
+  extension: z.string().trim().regex(/^[a-z0-9]+$/i).optional(),
+})
+export type PickSaveFileRequest = z.infer<typeof PickSaveFileRequestSchema>
+
+/** Vybraná cesta; null = uživatel dialog zrušil */
+export const PickResponseSchema = z.object({ path: z.string().nullable() })
+export type PickResponse = z.infer<typeof PickResponseSchema>
+
+// ---------- záloha hry ----------
+
+export const BackupGameRequestSchema = z.object({
+  /** Absolutní cesta k cílovému .zip souboru */
+  targetPath: z.string().trim().min(1),
+})
+export type BackupGameRequest = z.infer<typeof BackupGameRequestSchema>
+
+export const BackupGameResponseSchema = z.object({ path: z.string().min(1), bytes: z.number().int().nonnegative() })
+export type BackupGameResponse = z.infer<typeof BackupGameResponseSchema>
 
 /** Znaky, které nesmí být v názvu hry (název = složka ve vaultu). */
 export const INVALID_GAME_NAME_CHARS = /[\\/:*?"<>|#^[\]]/
