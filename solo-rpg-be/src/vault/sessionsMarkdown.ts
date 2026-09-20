@@ -18,6 +18,7 @@ import type { GameSession } from '@solo-rpg/shared'
  * ```
  *
  * Nadpis a souhrn jsou jen pro čtení, zdrojem pravdy jsou odrážky pod nadpisem. Id sezení = `startedAt` v ms.
+ * Sezení jsou řazená od nejnovějšího – nový zápis se objeví hned pod souhrnem.
  */
 
 const TITLE = '# Herní sezení'
@@ -48,8 +49,11 @@ function summary(sessions: GameSession[]): string {
   return `Celkem: ${sessions.length} sezení · ${formatDuration(total)} · průměrná zábavnost ${formatFun(Math.round(avg * 10) / 10)}`
 }
 
+/** Od nejnovějšího sezení k nejstaršímu */
+const byNewest = (a: GameSession, b: GameSession) => b.startedAt - a.startedAt
+
 export function serializeSessions(sessions: GameSession[]): string {
-  const sorted = [...sessions].sort((a, b) => a.startedAt - b.startedAt)
+  const sorted = [...sessions].sort(byNewest)
   const blocks = sorted.map(s => {
     const lines = [
       `## ${formatDate(s.startedAt)} · ${formatDuration(s.durationSeconds)} · ${formatFun(s.fun)}`,
@@ -97,5 +101,5 @@ export function parseSessions(raw: string): GameSession[] {
       description,
     })
   }
-  return sessions.sort((a, b) => a.startedAt - b.startedAt)
+  return sessions.sort(byNewest)
 }

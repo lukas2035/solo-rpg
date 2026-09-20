@@ -2384,7 +2384,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       fun: input.fun,
       description: input.description?.trim() ?? '',
     }
-    await this.writeSessions(dir, [...existing, session])
+    await this.writeSessions(dir, [session, ...existing])
     await this.touchGame(dir)
     return session
   }
