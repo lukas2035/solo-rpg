@@ -16,6 +16,8 @@ export interface SceneFormValues {
   characters: string[]
   /** Název lokace, kde se scéna odehrává */
   location: string | null
+  /** Pozice scény v pořadí (1 = první); ostatní scény se přečíslují */
+  order: number
 }
 
 /** Postava hry nabízená v checklistu */
@@ -29,6 +31,8 @@ export interface SceneCharacterOption {
 interface SceneModalProps {
   /** Upravovaná scéna; null = vytvoření nové */
   scene: SceneMeta | null
+  /** Všechny scény hry v pořadí – pro výběr pozice nové/přesouvané scény */
+  scenes: SceneMeta[]
   /** Aktuální obrázek scény jako URL použitelná v <img> */
   image: string | null
   /** Navržený název pro novou scénu */
@@ -53,10 +57,15 @@ interface SceneModalProps {
   onClose: () => void
 }
 
-/** Dialog pro vytvoření a úpravu scény (název, obrázek = pozadí scény, markdown popis, shrnutí děje, přítomné postavy) */
-export default function SceneModal({ scene, image, defaultTitle = '', defaultCharacters = [], defaultLocation = null, allCharacters, allLocations = [], required = false, onSubmit, onCreateCharacter, onSummarize, onDelete, onClose }: SceneModalProps) {
+/** Dialog pro vytvoření a úpravu scény (název, pozice, obrázek = pozadí scény, markdown popis, shrnutí děje, přítomné postavy) */
+export default function SceneModal({ scene, scenes, image, defaultTitle = '', defaultCharacters = [], defaultLocation = null, allCharacters, allLocations = [], required = false, onSubmit, onCreateCharacter, onSummarize, onDelete, onClose }: SceneModalProps) {
   const isEdit = scene !== null
+  const sorted = [...scenes].sort((a, b) => a.order - b.order)
+  // Pozice podle indexu v seřazeném seznamu (soubory ve vaultu mohou mít mezery v číslování)
+  const currentPosition = scene ? Math.max(0, sorted.findIndex(s => s.id === scene.id)) + 1 : sorted.length + 1
+  const positionCount = isEdit ? sorted.length : sorted.length + 1
   const [title, setTitle] = useState(scene?.title ?? defaultTitle)
+  const [order, setOrder] = useState(currentPosition)
   const [description, setDescription] = useState(scene?.description ?? '')
   const [summary, setSummary] = useState(scene?.summary ?? '')
   const [summarizing, setSummarizing] = useState(false)
@@ -126,6 +135,7 @@ export default function SceneModal({ scene, image, defaultTitle = '', defaultCha
         image: imageChanged ? editImage : undefined,
         characters: selected.filter(n => allCharacters.some(c => c.name === n)),
         location: location && allLocations.some(l => l.title === location) ? location : null,
+        order,
       })
       onClose()
     } catch (err) {
@@ -177,6 +187,23 @@ export default function SceneModal({ scene, image, defaultTitle = '', defaultCha
                 className={inputClass}
               />
             </label>
+            {positionCount > 1 && (
+              <label className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">
+                Pozice v příběhu <span className="opacity-60">(následující scény se přečíslují)</span>
+                <select value={order} onChange={(e) => setOrder(Number(e.target.value))} className={inputClass}>
+                  {Array.from({ length: positionCount }, (_, i) => i + 1).map(pos => {
+                    // U nové scény: „před“ scénou, která je teď na této pozici; u úpravy: scéna, s níž si vymění místo
+                    const others = isEdit ? sorted.filter(s => s.id !== scene.id) : sorted
+                    const before = others[pos - 1]
+                    let label: string
+                    if (isEdit && pos === currentPosition) label = `${pos} – současná pozice`
+                    else if (!before) label = `${pos} – na konec`
+                    else label = `${pos} – před „${before.title}“`
+                    return <option key={pos} value={pos}>{label}</option>
+                  })}
+                </select>
+              </label>
+            )}
             {allLocations.length > 0 && (
               <label className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">
                 Odehrává se v

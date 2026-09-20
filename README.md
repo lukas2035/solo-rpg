@@ -29,8 +29,11 @@ Konfigurace BE je v `solo-rpg-be/.env` (viz `.env.example`):
 ```
 VAULT_PATH=../vault   # výchozí složka s hrami – lze ji přepnout v prohlížeči (viz níže)
 PORT=3001
-OPENROUTER_API_KEY=   # klíč z https://openrouter.ai/keys – bez něj je AI vypravěč vypnutý
-OPENROUTER_MODEL=mistralai/mistral-large-2512
+AI_PROVIDER=openrouter   # `openrouter` nebo `mistral` (přímo Mistral AI API)
+OPENROUTER_API_KEY=   # klíč z https://openrouter.ai/keys – bez něj je AI vypravěč vypnutý (při AI_PROVIDER=openrouter)
+OPENROUTER_MODEL=mistralai/mistral-medium-3-5
+MISTRAL_API_KEY=      # klíč z https://console.mistral.ai/api-keys (při AI_PROVIDER=mistral)
+MISTRAL_MODEL=mistral-medium-latest
 AI_PROMPT_PATH=prompts/scene-prompt.md   # výchozí prompt pro vedení scény (uprav si ho podle sebe)
 ```
 
@@ -48,6 +51,11 @@ AI_PROMPT_PATH=prompts/scene-prompt.md   # výchozí prompt pro vedení scény (
 - **Export hry do textu** – tlačítko 📄 v horní liště otevřené hry stáhne `<hra>.md`: jeden Markdown soubor
   s vypravěči, postavami, lokacemi, frakcemi, questy, nitěmi, lore a přepisem všech scén (včetně shrnutí a tajemství).
   Jen text – obrázky se vynechají, wikilinky se převedou na prostý text. Hodí se jako kontext pro ChatGPT / Gemini.
+- **Import odehraného textu** – tlačítko 📥 v horní liště otevře dialog, kam vložíš přepis ze schránky (např. z Notionu).
+  Repliky ve tvaru `**Jméno**: text` nebo `**Jméno:** text` (tučné nevadí) se rozdělí podle mluvčích a připíší na konec
+  aktuální scény; jména se párují na postavy hry (celé jméno, přezdívka i křestní jméno) a vypravěče. Když jméno sedí na
+  víc postav (dvě Kláry), dialog je vypíše a nechá tě vybrat, o kterou jde – do té doby se nic neuloží. Řádky bez jména navazují na
+  předchozí repliku jako víceřádkový markdown, neznámé tučné jméno vytvoří dočasnou postavu (v pásu postav ji můžeš uložit).
 
 ### AI vypravěč (OpenRouter)
 
@@ -58,16 +66,20 @@ AI_PROMPT_PATH=prompts/scene-prompt.md   # výchozí prompt pro vedení scény (
   `<!-- ai-prompt -->`), který se připojí na konec požadavku.
 - Požadavek = `prompts/scene-prompt.md` (system) + postavy hráče a AI s popisy + popis scény + celý dosavadní průběh scény
   (formát jako 📋 kopírování) + prompt vypravěče. Odpověď ve tvaru `Jméno: text` se rozparsuje na záznamy a uloží do scény.
-- V AI módu odpoví vypravěč po každém tvém záznamu; AI postavy jsou v pásu označené 🤖 AI.
+- V AI módu se vypravěč nespouští automaticky – vpravo od záložky vypravěče je tlačítko **🤖 AI pokračuje**, které nechá
+  AI napsat další text do scény (počká na uložení tvého posledního záznamu). Stejný efekt má Enter v prázdném zadávacím
+  políčku. AI postavy jsou v pásu označené 🤖 AI.
 - **Shrnutí děje scény**: dialog scény (✏️) má víceřádkové markdown pole „Shrnutí děje scény“ – rychlý kontext pro tebe
   i AI. Tlačítko „🤖 Shrnout pomocí AI“ pošle přepis scény stejnému modelu s promptem `prompts/scene-summary-prompt.md`
   (`AI_SUMMARY_PROMPT_PATH`) a výsledek vloží do pole; uloží se až tlačítkem „Uložit“ (do souboru scény za značku `<!-- summary -->`).
 - **Kostky a pravidla pod příběhem**: tlačítko 🎲 v horní liště otevře dialog s markdown popisem pravidlového systému,
   který pod příběhem používáš (VtM 5e, D&D 5e, Fate…, případně vlastní tabulka pro výklad orákula), a zaškrtávátkem
-  „Posílat informace o kostkách a pravidlech AI“. Se zapnutým přepínačem se ke každému AI požadavku (vypravěč i shrnutí
-  scény) připojí prompt `prompts/rules-prompt.md` (`AI_RULES_PROMPT_PATH`) vysvětlující, že si házíš kostkami jako orákulem
-  a výsledky zapisuješ do textu, plus tvůj popis pravidel. S vypnutým přepínačem se AI o kostkách neposílá vůbec nic
-  (čistě příběhové scény). Do textového exportu hry (📄) jdou pravidla vždy.
+  „Posílat informace o kostkách a pravidlech AI vypravěči“. Ten se týká jen generování nových textů vypravěče ve scéně
+  řízené AI: se zapnutým přepínačem se k požadavku připojí prompt `prompts/rules-prompt.md` (`AI_RULES_PROMPT_PATH`)
+  vysvětlující, že si házíš kostkami jako orákulem a výsledky zapisuješ do textu, plus tvůj popis pravidel. S vypnutým
+  přepínačem se vypravěči o kostkách neposílá vůbec nic (čistě příběhové scény). Ke shrnutí scény i do textového exportu
+  hry (📄) jdou pravidla vždy – export používá stejný text (`rules-prompt.md` + tvůj popis) jako AI, takže úprava souboru
+  se projeví i v něm.
   Popis se ukládá do `game.md` za značku `<!-- rules -->` (tvé poznámky nad ní zůstávají), přepínač jako `rulesInAi`.
 
 ### Herní sezení (stopky)
@@ -128,6 +140,9 @@ Starší hry s `dm` v `game.md` se při otevření automaticky převedou na soub
 Aplikace při zápisu zachovává vlastní frontmatter klíče a tělo poznámek u postav i hry.
 Přejmenování postavy v aplikaci přejmenuje soubor, portrét i odkazy ve scénách; přejmenování scény
 přejmenuje její soubor i obrázek.
+Pořadí scén určuje frontmatter `order` (= prefix `001 - ` v názvu souboru). V dialogu scény lze zvolit **pozici v příběhu** –
+novou scénu vložit před libovolnou stávající nebo existující scénu přesunout; následující scény se automaticky přečíslují
+(přepíší se jejich soubory, `id` zůstává). Po smazání scény se mezera v číslování také zaplní.
 
 ### Dějové nitě (threads)
 

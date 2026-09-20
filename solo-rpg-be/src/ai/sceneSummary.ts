@@ -4,7 +4,7 @@ import type { FastifyBaseLogger as Logger } from 'fastify'
 import type { Config } from '../config.js'
 import type { StorageProvider } from '../vault/StorageProvider.js'
 import { NotFoundError } from '../vault/StorageProvider.js'
-import { AiError, chatCompletion, type ChatMessage } from './openRouter.js'
+import { AiError, PROVIDER_LABEL, chatCompletion, requireApiKey, type ChatMessage } from './provider.js'
 import { formatTranscript } from './scenePrompt.js'
 import { buildRulesSection } from './rulesPrompt.js'
 
@@ -12,11 +12,11 @@ import { buildRulesSection } from './rulesPrompt.js'
 const FALLBACK_NARRATOR: Narrator = { id: 'narrator', name: 'Vypravěč', description: '', aiPrompt: '', image: null }
 
 /**
- * Nechá model shrnout děj scény (stejný OpenRouter + model jako AI vypravěč, jiný prompt ze souboru
+ * Nechá model shrnout děj scény (stejný AI provider + model jako AI vypravěč, jiný prompt ze souboru
  * `prompts/scene-summary-prompt.md`). Výsledek se neukládá – FE ho vloží do pole „Shrnutí“ v dialogu scény.
  */
 export async function summarizeScene(storage: StorageProvider, config: Config, gameName: string, sceneId: string, log?: Logger): Promise<SceneSummaryResponse> {
-  if (!config.ai.apiKey) throw new AiError(503, 'AI není nakonfigurovaná – doplň OPENROUTER_API_KEY do solo-rpg-be/.env a restartuj server.')
+  const apiKey = requireApiKey(config)
 
   const detail = await storage.getGame(gameName)
   if (!detail) throw new NotFoundError(`Hra „${gameName}“ neexistuje.`)
@@ -49,15 +49,16 @@ export async function summarizeScene(storage: StorageProvider, config: Config, g
   sections.push('## Úkol\nShrň děj této scény podle pokynů.')
 
   const messages: ChatMessage[] = [
+    // Pravidla se ke shrnutí přikládají vždy (přepínač rulesInAi se týká jen generování textů vypravěče)
     { role: 'system', content: [prompt.trim(), await buildRulesSection(config, detail.setup)].filter(Boolean).join('\n\n') },
     { role: 'user', content: sections.join('\n\n') },
   ]
   if (config.ai.debug) {
     const dump = messages.map(m => `───── ${m.role.toUpperCase()} ─────\n${m.content}`).join('\n\n')
-    log?.info(`[AI shrnutí] model=${config.ai.model} scéna="${scene.title}"\n${dump}`)
+    log?.info(`[AI shrnutí] provider=${PROVIDER_LABEL[config.ai.provider]} model=${config.ai.model} scéna="${scene.title}"\n${dump}`)
   }
-  const raw = await chatCompletion(messages, {
-    apiKey: config.ai.apiKey,
+  const raw = await chatCompletion(config.ai.provider, messages, {
+    apiKey,
     model: config.ai.model,
     maxTokens: config.ai.maxTokens,
     // Shrnutí má být věcné a stabilní, ne kreativní

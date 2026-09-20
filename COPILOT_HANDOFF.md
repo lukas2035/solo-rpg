@@ -134,10 +134,18 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
 - Dokud hra nemá vypravěče: v `InputArea` je místo tabu vypravěče tlačítko **„Zadat vypravěče“** (otevře `NarratorModal`),
   výběr vypravěče (klik, Ctrl/Alt+0, Tab) není možný, výchozí výběr padne na první postavu; první vytvořený vypravěč se
   rovnou stane aktuálním. Záznam vypravěče nese `narrator` (portrét + jméno v `StoryPanel`); bez souboru → placeholder „Vypravěč“.
+- `StoryPanel`: klik do textu = inline editace (`onEntryEdit`), pravý klik = smazání, **klik na jméno nad textem = změna
+  mluvčího** (`speakerOptions` = postavy aktuální scény + vypravěči hry, `onEntrySpeakerChange` → `handleEntrySpeakerChange`
+  přepíše `character`/`narrator` záznamu a uloží scénu). Select má hodnoty `c:<id>` / `n:<id>`; aktuální mluvčí mimo nabídku
+  (dočasná postava) se přidá jako první možnost.
 - `public/dm.png` byl odstraněn – žádný výchozí portrét vypravěče.
 
 ### Scény (FE)
-- `SceneBar`: select scén, „+“ (nová) a ✏️ (úprava aktuální) → `SceneModal`: název, markdown popis, obrázek scény.
+- `SceneBar`: select scén, „+“ (nová) a ✏️ (úprava aktuální) → `SceneModal`: název, pozice v příběhu, markdown popis, obrázek scény.
+- **Pozice scény**: `SceneInput.order` (1 = první). `createScene` bez `order` = na konec, jinak vloží na pozici (postavy/AI
+  nastavení dědí ze scény, za kterou se vkládá); `updateScene` s `order` scénu přesune, bez něj pozici nemění. BE pak
+  `renumberScenes` srovná všechny scény na souvislou řadu 1..n (přepíše `order` + přejmenuje soubory `001 - `, jen kde se
+  něco mění); totéž po `deleteScene`. FE po create/update/delete znovu načte `GET /scenes`.
 - Obrázek scény se ukládá jako `backgrounds/<Název scény>.ext` (AssetKind `scene`, `ownerName` = název) a při aktivní
   scéně má přednost před pozadím hry. Přejmenování scény přejmenuje soubor i obrázek; smazání scény smaže i obrázek.
 - Submit: `POST /scenes` nebo `PATCH /scenes/:id` (409 při duplicitním názvu) → `storeImage` → `PATCH` s cestou.
@@ -233,15 +241,18 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
 - **Rozhodnutí Lukáše:** samostatné tlačítko 🤖 + dialog scény (ne v NarratorPickeru); AI řádky za hráčovy postavy i neznámá
   jména se **ukládají** (neznámé jméno → záznam vypravěče s prefixem `Jméno: `), uživatel si je smaže; AI odpoví po **každém**
   záznamu hráče v AI módu (i za vypravěče). Bez streamování (zatím jen indikátor „🤖 <vypravěč> píše…“).
-- **Konfigurace** (`solo-rpg-be/.env`, `config.ts` → `config.ai`): `OPENROUTER_API_KEY` (bez něj endpoint vrací 503),
-  `OPENROUTER_MODEL` (default `mistralai/mistral-large-2512`), `AI_PROMPT_PATH` (default `prompts/scene-prompt.md`),
+- **Konfigurace** (`solo-rpg-be/.env`, `config.ts` → `config.ai`): `AI_PROVIDER` (`openrouter` default | `mistral`),
+  `OPENROUTER_API_KEY` / `MISTRAL_API_KEY` (podle providera; bez klíče endpoint vrací 503),
+  `OPENROUTER_MODEL` (default `mistralai/mistral-medium-3-5`) / `MISTRAL_MODEL` (default `mistral-medium-latest`),
+  `AI_PROMPT_PATH` (default `prompts/scene-prompt.md`),
   `AI_MAX_TOKENS` (1500), `AI_TEMPERATURE` (0.9). **`solo-rpg-be/prompts/scene-prompt.md`** = výchozí prompt pro vedení scény
   (Lukáš tam vloží svůj text z ChatGPT; je verzovaný v gitu).
 - **Datový model:** `Narrator.aiPrompt` (tělo souboru za `<!-- ai-prompt -->`, `NarratorInput.aiPrompt?`), `SceneMeta.ai` +
   `SceneMeta.aiCharacters` (frontmatter `ai`, `aiCharacters` wikilinky; `SceneInput.ai?/aiCharacters?`, undefined = beze změny).
   BE: `aiCharacters` jen z postav scény (filtr i při změně `characters`), nová scéna dědí `ai`+`aiCharacters` z poslední,
   rename/delete postavy propisuje i `aiCharacters` (`renameSpeakerInScenes`, `removeCharacterFromScenes`). Helper `splitByMarker`.
-- **BE modul `src/ai/`:** `openRouter.ts` (`chatCompletion`, `AiError{status}` – sendError ji mapuje na HTTP stav),
+- **BE modul `src/ai/`:** `types.ts` (`ChatMessage`, `ChatOptions`, `AiError{status}` – sendError ji mapuje na HTTP stav),
+  `provider.ts` (`chatCompletion(provider, …)` přepíná podle `config.ai.provider`, `requireApiKey`), `openRouter.ts` / `mistral.ts` (klienti),
   `scenePrompt.ts` (`buildMessages` – system = soubor promptu, user = Vypravěč → Postavy hráče → Postavy AI (s `notes`) →
   Scéna (title, location, description) → volitelně „Doplňující popis situace“ (`scene.aiPrompt`) → Dosavadní průběh (`formatTranscript`, stejný formát jako 📋 export: `**Nick**: text`,
   víceřádkové `**Jméno**:\ntext`) → Pokyny vypravěče (`aiPrompt`) → Úkol; `parseAiReply` – řádky `Jméno: text` i `**Jméno**:`,
@@ -258,11 +269,16 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
   taby AI postav s prefixem 🤖. `CharacterBar` karta postavy: klik na portrét = `PortraitModal` (celá obrazovka; bez portrétu = editace),
   při hoveru ikony ✏️ (editace), 🗗 (`onPortraitFloat` → `FloatingPortrait`: plovoucí okno v stránce, `fixed` z-40/41, přetažení za
   titulek, změna velikosti rohovými úchyty se zamčeným poměrem stran obrázku (`naturalWidth/naturalHeight`, výška se dopočítává
-  z šířky), clamp do viewportu, více oken najednou – `StoryEditor.floatingPortraitIds`, poslední = nahoře; ⛶/dvojklik = `PortraitModal`)
+  z šířky), clamp do viewportu, více oken najednou – `StoryEditor.floatingPortraitIds`, poslední = nahoře; ⛶/dvojklik = `PortraitModal`;
+  stejné okno otevře i 🗗 vedle 🖼️ v horní liště pro obrázek pozadí (`onFloatBackground`, zástupné ID `BACKGROUND_FLOAT_ID`, název
+  „Pozadí – <scéna>“, obrázek sleduje `displayBackground` aktuální scény))
   a ✕ (`onCharacterRemoveFromScene` → `removeCharacterFromCurrentScene`: PATCH scény bez postavy
   v `characters` i `aiCharacters`, postava ve hře i její záznamy zůstávají; jen pro `DisplayCharacter.inScene`, ne dočasné mluvčí),
-  pravý klik = smazání z celé hry. `StoryEditor`: `persistStory` vrací Promise; `handleAddEntry` → po uložení `runAi(sceneId)`
-  (guard přes `currentSceneIdRef` – odpověď se nepřipíše do jiné scény; `charactersRef` pro resolve); banner pod StoryPanelem
+  pravý klik = smazání z celé hry.   `StoryEditor`: `persistStory` vrací Promise a ukládá ji do `pendingSaveRef`; AI se **nespouští automaticky
+    po záznamu hráče**, ale tlačítkem „🤖 AI pokračuje“ v `InputArea` vpravo od záložky vypravěče (`onGenerateAi`/`aiBusy` props,
+    jen když `scene.ai` a existuje vypravěč; odeslání prázdného políčka v `handleSubmit` volá totéž) → `handleGenerateAi`
+  → `runAi(sceneId)`, který nejdřív počká na `pendingSaveRef`
+    (guard přes `currentSceneIdRef` – odpověď se nepřipíše do jiné scény; `charactersRef` pro resolve); banner pod StoryPanelem
   „🤖 X píše…“ / chyba se „Zkusit znovu“; `handleAiSettingsSave` = `PATCH /scenes/:id {title, ai, aiCharacters}`; lokální rename/delete
   postavy aktualizuje i `aiCharacters` ve `scenes`.
 - **Ověřeno:** build + lint (jen pre-existující warning), API smoke test (aiPrompt roundtrip/zachování/vymazání sekce, ai +
@@ -294,12 +310,23 @@ POST /api/games/:name/assets/from-url ({ kind, url, ownerName? })
 GET/POST /api/games/:name/scenes ({title, description?, image?, characters?, location?, ai?, aiCharacters?})
 GET(záznamy)/PUT(záznamy)/PATCH(meta)/DELETE /api/games/:name/scenes/:id
 POST /api/games/:name/scenes/:id/ai  (AI vypravěč odpoví a záznamy uloží; → { entries, raw }; 503 bez klíče, 400 bez vypravěče, 502 chyba OpenRouteru)
+POST /api/games/:name/scenes/:id/import ({ text, resolutions? } – import odehraného přepisu, `vault/sceneImport.ts`; → { entries, addedCharacters, ambiguous }; 400 prázdný/nerozpoznaný text)
+  Přepis `**Jméno**: text` / `**Jméno:** text` (tučné nepovinné) parsuje `ai/scenePrompt.ts#parseSpeakerLines` (společné jádro
+  s `parseAiReply`) s volbou `unknownSpeaker: 'bold-character'` a vlastním `matchCharacter`: celé jméno → jednoznačné; jinak
+  `resolutions[jméno]` (case-insensitive); jinak postavy se stejnou přezdívkou **nebo křestním jménem** – jedna = shoda, více =
+  nejednoznačné → BE **nic neuloží** a vrátí `ambiguous: [{ name, candidates }]` (varianty zápisu sjednocené), FE
+  `ImportTranscriptModal` zobrazí radio výběr a pošle znovu s `resolutions`. Aktuální vypravěč (+ obecná označení a předchozí
+  vypravěči scény) i ostatní vypravěči hry pod svým jménem; tučné neznámé jméno (≤3 slova) = dočasná postava, netučné
+  `Něco: text` = pokračování předchozího záznamu (markdown). Postavy hry mluvící v přepisu, které ve scéně chybí, import do
+  scény doplní. FE: ikona 📥 v `CharacterBar` → `ImportTranscriptModal` → `handleImportTranscript`.
 POST /api/games/:name/scenes/:id/summary (AI shrnutí děje scény – `ai/sceneSummary.ts`, prompt `prompts/scene-summary-prompt.md`, teplota max 0.3; nic neukládá → { summary, raw }; 400 bez záznamů)
-  Oba AI endpointy (ai i summary) připojují k system promptu `ai/rulesPrompt.ts#buildRulesSection` – jen při
-  `rulesInAi`, jinak vrací '' a neposílá se nic (příběhové scény bez kostek AI nemate). Se zapnutým přepínačem: obsah
+  Oba AI endpointy (ai i summary) připojují k system promptu `ai/rulesPrompt.ts#buildRulesSection`: obsah
   `prompts/rules-prompt.md` (`AI_RULES_PROMPT_PATH` – orákulum, hody zapsané v textu jsou fakta, AI nehází) +
   `## Herní pravidla pod příběhem` = `setup.rules` (nebo věta „žádný konkrétní systém“, když je prázdné).
-  FE export (`utils/exportGame.ts`) má sekci „Kostky a pravidla“ vždy, s `rules` bez ohledu na `rulesInAi`.
+  Přepínač `rulesInAi` respektuje jen endpoint `ai` (generování textů vypravěče; `buildRulesSection(..., true)` – při
+  vypnutém vrací '' a neposílá se nic, příběhové scény bez kostek AI nemate). Shrnutí (`summary`) dostává pravidla vždy.
+  FE export (`utils/exportGame.ts`) má sekci o kostkách a pravidlech vždy: bere ji z `GET /api/games/:name/rules-prompt`
+  (→ { text } = `buildRulesSection` bez ohledu na `rulesInAi`, tj. stejný text jako dostává AI); při chybě záložní zkrácený text v kódu FE.
 GET  /api/games/:name/events  (SSE: event `change`, data `{paths: string[]}` – změny souborů hry mimo BE)
 POST /api/games/:name/backup  ({ targetPath: absolutní .zip } → 201 { path, bytes }; 400 pro cíl uvnitř hry / špatnou příponu / chybějící složku)
 GET/PUT /api/vault            (→ { path, defaultPath, nativeDialogs }; PUT { path, create? } přepne složku s hrami, 400 když neexistuje)

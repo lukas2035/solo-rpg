@@ -4,16 +4,16 @@ import type { FastifyBaseLogger as Logger } from 'fastify'
 import type { Config } from '../config.js'
 import type { StorageProvider } from '../vault/StorageProvider.js'
 import { NotFoundError } from '../vault/StorageProvider.js'
-import { AiError, chatCompletion } from './openRouter.js'
+import { AiError, PROVIDER_LABEL, chatCompletion, requireApiKey } from './provider.js'
 import { buildMessages, parseAiReply, previousNarratorNames } from './scenePrompt.js'
 import { buildRulesSection } from './rulesPrompt.js'
 
 /**
- * Nechá aktuálního vypravěče hry odpovědět ve scéně: sestaví prompt z vaultu, zavolá OpenRouter,
- * odpověď rozparsuje na záznamy a připíše je na konec scény. Vrací jen nově přidané záznamy.
+ * Nechá aktuálního vypravěče hry odpovědět ve scéně: sestaví prompt z vaultu, zavolá AI providera
+ * (OpenRouter / Mistral AI), odpověď rozparsuje na záznamy a připíše je na konec scény. Vrací jen nově přidané záznamy.
  */
 export async function generateSceneReply(storage: StorageProvider, config: Config, gameName: string, sceneId: string, log?: Logger): Promise<AiGenerateResponse> {
-  if (!config.ai.apiKey) throw new AiError(503, 'AI není nakonfigurovaná – doplň OPENROUTER_API_KEY do solo-rpg-be/.env a restartuj server.')
+  const apiKey = requireApiKey(config)
 
   const detail = await storage.getGame(gameName)
   if (!detail) throw new NotFoundError(`Hra „${gameName}“ neexistuje.`)
@@ -37,13 +37,13 @@ export async function generateSceneReply(storage: StorageProvider, config: Confi
     throw new AiError(500, `Soubor s výchozím promptem nenalezen: ${config.ai.promptPath}`)
   }
 
-  const messages = buildMessages({ defaultPrompt, rulesPrompt: await buildRulesSection(config, detail.setup), narrator, scene, playerCharacters, aiCharacters, entries })
+  const messages = buildMessages({ defaultPrompt, rulesPrompt: await buildRulesSection(config, detail.setup, true), narrator, scene, playerCharacters, aiCharacters, entries })
   if (config.ai.debug) {
     const dump = messages.map(m => `───── ${m.role.toUpperCase()} ─────\n${m.content}`).join('\n\n')
-    log?.info(`[AI] model=${config.ai.model} scéna="${scene.title}" hráč=[${playerCharacters.map(c => c.name).join(', ')}] AI=[${aiCharacters.map(c => c.name).join(', ')}]\n${dump}`)
+    log?.info(`[AI] provider=${PROVIDER_LABEL[config.ai.provider]} model=${config.ai.model} scéna="${scene.title}" hráč=[${playerCharacters.map(c => c.name).join(', ')}] AI=[${aiCharacters.map(c => c.name).join(', ')}]\n${dump}`)
   }
-  const raw = await chatCompletion(messages, {
-    apiKey: config.ai.apiKey,
+  const raw = await chatCompletion(config.ai.provider, messages, {
+    apiKey,
     model: config.ai.model,
     maxTokens: config.ai.maxTokens,
     temperature: config.ai.temperature,

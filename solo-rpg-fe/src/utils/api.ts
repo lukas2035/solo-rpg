@@ -14,6 +14,9 @@ import type {
   SceneInput,
   SceneMeta,
   SceneSummaryResponse,
+  SceneImportRequest,
+  SceneImportResponse,
+  RulesPromptResponse,
   StoryEntry,
   StoryThread,
   ThreadInput,
@@ -214,6 +217,10 @@ export const saveSceneEntries = (game: string, sceneId: string, entries: StoryEn
 export const deleteScene = (game: string, sceneId: string) =>
   request<void>('DELETE', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}`)
 
+/** Import odehraného přepisu (`**Jméno**: text`) – BE ho rozdělí na záznamy podle mluvčích a připíše na konec scény */
+export const importSceneTranscript = (game: string, sceneId: string, text: string, resolutions?: Record<string, string>) =>
+  request<SceneImportResponse>('POST', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/import`, { text, resolutions } satisfies SceneImportRequest)
+
 // ---------- AI vypravěč ----------
 
 /** Nechá aktuálního vypravěče odpovědět (OpenRouter); vrací nové záznamy, které BE už připsal do scény */
@@ -223,6 +230,9 @@ export const generateAiReply = (game: string, sceneId: string) =>
 /** Nechá AI shrnout děj scény (nic neukládá – výsledek se vloží do pole „Shrnutí“ v dialogu scény) */
 export const summarizeScene = (game: string, sceneId: string) =>
   request<SceneSummaryResponse>('POST', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/summary`)
+
+/** Sekce o kostkách a pravidlech přesně tak, jak ji dostává AI (`prompts/rules-prompt.md` + pravidla hry) – pro textový export */
+export const getRulesPrompt = (game: string) => request<RulesPromptResponse>('GET', `${gamePath(game)}/rules-prompt`)
 
 // ---------- dějové nitě (threads) ----------
 

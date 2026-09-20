@@ -72,7 +72,11 @@ interface CharacterBarProps {
   locationCount?: number
   loreCount?: number
   onClearStory?: () => Promise<boolean>
+  /** Ikona 📥 → dialog pro vložení odehraného přepisu do aktuální scény */
+  onImportTranscript?: () => void
   onShowBackground?: () => void
+  /** Ikona 🗗 vedle 🖼️ → otevřít obrázek pozadí v plovoucím okně */
+  onFloatBackground?: () => void
 }
 
 export default function CharacterBar({
@@ -113,7 +117,9 @@ export default function CharacterBar({
   locationCount = 0,
   loreCount = 0,
   onClearStory,
+  onImportTranscript,
   onShowBackground,
+  onFloatBackground,
 }: CharacterBarProps) {
   const navigate = useNavigate()
   const [aspectRatios, setAspectRatios] = useState<Record<string, number>>({})
@@ -349,7 +355,7 @@ export default function CharacterBar({
             <button
               type="button"
               onClick={onOpenRules}
-              title={rulesInAi ? 'Kostky a pravidla pod příběhem (posílají se AI)' : 'Kostky a pravidla pod příběhem (AI se neposílají)'}
+              title={rulesInAi ? 'Kostky a pravidla pod příběhem (posílají se AI vypravěči)' : 'Kostky a pravidla pod příběhem (AI vypravěči se neposílají)'}
               className={`relative w-8 h-8 rounded-md border bg-black/50 flex items-center justify-center cursor-pointer text-sm hover:bg-black/80 transition-all ${
                 rulesInAi ? 'border-cyan-400 bg-cyan-500/20 text-cyan-300 hover:border-cyan-300' : 'border-[var(--accent)]/60 text-[var(--accent)] hover:border-[var(--accent)]'
               }`}
@@ -385,6 +391,16 @@ export default function CharacterBar({
           >
             {feedback === 'story-cleared' ? '✓' : feedback === 'story-clear-failed' ? '✗' : '🗑️'}
           </button>
+          {onImportTranscript && (
+            <button
+              type="button"
+              onClick={onImportTranscript}
+              title="Vložit odehraný text (např. z Notionu) do aktuální scény – rozdělí se podle jmen mluvčích"
+              className="w-8 h-8 rounded-md border border-[var(--accent)]/60 bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all"
+            >
+              📥
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onShowBackground?.()}
@@ -393,6 +409,16 @@ export default function CharacterBar({
           >
             🖼️
           </button>
+          {onFloatBackground && (
+            <button
+              type="button"
+              onClick={onFloatBackground}
+              title="Otevřít obrázek pozadí v plovoucím okně"
+              className="w-8 h-8 rounded-md border border-[var(--accent)]/60 bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all"
+            >
+              🗗
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onToggleThreads?.()}

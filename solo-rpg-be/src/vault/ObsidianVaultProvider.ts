@@ -1071,23 +1071,51 @@ export class ObsidianVaultProvider implements StorageProvider {
     return (await this.readScenes(dir)).map(s => s.meta)
   }
 
+  /**
+   * Přečísluje scény podle jejich pořadí v `ordered` na souvislou řadu 1..n. Přepíše jen soubory, kterým se změní
+   * `order` nebo název souboru (prefix `001 - `); starý soubor smaže. Vrací scény s aktuálními metadaty.
+   */
+  private async renumberScenes(dir: string, ordered: SceneFile[]): Promise<SceneFile[]> {
+    const result: SceneFile[] = []
+    for (const [index, scene] of ordered.entries()) {
+      const order = index + 1
+      const fileName = this.sceneFileName(order, scene.meta.title)
+      if (scene.meta.order === order && scene.fileName === fileName) {
+        result.push(scene)
+        continue
+      }
+      if (scene.fileName !== fileName) await removeIfExists(path.join(dir, SCENE_DIR, scene.fileName))
+      const meta: SceneMeta = { ...scene.meta, order }
+      await this.writeSceneFile(dir, meta, scene.entriesBody, scene.data)
+      result.push({ ...scene, fileName, meta })
+    }
+    return result
+  }
+
+  /** Index v seřazeném seznamu, kam scénu vložit/přesunout: požadovaná pozice omezená na 1..max */
+  private clampScenePosition(requested: number | undefined, max: number, fallback: number): number {
+    if (requested === undefined) return fallback
+    return Math.min(Math.max(1, Math.trunc(requested)), max)
+  }
+
   async createScene(name: string, input: SceneInput): Promise<SceneMeta> {
     const dir = await this.requireGameDir(name)
     const scenes = await this.readScenes(dir)
     const title = input.title.trim()
     this.assertSceneTitleFree(scenes, title)
-    const order = scenes.reduce((max, s) => Math.max(max, s.meta.order), 0) + 1
-    // Bez explicitního seznamu převzít postavy z poslední scény
-    const last = scenes[scenes.length - 1]
-    const characters = await this.normalizeSceneCharacters(dir, input.characters ?? last?.meta.characters ?? [])
-    // AI nastavení se do nové scény přenáší z poslední (stejně jako postavy), jen pro postavy, které v nové scéně jsou
-    const ai = input.ai ?? last?.meta.ai ?? false
-    const aiCharacters = (input.aiCharacters ?? last?.meta.aiCharacters ?? []).filter(n => characters.includes(n))
+    // Pozice nové scény (1..n+1); bez `order` na konec
+    const position = this.clampScenePosition(input.order, scenes.length + 1, scenes.length + 1)
+    // Bez explicitního seznamu převzít postavy ze scény, za kterou se nová vkládá (na začátku z dosavadní první)
+    const neighbor = position > 1 ? scenes[position - 2] : scenes[0]
+    const characters = await this.normalizeSceneCharacters(dir, input.characters ?? neighbor?.meta.characters ?? [])
+    // AI nastavení se do nové scény přenáší ze sousední (stejně jako postavy), jen pro postavy, které v nové scéně jsou
+    const ai = input.ai ?? neighbor?.meta.ai ?? false
+    const aiCharacters = (input.aiCharacters ?? neighbor?.meta.aiCharacters ?? []).filter(n => characters.includes(n))
     const now = Date.now()
     const meta: SceneMeta = {
       id: `scene-${now}`,
       title,
-      order,
+      order: position,
       description: input.description ?? '',
       summary: input.summary ?? '',
       image: input.image ?? null,
@@ -1100,9 +1128,13 @@ export class ObsidianVaultProvider implements StorageProvider {
       createdAt: now,
       updatedAt: now,
     }
+    const created: SceneFile = { fileName: this.sceneFileName(position, title), data: {}, body: '', entriesBody: '', meta }
     await this.writeSceneFile(dir, meta, '', {})
+    // Následující scény posunout o jedna (a případné mezery v číslování srovnat)
+    const ordered = [...scenes.slice(0, position - 1), created, ...scenes.slice(position - 1)]
+    const renumbered = await this.renumberScenes(dir, ordered)
     await this.touchGame(dir)
-    return meta
+    return renumbered[position - 1].meta
   }
 
   async updateScene(name: string, sceneId: string, input: SceneInput): Promise<SceneMeta> {
@@ -1150,8 +1182,16 @@ export class ObsidianVaultProvider implements StorageProvider {
     }
     await this.writeSceneFile(dir, meta, current.entriesBody, current.data)
     if (title !== previous.title) await this.renameSceneInThreads(dir, previous.title, title)
+
+    // Přesun na jinou pozici: přeskládat seřazený seznam a přečíslovat (i ostatní scény)
+    const updated: SceneFile = { ...current, fileName: this.sceneFileName(meta.order, title), meta }
+    const currentIndex = scenes.indexOf(current)
+    const targetIndex = this.clampScenePosition(input.order, scenes.length, currentIndex + 1) - 1
+    const others = scenes.filter(s => s !== current)
+    const ordered = [...others.slice(0, targetIndex), updated, ...others.slice(targetIndex)]
+    const renumbered = await this.renumberScenes(dir, ordered)
     await this.touchGame(dir)
-    return meta
+    return renumbered[targetIndex].meta
   }
 
   /** Mluvčí, které parser scén rozezná: postavy (celé jméno i nickname) a vypravěči (jméno) */
@@ -1191,6 +1231,8 @@ export class ObsidianVaultProvider implements StorageProvider {
     await removeIfExists(path.join(dir, SCENE_DIR, scene.fileName))
     if (scene.meta.image) await this.removeSceneImageIfUnused(dir, scene.meta.image, scenes, sceneId)
     await this.renameSceneInThreads(dir, scene.meta.title, null)
+    // Následující scény posunout, aby číslování zůstalo souvislé
+    await this.renumberScenes(dir, scenes.filter(s => s !== scene))
     await this.touchGame(dir)
   }
 

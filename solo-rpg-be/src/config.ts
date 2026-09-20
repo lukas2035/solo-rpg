@@ -1,10 +1,21 @@
 import path from 'node:path'
+import type { AiProvider } from './ai/types.js'
+
+const AI_PROVIDERS: readonly AiProvider[] = ['openrouter', 'mistral']
+
+/** Výchozí model pro každého providera (id v jeho vlastním katalogu) */
+const DEFAULT_MODEL: Record<AiProvider, string> = {
+  openrouter: 'mistralai/mistral-medium-3-5',
+  mistral: 'mistral-medium-latest',
+}
 
 export interface Config {
   vaultPath: string
   port: number
-  /** Nastavení AI vypravěče přes OpenRouter; `apiKey` null = AI vypnutá (endpoint vrací 503) */
+  /** Nastavení AI vypravěče; `apiKey` null = AI vypnutá (endpoint vrací 503) */
   ai: {
+    /** Zvolený provider (AI_PROVIDER); `apiKey` a `model` jsou už vyřešené pro něj */
+    provider: AiProvider
     apiKey: string | null
     model: string
     /** Absolutní cesta k souboru s výchozím promptem pro vedení scény */
@@ -27,13 +38,18 @@ export function loadConfig(): Config {
   if (!Number.isInteger(port) || port <= 0) {
     throw new Error(`Neplatný PORT: ${process.env.PORT}`)
   }
-  const apiKey = process.env.OPENROUTER_API_KEY?.trim() || null
-  const model = process.env.OPENROUTER_MODEL?.trim() || 'mistralai/mistral-large-2512'
+  const providerRaw = (process.env.AI_PROVIDER?.trim() || 'openrouter').toLowerCase()
+  if (!(AI_PROVIDERS as readonly string[]).includes(providerRaw)) {
+    throw new Error(`Neplatný AI_PROVIDER: ${process.env.AI_PROVIDER} (povolené: ${AI_PROVIDERS.join(', ')})`)
+  }
+  const provider = providerRaw as AiProvider
+  const apiKey = (provider === 'mistral' ? process.env.MISTRAL_API_KEY : process.env.OPENROUTER_API_KEY)?.trim() || null
+  const model = (provider === 'mistral' ? process.env.MISTRAL_MODEL : process.env.OPENROUTER_MODEL)?.trim() || DEFAULT_MODEL[provider]
   const promptPath = path.resolve(process.cwd(), process.env.AI_PROMPT_PATH ?? 'prompts/scene-prompt.md')
   const summaryPromptPath = path.resolve(process.cwd(), process.env.AI_SUMMARY_PROMPT_PATH ?? 'prompts/scene-summary-prompt.md')
   const rulesPromptPath = path.resolve(process.cwd(), process.env.AI_RULES_PROMPT_PATH ?? 'prompts/rules-prompt.md')
   const maxTokens = Number(process.env.AI_MAX_TOKENS ?? 1500)
   const temperature = Number(process.env.AI_TEMPERATURE ?? 0.9)
   const debug = /^(1|true|yes)$/i.test(process.env.AI_DEBUG ?? '')
-  return { vaultPath, port, ai: { apiKey, model, promptPath, summaryPromptPath, rulesPromptPath, maxTokens, temperature, debug } }
+  return { vaultPath, port, ai: { provider, apiKey, model, promptPath, summaryPromptPath, rulesPromptPath, maxTokens, temperature, debug } }
 }

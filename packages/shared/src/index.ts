@@ -76,7 +76,7 @@ export const GameSettingsSchema = z.object({
   narrator: z.string().nullable(),
   /** Popis herních pravidel běžících pod příběhem (VtM 5e, D&D 5e, Fate…; markdown, tělo `game.md` za `<!-- rules -->`); prázdné = bez pravidel */
   rules: z.string().max(20000),
-  /** Posílat popis pravidel AI (vypravěč i shrnutí scény); frontmatter `rulesInAi` */
+  /** Posílat popis pravidel AI vypravěči při generování textů scény (shrnutí je dostává vždy); frontmatter `rulesInAi` */
   rulesInAi: z.boolean(),
 })
 export type GameSettings = z.infer<typeof GameSettingsSchema>
@@ -106,7 +106,7 @@ export const SceneMetaSchema = z.object({
   characters: z.array(z.string()),
   /** Název lokace, kde se scéna odehrává (frontmatter `location` jako wikilink); null = neuvedeno */
   location: z.string().nullable(),
-  /** AI vypravěč zapnutý pro tuto scénu (frontmatter `ai`) – po každém záznamu hráče odpoví aktuální vypravěč přes OpenRouter */
+  /** AI vypravěč zapnutý pro tuto scénu (frontmatter `ai`) – na tlačítko „🤖 AI pokračuje“ napíše aktuální vypravěč další text přes OpenRouter */
   ai: z.boolean(),
   /** Celá jména postav scény hraných AI (frontmatter `aiCharacters` jako wikilinky); ostatní postavy scény hraje hráč */
   aiCharacters: z.array(z.string()),
@@ -119,9 +119,14 @@ export const SceneMetaSchema = z.object({
 })
 export type SceneMeta = z.infer<typeof SceneMetaSchema>
 
-/** Vstup pro vytvoření/úpravu scény; `characters` undefined při vytvoření = převzít z poslední scény */
+/**
+ * Vstup pro vytvoření/úpravu scény; `characters` undefined při vytvoření = převzít z poslední scény.
+ * `order` = požadovaná pozice (1 = první); při vytvoření undefined = na konec, při úpravě undefined = beze změny.
+ * Ostatní scény se podle toho přečíslují (frontmatter `order` i prefix názvu souboru).
+ */
 export const SceneInputSchema = z.object({
   title: z.string().trim().min(1).max(100),
+  order: z.number().int().positive().optional(),
   description: z.string().optional(),
   image: ImageRefSchema.optional(),
   characters: z.array(z.string().trim().min(1)).optional(),
@@ -594,6 +599,41 @@ export const SceneSummaryResponseSchema = z.object({
   raw: z.string(),
 })
 export type SceneSummaryResponse = z.infer<typeof SceneSummaryResponseSchema>
+
+/** Tělo `POST /api/games/:game/scenes/:scene/import` – přepis odehraného textu (např. z Notionu) ve tvaru `**Jméno**: text` */
+export const SceneImportRequestSchema = z.object({
+  text: z.string().min(1).max(500000),
+  /** Rozhodnutí nejednoznačných jmen z předchozího pokusu: jméno v textu → celé jméno zvolené postavy */
+  resolutions: z.record(z.string(), z.string()).optional(),
+})
+export type SceneImportRequest = z.infer<typeof SceneImportRequestSchema>
+
+/** Jméno mluvčího v přepisu, které odpovídá více postavám hry (stejné křestní jméno nebo přezdívka) */
+export const SceneImportAmbiguitySchema = z.object({
+  /** Jméno tak, jak je v textu */
+  name: z.string(),
+  /** Celá jména postav, které přicházejí v úvahu */
+  candidates: z.array(z.string()),
+})
+export type SceneImportAmbiguity = z.infer<typeof SceneImportAmbiguitySchema>
+
+/**
+ * Odpověď importu přepisu – záznamy připsané na konec scény (už uložené) a postavy hry, které import do scény doplnil.
+ * Když `ambiguous` není prázdné, nic se neuložilo: FE nechá hráče vybrat postavy a pošle požadavek znovu s `resolutions`.
+ */
+export const SceneImportResponseSchema = z.object({
+  entries: z.array(StoryEntrySchema),
+  addedCharacters: z.array(z.string()),
+  ambiguous: z.array(SceneImportAmbiguitySchema),
+})
+export type SceneImportResponse = z.infer<typeof SceneImportResponseSchema>
+
+/** Odpověď `GET /api/games/:game/rules-prompt` – kompletní sekce o kostkách a pravidlech, jak ji dostává AI (pro textový export hry) */
+export const RulesPromptResponseSchema = z.object({
+  /** `prompts/rules-prompt.md` + `## Herní pravidla pod příběhem` s popisem pravidel hry; bez ohledu na `rulesInAi` */
+  text: z.string(),
+})
+export type RulesPromptResponse = z.infer<typeof RulesPromptResponseSchema>
 
 // ---------- složka s hrami (vault) ----------
 

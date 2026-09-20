@@ -1,16 +1,19 @@
 import fs from 'node:fs/promises'
 import type { GameSettings } from '@solo-rpg/shared'
 import type { Config } from '../config.js'
-import { AiError } from './openRouter.js'
+import { AiError } from './types.js'
 
 /**
- * Sekce o kostkách a pravidlech, která se připojuje k system promptu AI požadavků – jen když má hra zapnuté
- * `rulesInAi`. Pak jde obecná část (orákulum, hody zapsané v textu) ze souboru `prompts/rules-prompt.md` a za ní
- * popis konkrétních pravidel hry (`settings.rules`), pokud je vyplněný. S vypnutým přepínačem se neposílá nic,
- * aby se AI ve scénách bez kostek zbytečně nemátla.
+ * Sekce o kostkách a pravidlech, která se připojuje k system promptu AI požadavků. Obecná část (orákulum, hody
+ * zapsané v textu) jde ze souboru `prompts/rules-prompt.md` a za ní popis konkrétních pravidel hry (`settings.rules`),
+ * pokud je vyplněný.
+ *
+ * Přepínač `rulesInAi` respektuje jen generování nových textů vypravěče ve scéně (`sceneAi.ts`, volá s
+ * `respectToggle = true`) – s vypnutým přepínačem se tam neposílá nic, aby se AI ve scénách bez kostek zbytečně
+ * nemátla. Ostatní AI požadavky (shrnutí scény…) dostanou pravidla vždy, protože jim vysvětlení hodů jen pomáhá.
  */
-export async function buildRulesSection(config: Config, settings: Pick<GameSettings, 'rules' | 'rulesInAi'>): Promise<string> {
-  if (!settings.rulesInAi) return ''
+export async function buildRulesSection(config: Config, settings: Pick<GameSettings, 'rules' | 'rulesInAi'>, respectToggle = false): Promise<string> {
+  if (respectToggle && !settings.rulesInAi) return ''
   let base: string
   try {
     base = await fs.readFile(config.ai.rulesPromptPath, 'utf8')

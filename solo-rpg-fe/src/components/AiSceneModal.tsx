@@ -98,7 +98,7 @@ export default function AiSceneModal({ sceneTitle, characters, settings, narrato
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} className="w-5 h-5 accent-[var(--accent)] cursor-pointer" />
           <span>
             <span className="font-semibold">Zapnout AI pro tuto scénu</span>
-            <span className="block text-xs opacity-70">Po každém tvém záznamu odpoví aktuální vypravěč přes OpenRouter a jeho text se uloží do scény.</span>
+            <span className="block text-xs opacity-70">Vedle záložky vypravěče se objeví tlačítko „🤖 AI pokračuje“ – na kliknutí aktuální vypravěč napíše přes OpenRouter další text a ten se uloží do scény.</span>
           </span>
         </label>
 

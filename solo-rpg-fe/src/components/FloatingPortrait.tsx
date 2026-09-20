@@ -28,7 +28,7 @@ interface Box {
 }
 
 /**
- * Plovoucí okno s portrétem postavy: lze ho přetáhnout kamkoli v okně prohlížeče a rohy zvětšit/zmenšit.
+ * Plovoucí okno s obrázkem (portrét postavy nebo pozadí scény): lze ho přetáhnout kamkoli v okně prohlížeče a rohy zvětšit/zmenšit.
  * Při změně velikosti drží poměr stran obrázku – výška okna se vždy dopočítá z šířky.
  */
 export default function FloatingPortrait({ image, name, index, active, onFocus, onClose, onFullscreen }: FloatingPortraitProps) {
@@ -126,7 +126,7 @@ export default function FloatingPortrait({ image, name, index, active, onFocus, 
   return (
     <div
       role="dialog"
-      aria-label={`Portrét ${name}`}
+      aria-label={name}
       onPointerDown={onFocus}
       className={`fixed flex flex-col rounded-lg overflow-visible border-2 bg-black shadow-2xl select-none ${
         active ? 'border-[var(--accent)] shadow-[var(--accent)]/40' : 'border-[var(--accent)]/50'

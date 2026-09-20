@@ -33,6 +33,10 @@ interface StoryPanelProps {
   onPortraitClick: (image: string, characterName: string) => void
   onEntryDelete?: (entryId: string) => void
   onEntryEdit?: (entryId: string, newText: string) => void
+  /** Mluvčí, na které lze záznam přepsat klikem na jméno (postavy aktuální scény + vypravěči hry) */
+  speakerOptions?: { characters: Character[]; narrators: Narrator[] }
+  /** Změna mluvčího záznamu: `{ characterId }` = postava, `{ narratorId }` = vypravěč */
+  onEntrySpeakerChange?: (entryId: string, speaker: { characterId: string } | { narratorId: string }) => void
   /** Ztmavit podklad textů (při zesvětleném pozadí) */
   darkenEntries?: boolean
 }
@@ -41,12 +45,15 @@ const ENTRY_IMAGE_MAX_WIDTH = 140 // Zvětšená šířka pro obrázky
 /** Popisek záznamu vypravěče bez souboru */
 const NARRATOR_FALLBACK = 'Vypravěč'
 
-export default function StoryPanel({ entries, onPortraitClick, onEntryDelete, onEntryEdit, darkenEntries }: StoryPanelProps) {
+export default function StoryPanel({ entries, onPortraitClick, onEntryDelete, onEntryEdit, speakerOptions, onEntrySpeakerChange, darkenEntries }: StoryPanelProps) {
   const [aspectRatios, setAspectRatios] = useState<Record<string, number>>({})
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
+  /** Záznam, u kterého je otevřený výběr mluvčího */
+  const [speakerEditId, setSpeakerEditId] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const editRef = useRef<HTMLTextAreaElement | null>(null)
+  const canChangeSpeaker = Boolean(onEntrySpeakerChange && speakerOptions && (speakerOptions.characters.length + speakerOptions.narrators.length > 0))
 
   useEffect(() => {
     const el = scrollRef.current
@@ -97,6 +104,16 @@ export default function StoryPanel({ entries, onPortraitClick, onEntryDelete, on
 
   const ENTRY_IMAGE_HEIGHT = 100 // Zvětšená výška
 
+  /** Hodnota selectu mluvčího: `c:<id postavy>` / `n:<id vypravěče>`; vypravěč bez souboru = '' */
+  const speakerValue = (entry: StoryEntry) => (entry.character ? `c:${entry.character.id}` : entry.narrator ? `n:${entry.narrator.id}` : '')
+
+  const applySpeaker = (entry: StoryEntry, value: string) => {
+    setSpeakerEditId(null)
+    if (!value || value === speakerValue(entry)) return
+    const [kind, id] = [value.slice(0, 1), value.slice(2)]
+    onEntrySpeakerChange?.(entry.id, kind === 'c' ? { characterId: id } : { narratorId: id })
+  }
+
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto p-2 pl-6 space-y-4">
       {entries.map((entry) => {
@@ -140,8 +157,36 @@ export default function StoryPanel({ entries, onPortraitClick, onEntryDelete, on
 
             {/* Text vlevo */}
             <div className="flex-1 text-left">
-              {(entry.character || entry.narrator) && (
-                <div className="text-sm font-semibold text-[var(--accent)] mb-1" title={speaker.name}>
+              {speakerEditId === entry.id && speakerOptions ? (
+                <select
+                  autoFocus
+                  defaultValue={speakerValue(entry)}
+                  onChange={(e) => applySpeaker(entry, e.target.value)}
+                  onBlur={() => setSpeakerEditId(null)}
+                  onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); setSpeakerEditId(null) } }}
+                  className="mb-1 bg-black/70 border border-[var(--accent)] rounded-md px-2 py-0.5 text-sm font-semibold text-[var(--accent)] focus:outline-none"
+                >
+                  {!entry.character && !entry.narrator && <option value="">{NARRATOR_FALLBACK}</option>}
+                  {/* Aktuální mluvčí může být mimo scénu (dočasná postava, jiný vypravěč) – nabídnout ho, aby select měl platnou hodnotu */}
+                  {entry.character && !speakerOptions.characters.some(c => c.id === entry.character!.id) && (
+                    <option value={`c:${entry.character.id}`}>{entry.character.nickname}</option>
+                  )}
+                  {entry.narrator && !speakerOptions.narrators.some(n => n.id === entry.narrator!.id) && (
+                    <option value={`n:${entry.narrator.id}`}>🎭 {entry.narrator.name}</option>
+                  )}
+                  {speakerOptions.characters.map(c => (
+                    <option key={c.id} value={`c:${c.id}`}>{c.nickname === c.name ? c.name : `${c.nickname} (${c.name})`}</option>
+                  ))}
+                  {speakerOptions.narrators.map(n => (
+                    <option key={n.id} value={`n:${n.id}`}>🎭 {n.name}</option>
+                  ))}
+                </select>
+              ) : (entry.character || entry.narrator || canChangeSpeaker) && (
+                <div
+                  className={`text-sm font-semibold text-[var(--accent)] mb-1 inline-block ${canChangeSpeaker ? 'cursor-pointer hover:underline decoration-dotted' : ''}`}
+                  title={canChangeSpeaker ? `${speaker.name} – klikni pro změnu mluvčího` : speaker.name}
+                  onClick={() => { if (canChangeSpeaker) setSpeakerEditId(entry.id) }}
+                >
                   {speaker.label}:
                 </div>
               )}

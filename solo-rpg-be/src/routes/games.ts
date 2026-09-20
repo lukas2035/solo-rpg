@@ -9,6 +9,7 @@ import {
   NarratorInputSchema,
   RenameGameRequestSchema,
   SceneInputSchema,
+  SceneImportRequestSchema,
   StoryEntrySchema,
   ThreadInputSchema,
   FactionInputSchema,
@@ -19,14 +20,17 @@ import {
   BackupGameRequestSchema,
   isValidGameName,
 } from '@solo-rpg/shared'
+import type { RulesPromptResponse } from '@solo-rpg/shared'
 import { ConflictError, NotFoundError, ValidationError } from '../vault/StorageProvider.js'
 import type { VaultManager } from '../vault/VaultManager.js'
 import { backupGameFolder } from '../vault/backup.js'
 import { DialogBusyError } from '../system/dialogs.js'
 import type { Config } from '../config.js'
-import { AiError } from '../ai/openRouter.js'
+import { AiError } from '../ai/types.js'
 import { generateSceneReply } from '../ai/sceneAi.js'
 import { summarizeScene } from '../ai/sceneSummary.js'
+import { buildRulesSection } from '../ai/rulesPrompt.js'
+import { importSceneTranscript } from '../vault/sceneImport.js'
 
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024
 const SSE_HEARTBEAT_MS = 25_000
@@ -273,6 +277,13 @@ export async function registerGameRoutes(app: FastifyInstance, vault: VaultManag
     return reply.code(204).send()
   })
 
+  /** Import odehraného přepisu (`**Jméno**: text`, např. z Notionu) – rozdělí na záznamy podle mluvčích a připíše na konec scény */
+  app.post('/api/games/:game/scenes/:scene/import', async (request) => {
+    const { game, scene } = SceneParams.parse(request.params)
+    const { text, resolutions } = SceneImportRequestSchema.parse(request.body)
+    return importSceneTranscript(vault.storage, game, scene, text, resolutions)
+  })
+
   // ---------- AI vypravěč ----------
 
   /** Nechá aktuálního vypravěče odpovědět přes OpenRouter; nové záznamy se rovnou uloží do scény */
@@ -288,6 +299,14 @@ export async function registerGameRoutes(app: FastifyInstance, vault: VaultManag
   app.post('/api/games/:game/scenes/:scene/summary', async (request) => {
     const { game, scene } = SceneParams.parse(request.params)
     return summarizeScene(vault.storage, config, game, scene, request.log)
+  })
+
+  /** Sekce o kostkách a pravidlech přesně tak, jak ji dostává AI (pro textový export hry; přepínač rulesInAi se ignoruje) */
+  app.get('/api/games/:game/rules-prompt', async (request): Promise<RulesPromptResponse> => {
+    const { game } = GameParams.parse(request.params)
+    const detail = await vault.storage.getGame(game)
+    if (!detail) throw new NotFoundError(`Hra „${game}“ neexistuje.`)
+    return { text: await buildRulesSection(config, detail.setup) }
   })
 
   // ---------- dějové nitě (threads) ----------

@@ -14,6 +14,11 @@ import { LORE_KNOWLEDGE_LABELS, LORE_TRUTH_LABELS, LORE_TYPE_LABELS } from './lo
 export interface GameExportData {
   gameName: string
   settings: Pick<GameSettings, 'narrator' | 'rules'>
+  /**
+   * Sekce o kostkách a pravidlech z BE (`GET /api/games/:game/rules-prompt` – stejný text jako dostává AI).
+   * Když chybí (BE nedostupné), použije se zkrácená záložní formulace přímo z kódu.
+   */
+  rulesPrompt?: string
   characters: Character[]
   narrators: Narrator[]
   scenes: SceneMeta[]
@@ -71,7 +76,7 @@ function entryLine(entry: StoryEntry, characters: readonly Character[]): string 
 }
 
 export function buildGameMarkdown(data: GameExportData): string {
-  const { gameName, settings, characters, narrators, scenes, entriesByScene, threads, factions, quests, locations, lore } = data
+  const { gameName, settings, rulesPrompt, characters, narrators, scenes, entriesByScene, threads, factions, quests, locations, lore } = data
   const out: string[] = []
   const h = (level: number, title: string) => out.push(`${'#'.repeat(level)} ${toPlainMarkdown(title)}`)
 
@@ -82,16 +87,21 @@ export function buildGameMarkdown(data: GameExportData): string {
   )
 
   // ---------- kostky a pravidla (vždy, i bez konkrétního systému) ----------
-  h(2, 'Kostky a pravidla')
-  out.push(
-    'Hráč při hře hází kostkami jako **orákulem** (oracle rolls): nechává náhodu rozhodnout o vývoji děje, zvratech a odpovědích ' +
-      'na otázky, výsledek hodu zapíše přímo do textu (např. „d20: 17“, „procenta: 23 %“) a sám ho interpretuje. ' +
-      'Hody a jejich výsledky v přepisu jsou fakta fikce, která už nastala. ' +
-      (settings.rules.trim()
-        ? 'Pod příběhem navíc běží tento pravidlový systém – hody a mechaniky v textu vykládej podle něj:'
-        : 'Pod příběhem neběží žádný konkrétní pravidlový systém – hody ber jen jako orákulum.')
-  )
-  if (settings.rules.trim()) out.push(toPlainMarkdown(settings.rules))
+  if (rulesPrompt?.trim()) {
+    // Jeden zdroj pravdy: text z BE (rules-prompt.md + pravidla hry) – má vlastní nadpisy druhé úrovně
+    out.push(toPlainMarkdown(rulesPrompt))
+  } else {
+    h(2, 'Kostky a pravidla')
+    out.push(
+      'Hráč při hře hází kostkami jako **orákulem** (oracle rolls): nechává náhodu rozhodnout o vývoji děje, zvratech a odpovědích ' +
+        'na otázky, výsledek hodu zapíše přímo do textu (např. „d20: 17“, „procenta: 23 %“) a sám ho interpretuje. ' +
+        'Hody a jejich výsledky v přepisu jsou fakta fikce, která už nastala. ' +
+        (settings.rules.trim()
+          ? 'Pod příběhem navíc běží tento pravidlový systém – hody a mechaniky v textu vykládej podle něj:'
+          : 'Pod příběhem neběží žádný konkrétní pravidlový systém – hody ber jen jako orákulum.')
+    )
+    if (settings.rules.trim()) out.push(toPlainMarkdown(settings.rules))
+  }
 
   // ---------- vypravěči ----------
   if (narrators.length) {

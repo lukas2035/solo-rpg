@@ -11,6 +11,7 @@ import NarratorPickerModal from '../components/NarratorPickerModal'
 import NarratorModal, { type NarratorFormValues } from '../components/NarratorModal'
 import AiSceneModal, { type AiSceneSettings } from '../components/AiSceneModal'
 import RulesModal, { type RulesFormValues } from '../components/RulesModal'
+import ImportTranscriptModal from '../components/ImportTranscriptModal'
 import SessionModal from '../components/SessionModal'
 import { useSessionTimer } from '../hooks/useSessionTimer'
 import CharacterModal, { type CharacterFormValues } from '../components/CharacterModal'
@@ -58,6 +59,8 @@ interface StoryEntry {
 }
 
 type CharacterModalState = { mode: 'create' } | { mode: 'edit'; id: string }
+/** Zástupné ID v seznamu plovoucích oken pro obrázek pozadí (ID postav začínají jinak) */
+const BACKGROUND_FLOAT_ID = '__background__'
 type SceneModalState = { mode: 'create' } | { mode: 'edit'; id: string }
 type NarratorModalState = { mode: 'create' } | { mode: 'edit'; id: string }
 type ThreadModalState = { mode: 'create' } | { mode: 'edit'; id: string }
@@ -85,7 +88,7 @@ export default function StoryEditor() {
   const [currentSceneId, setCurrentSceneId] = useState<string | null>(null)
 
   const [selectedPortrait, setSelectedPortrait] = useState<{ image: string; character: string } | null>(null)
-  /** ID postav otevřených v plovoucích oknech (poslední v poli je nahoře) */
+  /** ID postav otevřených v plovoucích oknech (poslední v poli je nahoře); `BACKGROUND_FLOAT_ID` = obrázek pozadí */
   const [floatingPortraitIds, setFloatingPortraitIds] = useState<string[]>([])
   const [backgroundImage, setBackgroundImage] = useState<ImageRef>(null)
   const [brightBackground, setBrightBackground] = useState(true)
@@ -95,6 +98,7 @@ export default function StoryEditor() {
   const [narratorModal, setNarratorModal] = useState<NarratorModalState | null>(null)
   const [showAiModal, setShowAiModal] = useState(false)
   const [showRulesModal, setShowRulesModal] = useState(false)
+  const [showImportModal, setShowImportModal] = useState(false)
   /** Pravidla pod příběhem (popis systému) a zda se posílají AI – součást nastavení hry */
   const [rules, setRules] = useState('')
   const [rulesInAi, setRulesInAi] = useState(false)
@@ -379,10 +383,15 @@ export default function StoryEditor() {
       markdown: e.markdown,
     }))
 
+  /** Poslední probíhající uložení scény – AI se spouští až po něm (BE čte scénu z vaultu) */
+  const pendingSaveRef = useRef<Promise<void>>(Promise.resolve())
+
   const persistStory = (entries: StoryEntry[]): Promise<void> => {
     if (!currentSceneId) return Promise.resolve()
-    return api.saveSceneEntries(gameName, currentSceneId, toApiEntries(entries))
+    const saving = api.saveSceneEntries(gameName, currentSceneId, toApiEntries(entries))
       .catch(error => console.error('Uložení scény selhalo:', error))
+    pendingSaveRef.current = saving
+    return saving
   }
 
   const handleAddCharacter = () => setCharacterModal({ mode: 'create' })
@@ -534,12 +543,13 @@ export default function StoryEditor() {
     charactersRef.current = characters
   }, [currentSceneId, characters])
 
-  /** Nechá AI vypravěče odpovědět ve scéně; nové záznamy BE už uložil, tady je jen přidáme do stavu */
+  /** Nechá AI vypravěče pokračovat ve scéně (po dokončení rozpracovaného uložení); nové záznamy BE už uložil, tady je jen přidáme do stavu */
   const runAi = useCallback(async (sceneId: string): Promise<void> => {
     if (aiBusy) return
     setAiBusy(true)
     setAiError(null)
     try {
+      await pendingSaveRef.current
       const result = await api.generateAiReply(gameName, sceneId)
       if (currentSceneIdRef.current !== sceneId) return
       const resolved = resolveEntries(result.entries, charactersRef.current, narrators)
@@ -553,6 +563,22 @@ export default function StoryEditor() {
       setAiBusy(false)
     }
   }, [aiBusy, gameName, narrators, resolveEntries])
+
+  /** Import odehraného přepisu: BE záznamy uložil (a případně doplnil postavy do scény), tady je jen přidáme do stavu */
+  const handleImportTranscript = async (text: string, resolutions?: Record<string, string>) => {
+    if (!currentSceneId) throw new Error('Nejdřív vyber scénu.')
+    const sceneId = currentSceneId
+    const result = await api.importSceneTranscript(gameName, sceneId, text, resolutions)
+    // Nejednoznačná jména → nic se neuložilo, dialog nechá hráče vybrat
+    if (result.ambiguous.length || currentSceneIdRef.current !== sceneId) return result
+    const resolved = resolveEntries(result.entries, charactersRef.current, narrators)
+    setCharacters(resolved.characters)
+    setStoryEntries(prev => [...prev, ...resolved.entries])
+    if (result.addedCharacters.length) {
+      setScenes(prev => prev.map(s => (s.id === sceneId ? { ...s, characters: [...s.characters, ...result.addedCharacters.filter(n => !s.characters.includes(n))] } : s)))
+    }
+    return result
+  }
 
   const handleAddEntry = (text: string, selectedCharacterId: string | null, markdown?: boolean) => {
     const selectedCharacter = selectedCharacterId
@@ -572,12 +598,14 @@ export default function StoryEditor() {
 
     const newEntries = [...storyEntries, newEntry]
     setStoryEntries(newEntries)
-    const saved = persistStory(newEntries)
-    // V AI módu odpoví po každém záznamu hráče aktuální vypravěč (až po uložení, BE čte scénu z vaultu)
-    if (currentScene?.ai && currentSceneId) {
-      const sceneId = currentSceneId
-      void saved.then(() => runAi(sceneId)).catch(() => { /* chyba je v aiError */ })
-    }
+    // AI se už nespouští automaticky – hráč ji volá tlačítkem 🤖 vedle vypravěče (`handleGenerateAi`)
+    persistStory(newEntries)
+  }
+
+  /** Tlačítko 🤖 v InputArea: nechat AI vypravěče napsat další text do aktuální scény */
+  const handleGenerateAi = () => {
+    if (!currentSceneId || !currentScene?.ai) return
+    runAi(currentSceneId).catch(() => { /* chyba je v aiError */ })
   }
 
   const handleCharacterDelete = (characterId: string) => {
@@ -598,21 +626,39 @@ export default function StoryEditor() {
     persistStory(newEntries)
   }
 
+  /** Změna mluvčího záznamu (klik na jméno nad textem) – na postavu scény nebo vypravěče hry */
+  const handleEntrySpeakerChange = (entryId: string, speaker: { characterId: string } | { narratorId: string }) => {
+    const character = 'characterId' in speaker ? characters.find(c => c.id === speaker.characterId) ?? null : null
+    const narrator = 'narratorId' in speaker ? narrators.find(n => n.id === speaker.narratorId) ?? null : null
+    if (!character && !narrator) return
+    const newEntries = storyEntries.map(entry =>
+      entry.id === entryId ? { ...entry, character, narrator: character ? null : narrator } : entry
+    )
+    setStoryEntries(newEntries)
+    persistStory(newEntries)
+  }
+
   const handlePortraitClick = (image: string, characterName: string) => {
     setSelectedPortrait({ image, character: characterName })
   }
 
-  /** Otevře (nebo přenese nahoru) plovoucí okno s portrétem postavy */
+  /** Otevře (nebo přenese nahoru) plovoucí okno s portrétem postavy (nebo s pozadím při `BACKGROUND_FLOAT_ID`) */
   const handlePortraitFloat = (characterId: string) => {
     setFloatingPortraitIds(prev => [...prev.filter(id => id !== characterId), characterId])
   }
   const floatingPortraits = useMemo(
     () => floatingPortraitIds
-      .map(id => characters.find(c => c.id === id))
-      .filter((c): c is Character => Boolean(c && c.image))
-      .map(toDisplay)
-      .filter((c): c is typeof c & { image: string } => c.image !== null),
-    [floatingPortraitIds, characters, toDisplay]
+      .map(id => {
+        if (id === BACKGROUND_FLOAT_ID) {
+          return displayBackground ? { id, image: displayBackground, name: currentScene ? `Pozadí – ${currentScene.title}` : 'Pozadí' } : null
+        }
+        const c = characters.find(ch => ch.id === id)
+        if (!c?.image) return null
+        const display = toDisplay(c)
+        return display.image ? { id, image: display.image, name: display.name } : null
+      })
+      .filter((c): c is { id: string; image: string; name: string } => c !== null),
+    [floatingPortraitIds, characters, toDisplay, displayBackground, currentScene]
   )
 
   /** Submit dialogu vypravěče: vytvoří/aktualizuje soubor vypravěče a uloží portrét pod jeho jménem */
@@ -689,6 +735,11 @@ export default function StoryEditor() {
   const handleExportGame = async (): Promise<boolean> => {
     try {
       const detail = await api.getGame(gameName)
+      // Sekce o kostkách/pravidlech stejná jako pro AI; při chybě (např. chybějící soubor promptu) se použije záložní text z FE
+      const rulesPrompt = await api.getRulesPrompt(gameName).then(r => r.text).catch((error: unknown) => {
+        console.warn('Nepodařilo se načíst prompt o pravidlech, export použije záložní text:', error)
+        return undefined
+      })
       const entriesByScene: Record<string, ApiStoryEntry[]> = {}
       for (const scene of detail.scenes) {
         entriesByScene[scene.id] = await api.getSceneEntries(gameName, scene.id)
@@ -696,6 +747,7 @@ export default function StoryEditor() {
       const markdown = buildGameMarkdown({
         gameName: detail.meta.name,
         settings: { narrator: detail.setup.narrator, rules: detail.setup.rules },
+        rulesPrompt,
         characters: detail.setup.characters,
         narrators: detail.setup.narrators,
         scenes: detail.scenes,
@@ -788,7 +840,7 @@ export default function StoryEditor() {
   /** Submit dialogu scény: vytvoří/aktualizuje soubor scény a uloží její obrázek pod jejím názvem */
   const handleSceneSubmit = async (values: SceneFormValues) => {
     const editing = editingScene
-    const base: SceneInput = { title: values.title, description: values.description, summary: values.summary, characters: values.characters, location: values.location }
+    const base: SceneInput = { title: values.title, description: values.description, summary: values.summary, characters: values.characters, location: values.location, order: values.order }
 
     // Nejdřív scéna (kontrola duplicitního názvu), teprve pak obrázek pojmenovaný podle ní
     let saved = editing
@@ -800,14 +852,14 @@ export default function StoryEditor() {
       saved = await api.updateScene(gameName, saved.id, { ...base, image: ref })
     }
 
+    // Vložení/přesun přečísluje i ostatní scény → načíst aktuální seznam z BE
+    setScenes(await api.listScenes(gameName))
     if (editing) {
-      setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))
       // BE přepsal odkaz na scénu i v nitích
       if (editing.title !== saved.title) {
         setThreads(prev => prev.map(t => (t.scene === editing.title ? { ...t, scene: saved.title } : t)))
       }
     } else {
-      setScenes(prev => [...prev, saved])
       setStoryEntries([])
       setCurrentSceneId(saved.id)
     }
@@ -816,7 +868,8 @@ export default function StoryEditor() {
   const deleteScene = async (sceneId: string) => {
     const deleted = scenes.find(s => s.id === sceneId)
     await api.deleteScene(gameName, sceneId)
-    const remaining = scenes.filter(s => s.id !== sceneId)
+    // BE po smazání přečísluje následující scény
+    const remaining = await api.listScenes(gameName)
     setScenes(remaining)
     if (deleted) setThreads(prev => prev.map(t => (t.scene === deleted.title ? { ...t, scene: null } : t)))
     if (sceneId === currentSceneId) {
@@ -1133,11 +1186,13 @@ export default function StoryEditor() {
         locationCount={locations.length}
         loreCount={lore.length}
         onClearStory={handleClearStory}
+        onImportTranscript={currentSceneId ? () => setShowImportModal(true) : undefined}
         onShowBackground={() => {
           if (displayBackground) {
             setSelectedPortrait({ image: displayBackground, character: 'Pozadí' })
           }
         }}
+        onFloatBackground={displayBackground ? () => handlePortraitFloat(BACKGROUND_FLOAT_ID) : undefined}
       />
 
       <SceneBar
@@ -1186,7 +1241,15 @@ export default function StoryEditor() {
       <div className="flex-1 flex overflow-hidden relative">
         {/* Obsah */}
         <div className="relative flex-1 min-w-0 flex flex-col">
-          <StoryPanel entries={displayEntries} onPortraitClick={handlePortraitClick} onEntryDelete={handleEntryDelete} onEntryEdit={handleEntryEdit} darkenEntries={brightBackground} />
+          <StoryPanel
+            entries={displayEntries}
+            onPortraitClick={handlePortraitClick}
+            onEntryDelete={handleEntryDelete}
+            onEntryEdit={handleEntryEdit}
+            speakerOptions={{ characters: displayCharacters, narrators: displayNarrators }}
+            onEntrySpeakerChange={handleEntrySpeakerChange}
+            darkenEntries={brightBackground}
+          />
           {/* Stav AI vypravěče: generování / chyba */}
           {(aiBusy || aiError) && (
             <div
@@ -1219,6 +1282,8 @@ export default function StoryEditor() {
             narratorName={currentNarrator?.name ?? null}
             onCreateNarrator={() => setNarratorModal({ mode: 'create' })}
             onAddEntry={handleAddEntry}
+            onGenerateAi={currentScene?.ai && currentNarrator ? handleGenerateAi : undefined}
+            aiBusy={aiBusy}
             brightBackground={brightBackground}
             onBrightBackgroundChange={setBrightBackground}
           />
@@ -1354,6 +1419,15 @@ export default function StoryEditor() {
         />
       )}
 
+      {/* Import odehraného přepisu (Notion…) do aktuální scény */}
+      {showImportModal && currentScene && (
+        <ImportTranscriptModal
+          sceneTitle={currentScene.title}
+          onImport={handleImportTranscript}
+          onClose={() => setShowImportModal(false)}
+        />
+      )}
+
       {/* Vytvoření / úprava postavy */}
       {characterModal && (
         <CharacterModal
@@ -1471,6 +1545,7 @@ export default function StoryEditor() {
         <SceneModal
           key={sceneModal.mode === 'edit' ? sceneModal.id : 'new'}
           scene={editingScene}
+          scenes={scenes}
           image={editingScene ? assetUrl(gameName, editingScene.image, assetVersion) : null}
           defaultTitle={`Scéna ${scenes.length + 1}`}
           defaultCharacters={scenes.length > 0 ? scenes[scenes.length - 1].characters : sceneCharacterOptions.map(c => c.name)}

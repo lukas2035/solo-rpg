@@ -21,9 +21,13 @@ interface InputAreaProps {
   narratorName: string | null
   /** Otevře vytvoření prvního vypravěče (tlačítko „Zadat vypravěče“) */
   onCreateNarrator: () => void
+  /** Scéna řízená AI: tlačítko 🤖 vpravo od vypravěče nechá AI napsat další text; undefined = AI ve scéně vypnutá */
+  onGenerateAi?: () => void
+  /** AI právě generuje – tlačítko je neaktivní a pulzuje */
+  aiBusy?: boolean
 }
 
-export default function InputArea({ characters, showShortcutNumbers, onAddEntry, brightBackground, onBrightBackgroundChange, narratorName, onCreateNarrator }: InputAreaProps) {
+export default function InputArea({ characters, showShortcutNumbers, onAddEntry, brightBackground, onBrightBackgroundChange, narratorName, onCreateNarrator, onGenerateAi, aiBusy = false }: InputAreaProps) {
   const [text, setText] = useState('')
   const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null)
   const [quoteMode, setQuoteMode] = useState(false)
@@ -139,20 +143,22 @@ export default function InputArea({ characters, showShortcutNumbers, onAddEntry,
       return
     }
     let finalText = text
+    // Prázdné políčko (nebo jen předvyplněná uvozovka) + odeslání = „🤖 AI pokračuje“, pokud je AI ve scéně zapnutá
+    const isEmpty = finalText.trim() === '' || (quoteMode && finalText.trim() === '"')
+    if (isEmpty) {
+      if (onGenerateAi && !aiBusy) onGenerateAi()
+      return
+    }
     if (quoteMode) {
-      // Samotná předvyplněná uvozovka není záznam
-      if (finalText.trim() === '"') return
       // Lichý počet uvozovek → automaticky uzavřít na konci
       const quoteCount = (finalText.match(/"/g) || []).length
       if (quoteCount % 2 === 1) {
         finalText += '"'
       }
     }
-    if (finalText.trim()) {
-      onAddEntry(finalText, activeCharacterId, multilineMode)
-      quoteEscapedRef.current = false
-      setText(quoteMode ? '"' : '')
-    }
+    onAddEntry(finalText, activeCharacterId, multilineMode)
+    quoteEscapedRef.current = false
+    setText(quoteMode ? '"' : '')
   }
 
   const handleMultilineToggle = () => {
@@ -197,6 +203,19 @@ export default function InputArea({ characters, showShortcutNumbers, onAddEntry,
             className="ml-6 px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap cursor-pointer transition-all bg-black/70 text-[#aa3bff] border-2 border-dashed border-[#aa3bff]/60 hover:border-[#aa3bff] hover:border-solid"
           >
             Zadat vypravěče
+          </button>
+        )}
+        {hasNarrator && onGenerateAi && (
+          <button
+            type="button"
+            onClick={onGenerateAi}
+            disabled={aiBusy}
+            title={aiBusy ? `${narratorName} píše…` : `Nechat AI (${narratorName}) napsat další text do scény (nebo Enter v prázdném políčku)`}
+            className={`px-3 py-2 rounded-lg text-sm font-bold whitespace-nowrap cursor-pointer transition-all bg-black/70 text-cyan-300 border-2 border-cyan-500/60 hover:border-cyan-400 hover:bg-cyan-950/60 disabled:cursor-wait ${
+              aiBusy ? 'animate-pulse border-cyan-400' : ''
+            }`}
+          >
+            🤖 {aiBusy ? 'Píše…' : 'AI pokračuje'}
           </button>
         )}
 

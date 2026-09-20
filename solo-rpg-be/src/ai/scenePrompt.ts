@@ -1,11 +1,11 @@
 import type { Character, Narrator, SceneMeta, StoryEntry } from '@solo-rpg/shared'
-import type { ChatMessage } from './openRouter.js'
+import type { ChatMessage } from './types.js'
 
 /**
  * Sestavení požadavku pro AI vypravěče a parsování jeho odpovědi.
  *
  * Pořadí částí požadavku (domluvené):
- *  1. výchozí prompt pro vedení scény (soubor `prompts/scene-prompt.md`) + při `rulesInAi` sekce o kostkách/pravidlech
+ *  1. výchozí prompt pro vedení scény (soubor `prompts/scene-prompt.md`) + při zapnutém `rulesInAi` sekce o kostkách/pravidlech
  *     (`prompts/rules-prompt.md` + popis pravidel hry) – system zpráva
  *  2. postavy hráče a postavy hrané AI (s popisem, pokud je)
  *  3. popis scény (+ volitelný doplňující popis situace ze scény `aiPrompt`)
@@ -28,7 +28,7 @@ export interface ScenePromptContext {
 }
 
 /** Zobrazované jméno mluvčího – stejné jako v exportu do schránky (nickname postavy / jméno vypravěče) */
-const normalize = (s: string) => s.trim().toLocaleLowerCase('cs')
+export const normalize = (s: string) => s.trim().toLocaleLowerCase('cs')
 
 function speakerLabel(entry: StoryEntry, characters: Character[], narrator: Narrator): string {
   if (entry.characterName === null) return entry.narratorName ?? narrator.name
@@ -115,23 +115,50 @@ interface ParsedLine {
   lines: string[]
 }
 
+export interface ParseSpeakerLinesOptions {
+  /** Ostatní vypravěči hry (mimo `narrator`) – jejich řádky se uloží pod jejich jménem, ne pod aktuálního vypravěče */
+  otherNarrators?: Narrator[]
+  /**
+   * Co s řádkem `Jméno: text`, kde jméno neodpovídá žádné postavě ani vypravěči:
+   * - `narrator` (AI odpověď): připsat vypravěči, jméno zůstane v textu (`Jméno: text`)
+   * - `bold-character` (import přepisu): tučné `**Jméno**:` = nová (dočasná) postava s tímto jménem, netučné = pokračování textu
+   */
+  unknownSpeaker?: 'narrator' | 'bold-character'
+  /**
+   * Vlastní párování jména na postavu (místo výchozího: celé jméno, pak nickname). `null` = neznámé jméno,
+   * `'ambiguous'` = odpovídá více postavám – řádek se zpracuje jako neznámý a jméno se nahlásí přes `onAmbiguous`.
+   */
+  matchCharacter?: (name: string) => Character | 'ambiguous' | null
+  onAmbiguous?: (name: string) => void
+}
+
 /**
- * Převede odpověď modelu na záznamy scény. Známí mluvčí = vypravěč (jméno, obecná označení i `narratorAliases` –
- * jména předchozích vypravěčů ze scény, vždy se uloží pod aktuálního) a postavy scény (celé jméno i nickname).
- * Neznámé jméno se připíše vypravěči jako `Jméno: text`, text před prvním mluvčím a řádky bez mluvčího navazují
- * na předchozí záznam (víceřádkový markdown).
+ * Převede text ve tvaru řádků `Jméno: text` (volitelně `**Jméno**:` / `**Jméno:**`) na záznamy scény. Známí mluvčí =
+ * vypravěč (jméno, obecná označení i `narratorAliases` – jména předchozích vypravěčů ze scény, vždy se uloží pod
+ * aktuálního), další vypravěči hry (`otherNarrators`) a postavy scény (celé jméno i nickname). Text před prvním mluvčím
+ * a řádky bez mluvčího navazují na předchozí záznam (víceřádkový markdown). Neznámé jméno viz `unknownSpeaker`.
  */
-export function parseAiReply(raw: string, characters: Character[], narrator: Narrator, narratorAliases: string[] = []): StoryEntry[] {
+export function parseSpeakerLines(raw: string, characters: Character[], narrator: Narrator, narratorAliases: string[] = [], options: ParseSpeakerLinesOptions = {}): StoryEntry[] {
+  const unknownSpeaker = options.unknownSpeaker ?? 'narrator'
   // Občas model obalí odpověď do bloku kódu
   const text = raw.replace(/^\s*```[a-z]*\s*\n?/i, '').replace(/\n?```\s*$/, '').trim()
   const parsed: ParsedLine[] = []
   const narratorKeys = new Set([narrator.name, ...narratorAliases, ...GENERIC_NARRATOR_NAMES].map(normalize))
+  const otherNarrators = (options.otherNarrators ?? []).filter(n => n.name !== narrator.name)
 
   const resolveSpeaker = (name: string): { characterName: string | null; narratorName: string | null } | null => {
     const key = normalize(name)
     if (narratorKeys.has(key)) return { characterName: null, narratorName: narrator.name }
-    const character = characters.find(c => normalize(c.name) === key) ?? characters.find(c => normalize(c.nickname) === key)
-    return character ? { characterName: character.name, narratorName: null } : null
+    const character = options.matchCharacter
+      ? options.matchCharacter(name)
+      : characters.find(c => normalize(c.name) === key) ?? characters.find(c => normalize(c.nickname) === key) ?? null
+    if (character === 'ambiguous') {
+      options.onAmbiguous?.(name.trim())
+      return null
+    }
+    if (character) return { characterName: character.name, narratorName: null }
+    const other = otherNarrators.find(n => normalize(n.name) === key)
+    return other ? { characterName: null, narratorName: other.name } : null
   }
 
   for (const rawLine of text.split(/\r?\n/)) {
@@ -143,10 +170,16 @@ export function parseAiReply(raw: string, characters: Character[], narrator: Nar
         parsed.push({ ...speaker, lines: [stripBoldEdges(match[2])] })
         continue
       }
-      // Neznámý mluvčí (např. nová NPC) → vypravěč, jméno zůstane v textu; delší „jméno“ je spíš věta s dvojtečkou
+      // Neznámý mluvčí (např. nová NPC); delší „jméno“ je spíš věta s dvojtečkou
       const name = match[1].trim()
-      if (name.split(/\s+/).length <= 3 && !/["„“]/.test(name)) {
+      const looksLikeName = name.split(/\s+/).length <= 3 && !/["„“]/.test(name)
+      if (looksLikeName && unknownSpeaker === 'narrator') {
+        // → vypravěč, jméno zůstane v textu
         parsed.push({ characterName: null, narratorName: narrator.name, lines: [`${name}: ${stripBoldEdges(match[2])}`] })
+        continue
+      }
+      if (looksLikeName && unknownSpeaker === 'bold-character' && line.trimStart().startsWith('**')) {
+        parsed.push({ characterName: name, narratorName: null, lines: [stripBoldEdges(match[2])] })
         continue
       }
     }
@@ -171,4 +204,9 @@ export function parseAiReply(raw: string, characters: Character[], narrator: Nar
       timestamp: base + index,
       markdown: p.text.includes('\n') ? true : undefined,
     }))
+}
+
+/** Převede odpověď AI modelu na záznamy scény (neznámá jména se připíší vypravěči) – viz `parseSpeakerLines` */
+export function parseAiReply(raw: string, characters: Character[], narrator: Narrator, narratorAliases: string[] = []): StoryEntry[] {
+  return parseSpeakerLines(raw, characters, narrator, narratorAliases, { unknownSpeaker: 'narrator' })
 }

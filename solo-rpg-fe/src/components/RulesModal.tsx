@@ -84,11 +84,11 @@ export default function RulesModal({ rules: initialRules, rulesInAi: initialInAi
             className="mt-1 accent-[var(--accent)]"
           />
           <span>
-            <span className="font-semibold">Posílat informace o kostkách a pravidlech AI</span>
+            <span className="font-semibold">Posílat informace o kostkách a pravidlech AI vypravěči</span>
             <span className="block opacity-70">
-              Zapnuto: ke každému požadavku na AI vypravěče i ke shrnutí scény se připojí vysvětlení orákula (hody zapsané v textu)
-              a tento popis pravidel. Vypnuto: AI se o kostkách nedozví nic – vhodné pro čistě příběhové scény bez hodů.
-              Do textového exportu celé hry (📄) se pravidla přidávají vždy.
+              Týká se jen generování nových textů vypravěče ve scéně řízené AI. Zapnuto: k požadavku se připojí vysvětlení orákula
+              (hody zapsané v textu) a tento popis pravidel. Vypnuto: vypravěč se o kostkách nedozví nic – vhodné pro čistě
+              příběhové scény bez hodů. Ke shrnutí scény a do textového exportu celé hry (📄) se pravidla přidávají vždy.
             </span>
           </span>
         </label>
