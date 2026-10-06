@@ -1,33 +1,47 @@
 # Solo RPG
 
-Monorepo pro správce sólového RPG hraní. Data (postavy, scény, obrázky) se ukládají
-do **Obsidian vaultu** jako Markdown soubory, takže je lze číst i upravovat přímo v Obsidianu.
+Monorepo pro správce sólového RPG hraní. Data (postavy, scény, repliky, vazby) jsou v **Postgresu** (lokálně v Dockeru),
+obrázky ve složce `data/assets`. Hru lze kdykoli **exportovat do Obsidian vaultu** (Markdown + YAML frontmatter) nebo
+z něj importovat. Plán dalšího vývoje je v [`docs/ARCHITECTURE_V2.md`](docs/ARCHITECTURE_V2.md).
 
 ## Struktura
 
 | Složka | Popis |
 |---|---|
 | `solo-rpg-fe/` | React + Vite + Tailwind – herní UI |
-| `solo-rpg-be/` | Fastify (Node + TypeScript) – lokální API, zápis do vaultu |
+| `solo-rpg-be/` | Fastify (Node + TypeScript) – lokální API, Postgres (Drizzle), assety na disku |
 | `packages/shared/` | Sdílené typy a zod schémata (FE ↔ BE) |
-| `vault/` | Výchozí Obsidian vault s hrami (gitignored) |
+| `data/` | Data Postgresu (`db/`) a obrázky (`assets/`) – gitignored, **tohle zálohuj** |
+| `vault/` | Výchozí složka pro export/zálohy do Obsidianu (gitignored) |
 
 ## Spuštění (lokálně)
 
-Požadavky: Node.js 22+ a npm 10+.
+Požadavky: Node.js 22+, npm 10+ a **Docker Desktop** (Postgres běží v kontejneru).
 
 ```bash
 npm install
 cp solo-rpg-be/.env.example solo-rpg-be/.env   # lokální konfigurace BE (není v gitu)
-npm run dev        # spustí BE (http://127.0.0.1:3001) i FE (http://localhost:5173)
+npm run dev        # docker compose up -d (Postgres) + BE (http://127.0.0.1:3001) + FE (http://localhost:5173)
 ```
 
 > Na Windows s vypnutým spouštěním PowerShell skriptů použij `npm.cmd`.
 
+Užitečné příkazy:
+
+```bash
+npm run db:up / db:down                      # jen databáze
+npm run import:vault -w solo-rpg-be -- --vault D:\cesta\k\vaultu [--game "Název"] [--replace]   # import her z Obsidian vaultu (v1)
+npm run db:generate -w solo-rpg-be           # nová SQL migrace po změně src/storage/schema.ts (aplikuje se při startu)
+npm test -w solo-rpg-be                      # integrační testy nad běžící DB
+npm run backup -- -Target D:\OneDrive\SoloRPG   # pg_dump + zip obrázků do dvou souborů
+```
+
 Konfigurace BE je v `solo-rpg-be/.env` (viz `.env.example`):
 
 ```
-VAULT_PATH=../vault   # výchozí složka s hrami – lze ji přepnout v prohlížeči (viz níže)
+DATABASE_URL=postgres://solo:solo@localhost:5432/solo_rpg   # Postgres z docker-compose.yml
+DATA_DIR=../data      # obrázky (assets/) – vedle dat DB
+VAULT_PATH=../vault   # výchozí složka pro export/zálohy do Obsidianu – lze ji přepnout v prohlížeči (viz níže)
 PORT=3001
 AI_PROVIDER=openrouter   # `openrouter` nebo `mistral` (přímo Mistral AI API)
 OPENROUTER_API_KEY=   # klíč z https://openrouter.ai/keys – bez něj je AI vypravěč vypnutý (při AI_PROVIDER=openrouter)
@@ -37,17 +51,15 @@ MISTRAL_MODEL=mistral-medium-latest
 AI_PROMPT_PATH=prompts/scene-prompt.md   # výchozí prompt pro vedení scény (uprav si ho podle sebe)
 ```
 
-### Složka s hrami a zálohy
+### Složka pro export, zálohy
 
-- Při prvním spuštění se aplikace zeptá, **ve které složce mají být uložené hry** (každá hra = podsložka; složku lze
-  otevřít v Obsidianu jako vault). Volba se uloží do `localStorage` prohlížeče (`solo-rpg:vault-path`) a při dalších
-  spuštěních se použije automaticky; na úvodní stránce ji lze změnit („Změnit složku“ v zápatí). Hodí se to i proto,
-  aby složka s hrami neležela v projektu a IDE do ní nekoukalo.
-- Na Windows BE otevře nativní dialog pro výběr složky / „Uložit jako“ (přes PowerShell + WinForms); jinde se cesta zadává
-  ručně. FE posílá cestu s každým požadavkem (hlavička `x-vault-path`, u SSE a obrázků query `?vault=`) a BE podle ní
-  přepíná otevřený vault.
+- Při prvním spuštění se aplikace zeptá na **složku Obsidian vaultu** – do ní se hry exportují a zálohují (každá hra =
+  podsložka). Volba se uloží do `localStorage` prohlížeče (`solo-rpg:vault-path`); na úvodní stránce ji lze změnit
+  („Změnit složku“ v zápatí). FE posílá cestu s každým požadavkem (hlavička `x-vault-path`, u SSE a obrázků query `?vault=`).
+- Na Windows BE otevře nativní dialog pro výběr složky / „Uložit jako“ (přes PowerShell + WinForms); jinde se cesta zadává ručně.
 - **Zálohovat hru** na úvodní stránce: vyber hru → dialog „Uložit jako“ s předvyplněným názvem
-  `<hra> YYYY-MM-DD_HH-mm.zip` → celá složka hry se zabalí do zipu (`archiver`).
+  `<hra> YYYY-MM-DD_HH-mm.zip` → hra se vyexportuje do vaultu a její složka se zabalí do zipu (`archiver`).
+  Zálohu **všech** dat (DB dump + obrázky) dělá `npm run backup`.
 - **Export hry do textu** – tlačítko 📄 v horní liště otevřené hry stáhne `<hra>.md`: jeden Markdown soubor
   s vypravěči, postavami, lokacemi, frakcemi, questy, nitěmi, lore a přepisem všech scén (včetně shrnutí a tajemství).
   Jen text – obrázky se vynechají, wikilinky se převedou na prostý text. Hodí se jako kontext pro ChatGPT / Gemini.

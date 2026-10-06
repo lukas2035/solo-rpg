@@ -8,7 +8,10 @@
     "solo-rpg-fe"
   ],
   "scripts": {
-    "dev": "concurrently -n be,fe -c blue,green \"npm run dev -w solo-rpg-be\" \"npm run dev -w solo-rpg-fe\"",
+    "dev": "docker compose up -d --wait && concurrently -n be,fe -c blue,green \"npm run dev -w solo-rpg-be\" \"npm run dev -w solo-rpg-fe\"",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "backup": "powershell -ExecutionPolicy Bypass -File scripts/backup.ps1",
     "dev:be": "npm run dev -w solo-rpg-be",
     "dev:fe": "npm run dev -w solo-rpg-fe",
     "build": "npm run build -w @solo-rpg/shared && npm run build -w solo-rpg-be && npm run build -w solo-rpg-fe",

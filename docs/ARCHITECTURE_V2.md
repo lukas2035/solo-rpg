@@ -225,6 +225,13 @@ FE: `utils/api.ts` přejde na generické entity endpointy; `vaultPath.ts`, `Vaul
 
 ## 6. Pořadí prací (nic nebourat najednou)
 
+> **Stav (6. 10. 2026):** krok 1 je implementovaný (`solo-rpg-be/src/storage/*`: schéma, `PostgresProvider` nad v1
+> rozhraním `StorageProvider`, `FsAssetStore`, `VaultImporter`, `ObsidianExporter`, migrace v `solo-rpg-be/drizzle/`,
+> testy `solo-rpg-be/test/`, `scripts/backup.ps1`). FE beze změny – stále mluví jmény; překlad jméno ↔ id dělá
+> `PostgresProvider` (`Snapshot`). `ObsidianVaultProvider` zůstává jen jako čtečka pro import a zapisovač pro export.
+> Složka vaultu v UI („Změnit složku“) teď znamená *kam exportovat*. `GameWatcher` je nahrazen `NoopNotifier` (SSE jen heartbeat).
+> Další krok: 2.
+
 1. **Model + úložiště**: `shared` schémata (Entity/Link/Event/Brief/Suggestion/Patch, per‑kind Zod + verze), Drizzle schéma,
    `docker-compose.yml`, `FsAssetStore`, **importér ze stávajícího vaultu** (ať nepřijdeš o hry; mapování je v
    `COPILOT_HANDOFF.md` § Layout vaultu), `ObsidianExporter`, `scripts\backup.ps1`. FE přepnout na nové API při zachování UI.

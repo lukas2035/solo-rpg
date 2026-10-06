@@ -24,6 +24,7 @@ import type { RulesPromptResponse } from '@solo-rpg/shared'
 import { ConflictError, NotFoundError, ValidationError } from '../vault/StorageProvider.js'
 import type { VaultManager } from '../vault/VaultManager.js'
 import { backupGameFolder } from '../vault/backup.js'
+import type { ObsidianExporter } from '../storage/ObsidianExporter.js'
 import { DialogBusyError } from '../system/dialogs.js'
 import type { Config } from '../config.js'
 import { AiError } from '../ai/types.js'
@@ -63,7 +64,7 @@ function sendError(reply: FastifyReply, error: unknown): FastifyReply {
   return reply.code(500).send({ error: error instanceof Error ? error.message : 'Neznámá chyba.' })
 }
 
-export async function registerGameRoutes(app: FastifyInstance, vault: VaultManager, config: Config): Promise<void> {
+export async function registerGameRoutes(app: FastifyInstance, vault: VaultManager, config: Config, exporter: ObsidianExporter): Promise<void> {
   app.setErrorHandler((error, _request, reply) => sendError(reply, error))
 
   // Vlastní zápisy BE do složky hry nemají vyvolat hlášení „změna ve vaultu“ – utišit watcher před i po zpracování
@@ -133,12 +134,21 @@ export async function registerGameRoutes(app: FastifyInstance, vault: VaultManag
     return reply.code(204).send()
   })
 
-  // Záloha: celá složka hry zabalená do zipu na cestě zvolené uživatelem
+  // Záloha: hra se vyexportuje do Obsidian vaultu (aktuální exportní složka) a její složka se zabalí do zipu
   app.post('/api/games/:game/backup', async (request, reply) => {
     const { game } = GameParams.parse(request.params)
     const { targetPath } = BackupGameRequestSchema.parse(request.body)
     if (!(await vault.storage.getGame(game))) return reply.code(404).send({ error: `Hra „${game}“ neexistuje.` })
-    return reply.code(201).send(await backupGameFolder(vault.gameDir(game), game, targetPath))
+    const gameDir = await exporter.exportGame(game, vault.path)
+    return reply.code(201).send(await backupGameFolder(gameDir, game, targetPath))
+  })
+
+  // Export do Obsidian vaultu bez zipu
+  app.post('/api/games/:game/export', async (request, reply) => {
+    const { game } = GameParams.parse(request.params)
+    if (!(await vault.storage.getGame(game))) return reply.code(404).send({ error: `Hra „${game}“ neexistuje.` })
+    const path = await exporter.exportGame(game, vault.path)
+    return reply.code(201).send({ path })
   })
 
   // ---------- setup (pozadí, aktuální vypravěč) ----------

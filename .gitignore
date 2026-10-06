@@ -27,3 +27,6 @@ Thumbs.db
 
 # Obsidian vault s daty her (výchozí VAULT_PATH) – jen kořenová složka, ne solo-rpg-be/src/vault
 /vault/
+
+# Lokální data (Postgres bind mount + assety) – zálohovat mimo repo, viz docs/ARCHITECTURE_V2.md
+/data/

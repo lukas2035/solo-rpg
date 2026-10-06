@@ -1,64 +1,68 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { ObsidianVaultProvider } from './ObsidianVaultProvider.js'
-import { GameWatcher } from './GameWatcher.js'
-import { ValidationError, type StorageProvider } from './StorageProvider.js'
+import type { StorageProvider } from './StorageProvider.js'
+import { ValidationError } from './StorageProvider.js'
+import type { ChangeListener } from './GameWatcher.js'
+
+/** Hlášení změn hry pro SSE; s Postgresem jako úložištěm žádné vnější změny nevznikají, zůstává jen rozhraní */
+export interface ChangeNotifier {
+  noteOwnChange(game: string): void
+  subscribe(game: string, listener: ChangeListener): (() => void) | null
+  closeAll(): void
+}
+
+export class NoopNotifier implements ChangeNotifier {
+  noteOwnChange(): void {}
+  subscribe(): (() => void) | null {
+    return () => undefined
+  }
+  closeAll(): void {}
+}
 
 /**
- * Drží aktuálně otevřenou složku s hrami (vault) a k ní příslušný storage provider a watcher.
+ * Drží úložiště her (Postgres) a aktuální složku pro export/zálohy do Obsidian vaultu.
  *
- * Cestu si pamatuje prohlížeč (localStorage) a posílá ji s každým požadavkem v hlavičce `x-vault-path`
- * (u SSE a statických souborů v query `vault`). BE při změně cesty přepne provider i watcher.
+ * Cestu ke složce si pamatuje prohlížeč (localStorage) a posílá ji s každým požadavkem v hlavičce `x-vault-path`
+ * (u SSE a obrázků v query `vault`). Dřív určovala, odkud se hry čtou; teď jen kam se exportují.
  */
 export class VaultManager {
-  private current: { path: string; storage: StorageProvider; watcher: GameWatcher }
+  private currentPath: string
   private switching: Promise<void> | null = null
 
-  private constructor(readonly defaultPath: string, initial: { path: string; storage: StorageProvider; watcher: GameWatcher }) {
-    this.current = initial
+  constructor(
+    readonly defaultPath: string,
+    readonly storage: StorageProvider,
+    readonly watcher: ChangeNotifier = new NoopNotifier(),
+  ) {
+    this.currentPath = path.resolve(defaultPath)
   }
 
-  static async create(defaultPath: string): Promise<VaultManager> {
+  static async create(defaultPath: string, storage: StorageProvider): Promise<VaultManager> {
     const resolved = path.resolve(defaultPath)
-    const storage = new ObsidianVaultProvider(resolved)
-    await storage.init()
-    return new VaultManager(resolved, { path: resolved, storage, watcher: new GameWatcher(resolved) })
+    await fs.mkdir(resolved, { recursive: true })
+    return new VaultManager(resolved, storage)
   }
 
+  /** Složka Obsidian vaultu pro export a zálohy */
   get path(): string {
-    return this.current.path
+    return this.currentPath
   }
 
-  get storage(): StorageProvider {
-    return this.current.storage
-  }
-
-  get watcher(): GameWatcher {
-    return this.current.watcher
-  }
-
-  /** Absolutní cesta ke složce dané hry v aktuálním vaultu */
+  /** Absolutní cesta ke složce dané hry v exportním vaultu */
   gameDir(game: string): string {
-    return path.join(this.current.path, game)
+    return path.join(this.currentPath, game)
   }
 
-  /**
-   * Přepne na jinou složku s hrami. Složka musí existovat (nebo `create = true`).
-   * Opakované volání se stejnou cestou je bez efektu.
-   */
+  /** Přepne exportní složku. Složka musí existovat (nebo `create = true`). */
   async use(requested: string, create = false): Promise<string> {
     const normalized = VaultManager.normalize(requested)
-    if (normalized === this.current.path) return normalized
+    if (normalized === this.currentPath) return normalized
     if (this.switching) await this.switching
-    if (normalized === this.current.path) return normalized
+    if (normalized === this.currentPath) return normalized
 
     this.switching = (async () => {
       await VaultManager.ensureDirectory(normalized, create)
-      const storage = new ObsidianVaultProvider(normalized)
-      await storage.init()
-      const previous = this.current
-      this.current = { path: normalized, storage, watcher: new GameWatcher(normalized) }
-      previous.watcher.closeAll()
+      this.currentPath = normalized
     })()
     try {
       await this.switching
@@ -69,7 +73,7 @@ export class VaultManager {
   }
 
   close(): void {
-    this.current.watcher.closeAll()
+    this.watcher.closeAll()
   }
 
   static normalize(requested: string): string {

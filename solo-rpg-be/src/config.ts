@@ -10,8 +10,13 @@ const DEFAULT_MODEL: Record<AiProvider, string> = {
 }
 
 export interface Config {
+  /** Výchozí složka pro export/zálohu her ve formátu Obsidian vaultu (v1 zde byla primární data) */
   vaultPath: string
   port: number
+  /** Připojení k Postgresu (docker-compose.yml v rootu monorepa) */
+  databaseUrl: string
+  /** Složka s lokálními daty mimo DB (assety) */
+  dataDir: string
   /** Nastavení AI vypravěče; `apiKey` null = AI vypnutá (endpoint vrací 503) */
   ai: {
     /** Zvolený provider (AI_PROVIDER); `apiKey` a `model` jsou už vyřešené pro něj */
@@ -34,6 +39,8 @@ export interface Config {
 
 export function loadConfig(): Config {
   const vaultPath = path.resolve(process.cwd(), process.env.VAULT_PATH ?? '../vault')
+  const databaseUrl = process.env.DATABASE_URL?.trim() || 'postgres://solo:solo@localhost:5432/solo_rpg'
+  const dataDir = path.resolve(process.cwd(), process.env.DATA_DIR ?? '../data')
   const port = Number(process.env.PORT ?? 3001)
   if (!Number.isInteger(port) || port <= 0) {
     throw new Error(`Neplatný PORT: ${process.env.PORT}`)
@@ -51,5 +58,5 @@ export function loadConfig(): Config {
   const maxTokens = Number(process.env.AI_MAX_TOKENS ?? 1500)
   const temperature = Number(process.env.AI_TEMPERATURE ?? 0.9)
   const debug = /^(1|true|yes)$/i.test(process.env.AI_DEBUG ?? '')
-  return { vaultPath, port, ai: { provider, apiKey, model, promptPath, summaryPromptPath, rulesPromptPath, maxTokens, temperature, debug } }
+  return { vaultPath, port, databaseUrl, dataDir, ai: { provider, apiKey, model, promptPath, summaryPromptPath, rulesPromptPath, maxTokens, temperature, debug } }
 }

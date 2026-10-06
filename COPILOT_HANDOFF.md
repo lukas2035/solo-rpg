@@ -5,10 +5,12 @@ Tento text je předávací zpráva „od tebe pro tebe“. Napsal ji Claude Fabl
 proč, a co je v plánu dál. Přečti si ho celý, než začneš cokoli měnit. Uživatel je Lukáš (@lukas2035),
 komunikuje **česky**, je fullstack (React i Java/Spring Boot na stejné úrovni).
 
-> **⚠️ 6. 10. 2026 – plánovaná přestavba (v2).** Tento soubor popisuje **současný stav v1** (Obsidian vault jako úložiště).
+> **⚠️ 6. 10. 2026 – přestavba (v2) běží.** Tento soubor popisuje **stav v1** (Obsidian vault jako úložiště).
 > Rozhodnutí o nové architektuře (Postgres v Dockeru, generické entity + JSONB, assety na FS, dvouvrstvá AI Director/Narrative,
 > pořadí prací) jsou v **`docs/ARCHITECTURE_V2.md`** – přečti ho jako první; kde si odporují, platí v2.
-> Sekce §2 níže („neotevírat znovu“) stále platí pro FE/BE stack, ale **ne** pro Obsidian jako core úložiště.
+> **Krok 1 je hotový:** úložištěm je Postgres (`solo-rpg-be/src/storage/PostgresProvider.ts`), Obsidian vault je jen cíl
+> exportu/záloh a zdroj importu (`VaultImporter`, `ObsidianExporter`). Sekce §3 „Layout vaultu“ níže platí pro formát exportu.
+> Sekce §2 („neotevírat znovu“) stále platí pro FE/BE stack, ale **ne** pro Obsidian jako core úložiště.
 
 ---
 
