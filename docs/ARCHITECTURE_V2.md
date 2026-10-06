@@ -230,7 +230,9 @@ FE: `utils/api.ts` přejde na generické entity endpointy; `vaultPath.ts`, `Vaul
 > testy `solo-rpg-be/test/`, `scripts/backup.ps1`). FE beze změny – stále mluví jmény; překlad jméno ↔ id dělá
 > `PostgresProvider` (`Snapshot`). `ObsidianVaultProvider` zůstává jen jako čtečka pro import a zapisovač pro export.
 > Složka vaultu v UI („Změnit složku“) teď znamená *kam exportovat*. `GameWatcher` je nahrazen `NoopNotifier` (SSE jen heartbeat).
-> Další krok: 2.
+> Záloha/obnova ověřena (včetně obnovy do úplně prázdné DB). Obě hry importované z `c:\Lukas\ttrpg games` (vault zůstává jako v1 záloha).
+> **Teď:** Lukáš několik dní play‑testuje obě hry ve FE nad Postgresem – případné odchylky od chování v1 opravit před krokem 2.
+> Další krok: 2 (zahájit krátkým návrhem + `ask_user` na sporné body: ukládat reject‑důvod už teď?, token budget, streaming).
 
 1. **Model + úložiště**: `shared` schémata (Entity/Link/Event/Brief/Suggestion/Patch, per‑kind Zod + verze), Drizzle schéma,
    `docker-compose.yml`, `FsAssetStore`, **importér ze stávajícího vaultu** (ať nepřijdeš o hry; mapování je v
