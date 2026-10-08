@@ -164,6 +164,17 @@ describe('postavy a scény', () => {
     const [row] = await database.db.execute(sql`SELECT schema_version FROM entities WHERE id = ${scene.id}`).then(r => r.rows as { schema_version: number }[])
     expect(row.schema_version).toBe(2)
 
+    // Kontextové scény: vazba scéna → scéna podle názvu, sama sebe a neznámé vypustí, rename se promítne
+    const other = await storage.createScene(G, { title: 'Jiná scéna' })
+    await storage.updateScene(G, scene.id, { title: 'Přejmenovaná', contextScenes: ['Jiná scéna', 'Přejmenovaná', 'Neexistuje'] })
+    expect((await find()).contextScenes).toEqual(['Jiná scéna'])
+    await storage.updateScene(G, other.id, { title: 'Jiná scéna 2' })
+    expect((await find()).contextScenes).toEqual(['Jiná scéna 2'])
+    await storage.updateScene(G, scene.id, { title: 'Přejmenovaná', description: 'x' })
+    expect((await find()).contextScenes).toEqual(['Jiná scéna 2'])
+    await storage.deleteScene(G, other.id)
+    expect((await find()).contextScenes).toEqual([])
+
     await storage.deleteScene(G, scene.id)
   })
 })

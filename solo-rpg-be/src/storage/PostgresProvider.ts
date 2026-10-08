@@ -391,6 +391,7 @@ export class PostgresProvider implements StorageProvider {
       summary: e.fields.summary,
       summaryStale: e.fields.summaryStale,
       entryCount: snap.entryCounts.get(e.row.id) ?? 0,
+      contextScenes: snap.manyNames(e, 'contextScenes'),
       createdAt: ms(e.row.createdAt),
       updatedAt: ms(e.row.updatedAt),
     }
@@ -790,6 +791,7 @@ export class PostgresProvider implements StorageProvider {
       await this.setLinks(tx, snap.game.id, id, 'characters', characterIds)
       await this.setLinks(tx, snap.game.id, id, 'aiCharacters', aiCharacterIds)
       await this.setLink(tx, snap.game.id, id, 'location', snap.resolveOne('location', input.location))
+      await this.setLinks(tx, snap.game.id, id, 'contextScenes', snap.resolveMany('scene', input.contextScenes, id))
 
       const after = await this.loadSnapshot(tx, snap.game)
       const created = after.require('scene', id)
@@ -832,6 +834,7 @@ export class PostgresProvider implements StorageProvider {
       await this.setLinks(tx, snap.game.id, sceneId, 'characters', characterIds)
       await this.setLinks(tx, snap.game.id, sceneId, 'aiCharacters', aiCharacterIds)
       if (input.location !== undefined) await this.setLink(tx, snap.game.id, sceneId, 'location', snap.resolveOne('location', input.location))
+      if (input.contextScenes) await this.setLinks(tx, snap.game.id, sceneId, 'contextScenes', snap.resolveMany('scene', input.contextScenes, sceneId))
 
       // Přesun na jinou pozici: přeskládat a přečíslovat
       const currentIndex = scenes.indexOf(current)

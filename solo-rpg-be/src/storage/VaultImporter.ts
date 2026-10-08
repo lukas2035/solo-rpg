@@ -235,6 +235,7 @@ export class VaultImporter {
       await links(id, 'characters', chars)
       await links(id, 'aiCharacters', resolve('character', s.aiCharacters).filter(c => chars.includes(c)))
       await links(id, 'location', resolve('location', s.location ? [s.location] : []))
+      await links(id, 'contextScenes', resolve('scene', s.contextScenes).filter(x => x !== id))
     }
     for (const t of detail.threads) {
       const id = ids.thread.get(t.title)!

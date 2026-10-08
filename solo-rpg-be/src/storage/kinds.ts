@@ -150,6 +150,7 @@ export const LINK_SPECS: Record<EntityKind, Record<string, LinkSpec>> = {
     characters: { target: 'character', cardinality: 'many' },
     aiCharacters: { target: 'character', cardinality: 'many' },
     location: { target: 'location', cardinality: 'one' },
+    contextScenes: { target: 'scene', cardinality: 'many' },
   },
   thread: {
     characters: { target: 'character', cardinality: 'many' },

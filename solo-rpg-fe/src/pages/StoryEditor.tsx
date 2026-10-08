@@ -931,7 +931,7 @@ export default function StoryEditor() {
   /** Submit dialogu scény: vytvoří/aktualizuje soubor scény a uloží její obrázek pod jejím názvem */
   const handleSceneSubmit = async (values: SceneFormValues) => {
     const editing = editingScene
-    const base: SceneInput = { title: values.title, description: values.description, summary: values.summary, characters: values.characters, location: values.location, order: values.order }
+    const base: SceneInput = { title: values.title, description: values.description, summary: values.summary, characters: values.characters, location: values.location, order: values.order, contextScenes: values.contextScenes }
 
     // Nejdřív scéna (kontrola duplicitního názvu), teprve pak obrázek pojmenovaný podle ní
     let saved = editing
@@ -1661,6 +1661,7 @@ export default function StoryEditor() {
           onSubmit={handleSceneSubmit}
           onCreateCharacter={createCharacterFromSceneModal}
           onSummarize={editingScene ? () => api.summarizeScene(gameName, editingScene.id).then(r => r.summary) : undefined}
+          onSuggestContextScenes={editingScene ? () => api.suggestContextScenes(gameName, editingScene.id).then(r => r.scenes) : undefined}
           onDelete={editingScene ? () => deleteScene(editingScene.id) : undefined}
           onClose={() => setSceneModal(null)}
         />

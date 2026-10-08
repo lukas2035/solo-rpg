@@ -1011,6 +1011,7 @@ export class ObsidianVaultProvider implements StorageProvider {
           ai: data.ai === true,
           aiCharacters: parseCharacterLinks(data.aiCharacters),
           aiPrompt: stringOrNull(data.aiPrompt) ?? '',
+          contextScenes: parseCharacterLinks(data.contextScenes),
           createdAt: toTimestamp(data.createdAt, stat.birthtimeMs),
           updatedAt: toTimestamp(data.updatedAt, stat.mtimeMs),
         },
@@ -1055,6 +1056,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       aiCharacters: toCharacterLinks(meta.aiCharacters),
       aiPrompt: meta.aiPrompt.trim() ? meta.aiPrompt.trim() : null,
       summaryStale: meta.summaryStale ? true : null,
+      contextScenes: meta.contextScenes.length ? toCharacterLinks(meta.contextScenes) : null,
       createdAt: toIso(meta.createdAt),
       updatedAt: toIso(meta.updatedAt),
     }
@@ -1124,6 +1126,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       summary: input.summary ?? '',
       summaryStale: false,
       entryCount: 0,
+      contextScenes: (input.contextScenes ?? []).filter(t => scenes.some(s => s.meta.title === t)),
       image: input.image ?? null,
       characters,
       location: await this.normalizeLocationRef(dir, input.location ?? null),
@@ -1187,6 +1190,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       // AI může hrát jen postavy, které ve scéně jsou
       aiCharacters: aiCharacters.filter(n => characters.includes(n)),
       aiPrompt: input.aiPrompt ?? previous.aiPrompt,
+      contextScenes: input.contextScenes ? input.contextScenes.filter(t => t !== title && scenes.some(s => s.meta.title === t)) : previous.contextScenes,
       updatedAt: Date.now(),
     }
     await this.writeSceneFile(dir, meta, current.entriesBody, current.data)

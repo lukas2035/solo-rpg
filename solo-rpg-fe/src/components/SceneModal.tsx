@@ -18,6 +18,8 @@ export interface SceneFormValues {
   location: string | null
   /** Pozice scény v pořadí (1 = první); ostatní scény se přečíslují */
   order: number
+  /** Názvy scén, jejichž shrnutí dostane AI vypravěč jako kontext (prázdné = všechny předchozí) */
+  contextScenes: string[]
 }
 
 /** Postava hry nabízená v checklistu */
@@ -53,12 +55,14 @@ interface SceneModalProps {
   onCreateCharacter?: (values: CharacterFormValues) => Promise<SceneCharacterOption>
   /** Nechá AI shrnout děj scény (jen u existující scény); vrací markdown shrnutí, které se vloží do pole */
   onSummarize?: () => Promise<string>
+  /** Nechá AI vybrat předchozí scény relevantní pro tuto scénu (jen u existující scény); vrací názvy scén */
+  onSuggestContextScenes?: () => Promise<string[]>
   onDelete?: () => Promise<void>
   onClose: () => void
 }
 
 /** Dialog pro vytvoření a úpravu scény (název, pozice, obrázek = pozadí scény, markdown popis, shrnutí děje, přítomné postavy) */
-export default function SceneModal({ scene, scenes, image, defaultTitle = '', defaultCharacters = [], defaultLocation = null, allCharacters, allLocations = [], required = false, onSubmit, onCreateCharacter, onSummarize, onDelete, onClose }: SceneModalProps) {
+export default function SceneModal({ scene, scenes, image, defaultTitle = '', defaultCharacters = [], defaultLocation = null, allCharacters, allLocations = [], required = false, onSubmit, onCreateCharacter, onSummarize, onSuggestContextScenes, onDelete, onClose }: SceneModalProps) {
   const isEdit = scene !== null
   const sorted = [...scenes].sort((a, b) => a.order - b.order)
   // Pozice podle indexu v seřazeném seznamu (soubory ve vaultu mohou mít mezery v číslování)
@@ -69,6 +73,8 @@ export default function SceneModal({ scene, scenes, image, defaultTitle = '', de
   const [description, setDescription] = useState(scene?.description ?? '')
   const [summary, setSummary] = useState(scene?.summary ?? '')
   const [summarizing, setSummarizing] = useState(false)
+  const [contextScenes, setContextScenes] = useState<string[]>(scene?.contextScenes ?? [])
+  const [suggestingContext, setSuggestingContext] = useState(false)
   const [selected, setSelected] = useState<string[]>(scene?.characters ?? defaultCharacters)
   const [location, setLocation] = useState<string | null>(scene ? scene.location : defaultLocation)
   const [creatingCharacter, setCreatingCharacter] = useState(false)
@@ -116,6 +122,24 @@ export default function SceneModal({ scene, scenes, image, defaultTitle = '', de
     }
   }
 
+  const handleSuggestContextScenes = async () => {
+    if (!onSuggestContextScenes || suggestingContext) return
+    setSuggestingContext(true)
+    setError(null)
+    try {
+      setContextScenes(await onSuggestContextScenes())
+    } catch (err) {
+      setError(err instanceof Error ? `AI výběr scén selhal: ${err.message}` : 'AI výběr scén selhal.')
+    } finally {
+      setSuggestingContext(false)
+    }
+  }
+
+  /** Ostatní scény hry (kandidáti pro kontext) v pořadí; samotná scéna se vynechá */
+  const otherScenes = sorted.filter(s => s.id !== scene?.id)
+  const contextSelected = otherScenes.filter(s => contextScenes.includes(s.title))
+  const contextAvailable = otherScenes.filter(s => !contextScenes.includes(s.title))
+
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault()
     if (saving) return
@@ -136,6 +160,7 @@ export default function SceneModal({ scene, scenes, image, defaultTitle = '', de
         characters: selected.filter(n => allCharacters.some(c => c.name === n)),
         location: location && allLocations.some(l => l.title === location) ? location : null,
         order,
+        contextScenes: contextSelected.map(s => s.title),
       })
       onClose()
     } catch (err) {
@@ -324,6 +349,58 @@ export default function SceneModal({ scene, scenes, image, defaultTitle = '', de
             </div>
           )}
         </fieldset>
+
+        {otherScenes.length > 0 && (
+          <fieldset className="flex flex-col gap-2 text-left text-sm text-[var(--text)]">
+            <legend className="mb-1 flex items-center gap-3 w-full">
+              <span>
+                Kontext pro AI vypravěče{' '}
+                <span className="opacity-60">
+                  (shrnutí těchto scén dostane AI; {contextSelected.length === 0 ? 'prázdné = všechny předchozí scény do rozpočtu' : `${contextSelected.length} vybráno`})
+                </span>
+              </span>
+              {isEdit && onSuggestContextScenes && (
+                <button
+                  type="button"
+                  onClick={handleSuggestContextScenes}
+                  disabled={suggestingContext || saving}
+                  title="Nechat AI vybrat podle postav, názvu a popisu této scény relevantní předchozí scény – nahradí aktuální seznam, uloží se tlačítkem „Uložit“"
+                  className="ml-auto px-2 py-1 rounded-md border border-dashed border-[var(--accent)]/70 text-xs text-[var(--accent)] hover:border-solid hover:bg-black/40 transition-all disabled:opacity-50 whitespace-nowrap"
+                >
+                  {suggestingContext ? '🤖 Vybírám…' : contextSelected.length ? '🤖 Vybrat znovu pomocí AI' : '🤖 Vybrat pomocí AI'}
+                </button>
+              )}
+            </legend>
+            <div className={`flex flex-wrap gap-2 items-center ${suggestingContext ? 'animate-pulse' : ''}`}>
+              {contextSelected.map(s => (
+                <span key={s.id} className="flex items-center gap-1 px-2 py-1 rounded-lg border border-[var(--accent)] bg-[var(--accent)]/15 text-xs">
+                  {String(s.order).padStart(2, '0')} · {s.title}
+                  <button
+                    type="button"
+                    onClick={() => setContextScenes(prev => prev.filter(t => t !== s.title))}
+                    title="Odebrat z kontextu"
+                    className="ml-1 opacity-60 hover:opacity-100"
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+              {contextAvailable.length > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => { if (e.target.value) setContextScenes(prev => [...prev, e.target.value]) }}
+                  className={`${inputClass} text-xs w-auto py-1`}
+                  title="Přidat scénu do kontextu ručně"
+                >
+                  <option value="">＋ přidat scénu…</option>
+                  {contextAvailable.map(s => (
+                    <option key={s.id} value={s.title}>{String(s.order).padStart(2, '0')} · {s.title}{s.summary.trim() ? '' : ' (bez shrnutí)'}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </fieldset>
+        )}
 
         {error && (
           <div className="px-3 py-2 rounded-lg bg-red-900/70 border border-red-500 text-sm text-red-100">{error}</div>

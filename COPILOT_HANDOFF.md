@@ -330,6 +330,7 @@ POST /api/games/:name/scenes/:id/ai  (AI vypravěč navrhne pokračování, NEUK
 GET  /api/games/:name/scenes/:id/ai/suggestion  (→ { suggestion | null, rejectedReasons })
 POST /api/games/:name/scenes/:id/ai/suggestions/:sug/accept ({ entries } – upravené repliky; → { entries }; 404 neaktuální návrh)
 POST /api/games/:name/scenes/:id/ai/suggestions/:sug/reject ({ reason } → AiSuggestionState; 404 neaktuální návrh)
+POST /api/games/:name/scenes/:id/context-scenes  (AI vybere předchozí scény relevantní pro scénu; → { scenes, raw }; neukládá; 400 bez předchozích scén se shrnutím)
 POST /api/games/:name/scenes/:id/import ({ text, resolutions? } – import odehraného přepisu, `vault/sceneImport.ts`; → { entries, addedCharacters, ambiguous }; 400 prázdný/nerozpoznaný text)
   Přepis `**Jméno**: text` / `**Jméno:** text` (tučné nepovinné) parsuje `ai/scenePrompt.ts#parseSpeakerLines` (společné jádro
   s `parseAiReply`) s volbou `unknownSpeaker: 'bold-character'` a vlastním `matchCharacter`: celé jméno → jednoznačné; jinak
@@ -381,6 +382,12 @@ GET  /vault/*  (statické soubory z aktuálně otevřené složky s hrami)
   počet replik (ze `scene_entries`, ve `Snapshot.entryCounts`). FE `utils/scenes.ts#needsSummary` = `summaryStale || (entryCount > 0 && !summary)`;
   takové scény mají ⚠️ v `SceneBar` a tlačítko „🤖 Doplnit shrnutí (n)“ je postupně shrne a uloží (`SceneModal` ukazuje „⚠️ zastaralé“).
   `updateEntity` při přepisu `fields` zapisuje i aktuální `schema_version` (`CURRENT_VERSION_BY_KIND`), jinak by se migrace v1→v2 spouštěla znovu.
+- **Výběr scén pro kontext (`SceneMeta.contextScenes`)** – vazba scéna → scéna (`links.kind = contextScenes`, frontmatter wikilinky).
+  Prázdné = `contextBuilder` posílá shrnutí všech předchozích scén (od nejnovější do 30 % rozpočtu); neprázdné = jen těchto scén
+  (i pozdějších). `ai/sceneContextScenes.ts#suggestContextScenes` (prompt `prompts/scene-context-prompt.md`, `AI_CONTEXT_PROMPT_PATH`,
+  temperature 0) pošle modelu postavy/název/popis/lokaci scény + shrnutí všech předchozích scén a čeká seznam id (`parseSelectedScenes`,
+  fallback na názvy). Route `POST …/scenes/:id/context-scenes` → `{ scenes: názvy, raw }`, nic neukládá. FE `SceneModal`: sekce
+  „Kontext pro AI vypravěče“ – chipy s ✕, select „＋ přidat scénu…“, tlačítko „🤖 Vybrat (znovu) pomocí AI“ nahradí seznam; uloží se s „Uložit“.
 
 ### Ověřeno
 - `npm.cmd run build` (shared, BE, FE) prochází; `npm.cmd run lint` – jen 1 pre-existující warning v `InputArea.tsx`.

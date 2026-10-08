@@ -27,6 +27,8 @@ export interface Config {
     promptPath: string
     /** Absolutní cesta k souboru s promptem pro AI shrnutí děje scény */
     summaryPromptPath: string
+    /** Absolutní cesta k souboru s promptem pro AI výběr relevantních předchozích scén (kontext vypravěče) */
+    contextPromptPath: string
     /** Absolutní cesta k souboru s promptem o kostkách/orákulu a herních pravidlech pod příběhem */
     rulesPromptPath: string
     /** Limit délky odpovědi modelu (tokeny) */
@@ -58,6 +60,7 @@ export function loadConfig(): Config {
   const model = (provider === 'mistral' ? process.env.MISTRAL_MODEL : process.env.OPENROUTER_MODEL)?.trim() || DEFAULT_MODEL[provider]
   const promptPath = path.resolve(process.cwd(), process.env.AI_PROMPT_PATH ?? 'prompts/scene-prompt.md')
   const summaryPromptPath = path.resolve(process.cwd(), process.env.AI_SUMMARY_PROMPT_PATH ?? 'prompts/scene-summary-prompt.md')
+  const contextPromptPath = path.resolve(process.cwd(), process.env.AI_CONTEXT_PROMPT_PATH ?? 'prompts/scene-context-prompt.md')
   const rulesPromptPath = path.resolve(process.cwd(), process.env.AI_RULES_PROMPT_PATH ?? 'prompts/rules-prompt.md')
   const maxTokens = Number(process.env.AI_MAX_TOKENS ?? 1500)
   const temperature = Number(process.env.AI_TEMPERATURE ?? 0.9)
@@ -69,6 +72,6 @@ export function loadConfig(): Config {
     port,
     databaseUrl,
     dataDir,
-    ai: { provider, apiKey, model, promptPath, summaryPromptPath, rulesPromptPath, maxTokens, temperature, contextTokens, transcriptTokens, debug },
+    ai: { provider, apiKey, model, promptPath, summaryPromptPath, contextPromptPath, rulesPromptPath, maxTokens, temperature, contextTokens, transcriptTokens, debug },
   }
 }

@@ -302,9 +302,11 @@ export function buildSceneContext(detail: GameDetail, scene: SceneMeta, options:
   }
   candidates.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, 'cs'))
 
-  // Shrnutí předchozích scén – od nejnovější, přednostně do vyhrazeného podílu rozpočtu
+  // Shrnutí předchozích scén – od nejnovější, přednostně do vyhrazeného podílu rozpočtu.
+  // Má‑li scéna vlastní výběr `contextScenes`, posílají se jen tyto (v libovolném pořadí ve hře); jinak všechny předchozí.
+  const picked = new Set(scene.contextScenes)
   const summaries: ContextBlock[] = detail.scenes
-    .filter(s => s.id !== scene.id && s.order < scene.order && s.summary.trim())
+    .filter(s => s.id !== scene.id && s.summary.trim() && (picked.size > 0 ? picked.has(s.title) : s.order < scene.order))
     .sort((a, b) => b.order - a.order)
     .map(s => ({ kind: 'summary', id: s.id, name: s.title, text: `### ${s.title} (id: ${s.id})\n${s.summary.trim()}`, secret: '', score: 0 }))
 

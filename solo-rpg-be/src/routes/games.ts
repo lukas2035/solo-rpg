@@ -22,7 +22,7 @@ import {
   AiSuggestionRejectRequestSchema,
   isValidGameName,
 } from '@solo-rpg/shared'
-import type { AiSuggestion, AiSuggestionAcceptResponse, AiSuggestionState, RulesPromptResponse } from '@solo-rpg/shared'
+import type { AiSuggestion, AiSuggestionAcceptResponse, AiSuggestionState, RulesPromptResponse, SceneContextSuggestionResponse } from '@solo-rpg/shared'
 import { ConflictError, NotFoundError, ValidationError } from '../vault/StorageProvider.js'
 import type { VaultManager } from '../vault/VaultManager.js'
 import { backupGameFolder } from '../vault/backup.js'
@@ -32,6 +32,7 @@ import type { Config } from '../config.js'
 import { AiError } from '../ai/types.js'
 import { SuggestionService } from '../narrative/suggestions.js'
 import { summarizeScene } from '../ai/sceneSummary.js'
+import { suggestContextScenes } from '../ai/sceneContextScenes.js'
 import { buildRulesSection } from '../ai/rulesPrompt.js'
 import { importSceneTranscript } from '../vault/sceneImport.js'
 
@@ -338,6 +339,12 @@ export async function registerGameRoutes(app: FastifyInstance, vault: VaultManag
   app.post('/api/games/:game/scenes/:scene/summary', async (request) => {
     const { game, scene } = SceneParams.parse(request.params)
     return summarizeScene(vault.storage, config, game, scene, request.log)
+  })
+
+  // AI výběr předchozích scén relevantních pro tuto scénu – nic neukládá, FE výsledek vloží do dialogu scény (`contextScenes`)
+  app.post('/api/games/:game/scenes/:scene/context-scenes', async (request): Promise<SceneContextSuggestionResponse> => {
+    const { game, scene } = SceneParams.parse(request.params)
+    return suggestContextScenes(vault.storage, config, game, scene, request.log)
   })
 
   /** Sekce o kostkách a pravidlech přesně tak, jak ji dostává AI (pro textový export hry; přepínač rulesInAi se ignoruje) */

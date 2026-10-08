@@ -118,6 +118,11 @@ export const SceneMetaSchema = z.object({
   summaryStale: z.boolean(),
   /** Počet záznamů (replik) ve scéně – FE podle něj pozná, že scéna má co shrnout */
   entryCount: z.number().int().nonnegative(),
+  /**
+   * Názvy jiných scén, jejichž shrnutí dostane AI vypravěč jako kontext (frontmatter `contextScenes` jako wikilinky).
+   * Prázdné = výchozí chování (všechny předchozí scény se shrnutím, od nejnovější, do rozpočtu).
+   */
+  contextScenes: z.array(z.string()),
   createdAt: z.number(),
   updatedAt: z.number(),
 })
@@ -139,6 +144,7 @@ export const SceneInputSchema = z.object({
   aiCharacters: z.array(z.string().trim().min(1)).optional(),
   aiPrompt: z.string().max(5000).optional(),
   summary: z.string().max(20000).optional(),
+  contextScenes: z.array(z.string().trim().min(1)).max(50).optional(),
 })
 export type SceneInput = z.infer<typeof SceneInputSchema>
 
@@ -638,6 +644,14 @@ export const SceneSummaryResponseSchema = z.object({
   raw: z.string(),
 })
 export type SceneSummaryResponse = z.infer<typeof SceneSummaryResponseSchema>
+
+/** Odpověď `POST /api/games/:game/scenes/:scene/context-scenes` – AI výběr předchozích scén relevantních pro tuto scénu (neukládá se) */
+export const SceneContextSuggestionResponseSchema = z.object({
+  /** Názvy vybraných scén v chronologickém pořadí */
+  scenes: z.array(z.string()),
+  raw: z.string(),
+})
+export type SceneContextSuggestionResponse = z.infer<typeof SceneContextSuggestionResponseSchema>
 
 /** Tělo `POST /api/games/:game/scenes/:scene/import` – přepis odehraného textu (např. z Notionu) ve tvaru `**Jméno**: text` */
 export const SceneImportRequestSchema = z.object({

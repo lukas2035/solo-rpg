@@ -2,13 +2,14 @@ import { describe, expect, it } from 'vitest'
 import type { Faction, GameDetail, LoreEntry, Quest, SceneMeta, StoryLocation, StoryThread } from '@solo-rpg/shared'
 import { buildSceneContext, estimateTokens, transcriptCutoff } from '../src/narrative/contextBuilder.js'
 import { buildMessages } from '../src/ai/scenePrompt.js'
+import { parseSelectedScenes } from '../src/ai/sceneContextScenes.js'
 
 const NOW = Date.parse('2026-10-08T12:00:00Z')
 const DAY = 86_400_000
 
 const character = (id: string, name: string, notes = '') => ({ id, name, firstName: name.split(' ')[0], lastName: name.split(' ')[1] ?? '', nickname: name.split(' ')[0], image: null, notes })
 const scene = (p: Partial<SceneMeta> & { id: string; title: string; order: number }): SceneMeta => ({
-  description: '', image: null, characters: [], location: null, ai: true, aiCharacters: [], aiPrompt: '', summary: '', summaryStale: false, entryCount: 0, createdAt: NOW, updatedAt: NOW, ...p,
+  description: '', image: null, characters: [], location: null, ai: true, aiCharacters: [], aiPrompt: '', summary: '', summaryStale: false, entryCount: 0, contextScenes: [], createdAt: NOW, updatedAt: NOW, ...p,
 })
 const thread = (p: Partial<StoryThread> & { id: string; title: string }): StoryThread => ({
   type: 'threat', status: 'active', horizon: 'short-term', certainty: 'confirmed', revealCondition: '', clock: null,
@@ -102,6 +103,15 @@ describe('buildSceneContext', () => {
     expect(summary).not.toContain('Budoucnost')
   })
 
+  it('s vlastním výběrem contextScenes posílá jen vybrané scény (i pozdější), ostatní ne', () => {
+    const ctx = buildSceneContext(detail, { ...current, contextScenes: ['Úvod', 'Později', 'Neexistující'] }, { budgetTokens: 10_000, now: NOW })
+    const summary = ctx.sections[0]
+    expect(summary).toContain('Klára přijela do Prahy.')
+    expect(summary).toContain('Budoucnost')
+    expect(summary).not.toContain('Setkání s Julií')
+    expect(ctx.included.filter(i => i.startsWith('Shrnutí:'))).toHaveLength(2)
+  })
+
   it('řadí podle skóre: eskalovaná otevřená nit před vyřešenou', () => {
     const ctx = buildSceneContext(detail, current, { budgetTokens: 10_000, now: NOW })
     const threads = ctx.sections.find(s => s.startsWith('## Dějové nitě'))!
@@ -127,6 +137,21 @@ describe('buildSceneContext', () => {
     const ctx = buildSceneContext(detail, scene({ id: 'scn_x', title: 'Prázdná', order: 3 }), { budgetTokens: 10_000, now: NOW })
     expect(ctx.sections).toHaveLength(1)
     expect(ctx.sections[0]).toContain('Co se stalo')
+  })
+})
+
+describe('parseSelectedScenes', () => {
+  const c = [
+    { id: 'scn_a', title: 'Úvod', order: 1 },
+    { id: 'scn_b', title: 'Kavárna', order: 2 },
+    { id: 'scn_c', title: 'Noc', order: 3 },
+  ]
+  it('vybere podle id v libovolném formátu, výsledek chronologicky bez duplicit', () => {
+    expect(parseSelectedScenes('scn_c\n- scn_a (relevantní)\nscn_c', c)).toEqual(['Úvod', 'Noc'])
+  })
+  it('bez id zkusí přesné názvy na řádcích', () => {
+    expect(parseSelectedScenes('1. **Kavárna**\n2. noc\n3. Něco jiného', c)).toEqual(['Kavárna', 'Noc'])
+    expect(parseSelectedScenes('Nic relevantního.', c)).toEqual([])
   })
 })
 

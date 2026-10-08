@@ -18,6 +18,7 @@ import type {
   SceneInput,
   SceneMeta,
   SceneSummaryResponse,
+  SceneContextSuggestionResponse,
   SceneImportRequest,
   SceneImportResponse,
   RulesPromptResponse,
@@ -254,6 +255,10 @@ export const rejectAiSuggestion = (game: string, sceneId: string, suggestionId: 
 /** Nechá AI shrnout děj scény (nic neukládá – výsledek se vloží do pole „Shrnutí“ v dialogu scény) */
 export const summarizeScene = (game: string, sceneId: string) =>
   request<SceneSummaryResponse>('POST', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/summary`)
+
+/** Nechá AI vybrat předchozí scény relevantní pro tuto scénu (nic neukládá – výsledek se vloží do dialogu scény jako `contextScenes`) */
+export const suggestContextScenes = (game: string, sceneId: string) =>
+  request<SceneContextSuggestionResponse>('POST', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/context-scenes`)
 
 /** Sekce o kostkách a pravidlech přesně tak, jak ji dostává AI (`prompts/rules-prompt.md` + pravidla hry) – pro textový export */
 export const getRulesPrompt = (game: string) => request<RulesPromptResponse>('GET', `${gamePath(game)}/rules-prompt`)
