@@ -316,7 +316,7 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
 ```
 GET  /api/health
 GET/POST /api/games            GET/PATCH(rename)/DELETE /api/games/:name
-PUT  /api/games/:name/setup    (jen backgroundImage, brightBackground, narrator = jméno | null; 404 pro neznámého vypravěče)
+PUT  /api/games/:name/setup    (GameSettings: backgroundImage, brightBackground, narrator = jméno | null, rules, rulesInAi, rulesSystem, pulseOverride; 404 pro neznámého vypravěče)
 POST /api/games/:name/characters             PUT/DELETE /api/games/:name/characters/:id
 POST /api/games/:name/narrators              PUT/DELETE /api/games/:name/narrators/:id   ({ name, description?, aiPrompt?, image? })
 GET/POST /api/games/:name/threads            PUT/DELETE /api/games/:name/threads/:id     (ThreadInput; title+type povinné)
@@ -331,6 +331,10 @@ GET  /api/games/:name/scenes/:id/ai/suggestion  (→ { suggestion | null, reject
 POST /api/games/:name/scenes/:id/ai/suggestions/:sug/accept ({ entries } – upravené repliky; → { entries }; 404 neaktuální návrh)
 POST /api/games/:name/scenes/:id/ai/suggestions/:sug/reject ({ reason } → AiSuggestionState; 404 neaktuální návrh)
 POST /api/games/:name/scenes/:id/context-scenes  (AI vybere předchozí scény relevantní pro scénu; → { scenes, raw }; neukládá; 400 bez předchozích scén se shrnutím)
+GET  /api/games/:name/scenes/:id/director        (→ DirectorState { pulse: CampaignPulse, brief: NarrativeBrief | null })
+POST /api/games/:name/scenes/:id/director/brief  ({ seed? } → NarrativeBrief; nahradí rozpracovaný brief scény, in-memory)
+PATCH /api/games/:name/scenes/:id/director/brief (BriefPatch – ruční úpravy hráče; → NarrativeBrief; 404 bez briefu)
+DELETE /api/games/:name/scenes/:id/director/brief (přeskočit režii → 204)
 POST /api/games/:name/scenes/:id/import ({ text, resolutions? } – import odehraného přepisu, `vault/sceneImport.ts`; → { entries, addedCharacters, ambiguous }; 400 prázdný/nerozpoznaný text)
   Přepis `**Jméno**: text` / `**Jméno:** text` (tučné nepovinné) parsuje `ai/scenePrompt.ts#parseSpeakerLines` (společné jádro
   s `parseAiReply`) s volbou `unknownSpeaker: 'bold-character'` a vlastním `matchCharacter`: celé jméno → jednoznačné; jinak
@@ -387,7 +391,30 @@ GET  /vault/*  (statické soubory z aktuálně otevřené složky s hrami)
   (i pozdějších). `ai/sceneContextScenes.ts#suggestContextScenes` (prompt `prompts/scene-context-prompt.md`, `AI_CONTEXT_PROMPT_PATH`,
   temperature 0) pošle modelu postavy/název/popis/lokaci scény + shrnutí všech předchozích scén a čeká seznam id (`parseSelectedScenes`,
   fallback na názvy). Route `POST …/scenes/:id/context-scenes` → `{ scenes: názvy, raw }`, nic neukládá. FE `SceneModal`: sekce
-  „Kontext pro AI vypravěče“ – chipy s ✕, select „＋ přidat scénu…“, tlačítko „🤖 Vybrat (znovu) pomocí AI“ nahradí seznam; uloží se s „Uložit“.
+  „Kontext pro AI vypravěče“ – chipy s ✕,   select „＋ přidat scénu…“, tlačítko „🤖 Vybrat (znovu) pomocí AI“ nahradí seznam; uloží se s „Uložit“.
+
+### Director v1 – režie beatu (`solo-rpg-be/src/director/`, FE `DirectorPanel`)
+- **Viditelný krok před psaním AI:** 🤖 bez briefu → `POST …/director/brief` a panel „🎬 Režie“ pod scénou (hráč může přehodit
+  se seedem, upravit cokoli, přeskočit = `DELETE` + psát volně, nebo „Nechat AI psát“). S briefem 🤖 rovnou píše; brief se
+  **spotřebuje až přijetím návrhu** (`director.consume` → event `director.beat.accepted` {suggestionId, brief, summary});
+  odmítnutí + znovu brief použije znovu. Brief je in‑memory per scéna (jako AiSuggestion), FE ho načte přes GET při přepnutí scény.
+- **`CampaignPulse`** (`pulse.ts#computePulse`): napětí 0–10 = eskalované nitě ×2 (cap 4) + aktivní (cap 3) + hodiny ≥75 % (cap 2)
+  + ≥2 aktivní questy (+1) + posledních 5 beatů (obstacle/fail +0.5, reward/resolution −1); fáze calm ≤3 / rising ≤6 / peak,
+  aftermath po resolution/reward; `consequenceDebt` (fail +1, consequence beat −1, cap 3), `beatsSinceTwist`, `signals` („proč?“).
+  Historie beatů = `listEvents(kinds: director.beat.accepted, limit 50)`. **Ruční korekce** `GameSettings.pulseOverride {tension, phase}`
+  (DB `games.pulseOverride`, frontmatter `pulseTension`/`pulsePhase`) má přednost → `overridden` flagy.
+- **Tabulky** `tables/director-tables.json` (Zod validace, seedovaný `rng.ts` mulberry32, `weightedPick` podle pásma napětí):
+  mode continue/event, eventType obstacle/neutral/opportunity/reward, beatKind escalation/consequence/resolution/reveal, stakes,
+  twist šance roste s `beatsSinceTwist` (→ beatKind reveal), dluh následků vynutí consequence bez reward/zvratu, reward bez hodu.
+  Focus thread/quest = vážený los z top 3 (stav + sdílené postavy ×2 + lokace + hodiny ≥50 %), faction z nitě/questu.
+- **Rules adapter v1** (`rulesAdapter.ts`): `GameSettings.rulesSystem` none/dnd5e/vtm5e/fate (select v `RulesModal`) přeloží
+  obtížnost 1–5 → `difficultyLabel` (DC 10/13/15/18/20, Difficulty 2–6, Fate +1..+5). Hráč hází sám a výsledek
+  success/partial/fail zadá do briefu (`outcome`).
+- **Prompt:** `briefPrompt.ts#buildBriefSection` → sekce „## Režie (závazné zadání pro tento beat)“ před „## Úkol“
+  (`ScenePromptContext.briefSection`); bez výsledku hodu „doveď k hodu a ZASTAV SE“, s výsledkem „Výsledek NEMĚŇ“.
+  `AiSuggestion.briefId` váže návrh na brief (`DirectorPanel.suggestionPending`).
+- Testy: `test/director.test.ts` (puls, tabulky, builder, patch, prompt – bez DB), `test/directorService.test.ts` (Postgres, mock AI
+  zachytává brief, consume → event). **Neověřeno s reálným modelem** – play‑test, zda Mistral respektuje „zastav se před hodem“.
 
 ### Ověřeno
 - `npm.cmd run build` (shared, BE, FE) prochází; `npm.cmd run lint` – jen 1 pre-existující warning v `InputArea.tsx`.
@@ -422,7 +449,9 @@ npm.cmd run dev          # BE http://127.0.0.1:3001 + FE http://localhost:5173
 ```
 
 ## 5. Co je DALŠÍ na řadě
-**Řídí se `docs/ARCHITECTURE_V2.md` §6** – kroky 1 a 2 hotové, další je krok 3 (Director v1). Níže starší v1 nápady, část už pokrytá:
+**Řídí se `docs/ARCHITECTURE_V2.md` §6** – kroky 1–3 hotové, další je **krok 4 (Extrakce → Patch → events)**: po přijetí
+návrhu AI navrhne strukturované změny (stav nití/questů, hodiny, nové entity), hráč je v panelu schválí, teprve pak se zapíší.
+Před tím: play‑test Directoru s reálným Mistralem (`AI_DEBUG=1`). Níže starší v1 nápady, část už pokrytá:
 1. **AI vypravěč – další kroky:** ~~AI context builder pro nitě/frakce/questy/lokace/lore (oddělit `description` od `secrets`)~~ hotovo (krok 2);
    play‑test kroku 2 s reálným Mistralem a doladění vah v `contextBuilder.ts`; SSE streaming odpovědi;
    `ModelRouter` (přepínání modelů, mature flag); strukturované návrhy změn cílů/stavu questů a nití po scéně (krok 4).

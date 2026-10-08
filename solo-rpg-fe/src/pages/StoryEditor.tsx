@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AiSuggestion, Character, CharacterInput, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, Quest, QuestInput, QuestStatus, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
+import type { AiSuggestion, BriefPatch, Character, CharacterInput, DirectorState, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, PulseOverride, Quest, QuestInput, QuestStatus, RulesSystem, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
 import { OPEN_THREAD_STATUSES, locationPath } from '@solo-rpg/shared'
 import CharacterBar from '../components/CharacterBar'
 import StoryPanel from '../components/StoryPanel'
@@ -11,6 +11,7 @@ import NarratorPickerModal from '../components/NarratorPickerModal'
 import NarratorModal, { type NarratorFormValues } from '../components/NarratorModal'
 import AiSceneModal, { type AiSceneSettings } from '../components/AiSceneModal'
 import AiSuggestionPanel from '../components/AiSuggestionPanel'
+import DirectorPanel from '../components/DirectorPanel'
 import RulesModal, { type RulesFormValues } from '../components/RulesModal'
 import ImportTranscriptModal from '../components/ImportTranscriptModal'
 import SessionModal from '../components/SessionModal'
@@ -104,6 +105,14 @@ export default function StoryEditor() {
   /** Pravidla pod příběhem (popis systému) a zda se posílají AI – součást nastavení hry */
   const [rules, setRules] = useState('')
   const [rulesInAi, setRulesInAi] = useState(false)
+  /** Systém pravidel pro překlad obtížnosti v režii a ruční korekce pulsu kampaně – součást nastavení hry */
+  const [rulesSystem, setRulesSystem] = useState<RulesSystem>('none')
+  const [pulseOverride, setPulseOverride] = useState<PulseOverride>({ tension: null, phase: null })
+  /** Director: puls kampaně + rozpracovaný brief, klíčované scénou (po přepnutí scény se stav předchozí nezobrazí) */
+  const [directorBySceneId, setDirectorBySceneId] = useState<{ sceneId: string; state: DirectorState } | null>(null)
+  const [directorBusy, setDirectorBusy] = useState(false)
+  /** Scéna, pro kterou je panel režie otevřený ručně (bez briefu) */
+  const [directorOpenFor, setDirectorOpenFor] = useState<string | null>(null)
   /** AI právě generuje odpověď (jen jedna najednou) */
   const [aiBusy, setAiBusy] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
@@ -322,7 +331,9 @@ export default function StoryEditor() {
     setNarratorName(setup.narrator)
     setRules(setup.rules)
     setRulesInAi(setup.rulesInAi)
-    const settings: GameSettings = { backgroundImage: setup.backgroundImage, brightBackground: setup.brightBackground, narrator: setup.narrator, rules: setup.rules, rulesInAi: setup.rulesInAi }
+    setRulesSystem(setup.rulesSystem)
+    setPulseOverride(setup.pulseOverride)
+    const settings: GameSettings = { backgroundImage: setup.backgroundImage, brightBackground: setup.brightBackground, narrator: setup.narrator, rules: setup.rules, rulesInAi: setup.rulesInAi, rulesSystem: setup.rulesSystem, pulseOverride: setup.pulseOverride }
     lastSavedSetupRef.current = JSON.stringify(settings)
   }, [])
 
@@ -362,8 +373,8 @@ export default function StoryEditor() {
   }, [gameName, resolveEntries, applySetup])
 
   const currentSettings = useMemo<GameSettings>(
-    () => ({ backgroundImage, brightBackground, narrator: narratorName, rules, rulesInAi }),
-    [backgroundImage, brightBackground, narratorName, rules, rulesInAi]
+    () => ({ backgroundImage, brightBackground, narrator: narratorName, rules, rulesInAi, rulesSystem, pulseOverride }),
+    [backgroundImage, brightBackground, narratorName, rules, rulesInAi, rulesSystem, pulseOverride]
   )
 
   // Automatické ukládání nastavení (pozadí, aktuální vypravěč) do vaultu – postavy a vypravěči mají vlastní endpointy
@@ -581,6 +592,95 @@ export default function StoryEditor() {
     return () => { cancelled = true }
   }, [gameName, currentSceneId])
 
+  /** Znovu načte puls kampaně a brief scény (po přijetí návrhu, změně pulsu nebo systému pravidel) */
+  const refreshDirector = useCallback(async (sceneId: string): Promise<DirectorState | null> => {
+    try {
+      const state = await api.getDirector(gameName, sceneId)
+      if (currentSceneIdRef.current === sceneId) setDirectorBySceneId({ sceneId, state })
+      return state
+    } catch {
+      return null
+    }
+  }, [gameName])
+
+  // Při přepnutí scény načíst stav Directoru; panel se otevře sám, pokud má scéna brief
+  useEffect(() => {
+    if (!currentSceneId) return
+    let cancelled = false
+    api.getDirector(gameName, currentSceneId)
+      .then(state => { if (!cancelled) setDirectorBySceneId({ sceneId: currentSceneId, state }) })
+      .catch(() => { /* bez Directoru */ })
+    return () => { cancelled = true }
+  }, [gameName, currentSceneId])
+
+  const directorState = directorBySceneId && directorBySceneId.sceneId === currentSceneId ? directorBySceneId.state : null
+  const showDirector = !!currentSceneId && directorOpenFor === currentSceneId
+  const setDirectorState = (sceneId: string, update: (prev: DirectorState | null) => DirectorState | null) => {
+    setDirectorBySceneId(prev => {
+      const state = update(prev && prev.sceneId === sceneId ? prev.state : null)
+      return state ? { sceneId, state } : null
+    })
+  }
+
+  /** Vytvoří (nebo přehodí) brief pro aktuální scénu a otevře panel režie */
+  const handleCreateBrief = async (seed?: number) => {
+    if (!currentSceneId || directorBusy) return
+    const sceneId = currentSceneId
+    setDirectorBusy(true)
+    setAiError(null)
+    try {
+      await pendingSaveRef.current
+      const brief = await api.createBrief(gameName, sceneId, seed)
+      if (currentSceneIdRef.current !== sceneId) return
+      setDirectorState(sceneId, () => ({ pulse: brief.pulse, brief }))
+      setDirectorOpenFor(sceneId)
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : 'Příprava režie selhala.')
+    } finally {
+      setDirectorBusy(false)
+    }
+  }
+
+  const handlePatchBrief = async (patch: BriefPatch) => {
+    if (!currentSceneId || !directorState?.brief) return
+    const sceneId = currentSceneId
+    try {
+      const brief = await api.patchBrief(gameName, sceneId, patch)
+      if (currentSceneIdRef.current !== sceneId) return
+      setDirectorState(sceneId, prev => (prev ? { ...prev, brief } : { pulse: brief.pulse, brief }))
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : 'Úprava režie selhala.')
+      if (error instanceof api.ApiError && error.status === 404) void refreshDirector(sceneId)
+    }
+  }
+
+  /** Přeskočit režii: brief zahodit a nechat AI psát volně */
+  const handleSkipBrief = async () => {
+    if (!currentSceneId || aiBusy) return
+    const sceneId = currentSceneId
+    try {
+      await api.clearBrief(gameName, sceneId)
+    } catch { /* brief už neexistuje */ }
+    setDirectorState(sceneId, prev => (prev ? { ...prev, brief: null } : prev))
+    setDirectorOpenFor(null)
+    runAi(sceneId).catch(() => { /* chyba je v aiError */ })
+  }
+
+  /** Ruční korekce pulsu – uloží se do nastavení hry (autosave) a puls se přepočítá */
+  const handlePulseOverride = async (override: PulseOverride) => {
+    if (!currentSceneId) return
+    const sceneId = currentSceneId
+    setPulseOverride(override)
+    const next: GameSettings = { ...currentSettings, pulseOverride: override }
+    try {
+      await api.saveSetup(gameName, next)
+      lastSavedSetupRef.current = JSON.stringify(next)
+      await refreshDirector(sceneId)
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : 'Uložení pulsu selhalo.')
+    }
+  }
+
   /** Přijetí návrhu AI – BE záznamy (případně upravené) připíše do scény, tady je jen přidáme do stavu */
   const handleAcceptSuggestion = async (entries: ApiStoryEntry[]) => {
     if (!aiSuggestion || !currentSceneId || aiBusy) return
@@ -595,6 +695,9 @@ export default function StoryEditor() {
       setStoryEntries(prev => [...prev, ...resolved.entries])
       setScenes(prev => prev.map(s => (s.id === sceneId ? { ...s, summaryStale: true, entryCount: s.entryCount + result.entries.length } : s)))
       setAiSuggestion(null)
+      // Brief se přijetím spotřeboval → puls se přepočítá z nového beatu
+      setDirectorOpenFor(null)
+      void refreshDirector(sceneId)
     } catch (error) {
       setAiError(error instanceof Error ? error.message : 'Přijetí návrhu selhalo.')
       if (error instanceof api.ApiError && error.status === 404) setAiSuggestion(null)
@@ -658,10 +761,14 @@ export default function StoryEditor() {
     persistStory(newEntries)
   }
 
-  /** Tlačítko 🤖 v InputArea: nechat AI vypravěče napsat další text do aktuální scény */
+  /** Tlačítko 🤖 v InputArea: bez briefu nejdřív připravit režii (viditelný krok), s briefem nechat AI psát */
   const handleGenerateAi = () => {
-    if (!currentSceneId || !currentScene?.ai) return
-    runAi(currentSceneId).catch(() => { /* chyba je v aiError */ })
+    if (!currentSceneId || !currentScene?.ai || aiBusy) return
+    if (directorState?.brief) {
+      runAi(currentSceneId).catch(() => { /* chyba je v aiError */ })
+      return
+    }
+    void handleCreateBrief()
   }
 
   const handleCharacterDelete = (characterId: string) => {
@@ -774,11 +881,14 @@ export default function StoryEditor() {
 
   /** Uloží pravidla pod příběhem ihned a zapíše je i do stavu, aby autosave nastavení nic nepřepsal */
   const handleRulesSave = async (values: RulesFormValues) => {
-    const next: GameSettings = { ...currentSettings, rules: values.rules, rulesInAi: values.rulesInAi }
+    const next: GameSettings = { ...currentSettings, rules: values.rules, rulesInAi: values.rulesInAi, rulesSystem: values.rulesSystem }
     await api.saveSetup(gameName, next)
     lastSavedSetupRef.current = JSON.stringify(next)
     setRules(values.rules)
     setRulesInAi(values.rulesInAi)
+    setRulesSystem(values.rulesSystem)
+    // Popisek obtížnosti v rozpracovaném briefu závisí na systému
+    if (currentSceneId && directorState?.brief) void refreshDirector(currentSceneId)
   }
 
   const handleExportMarkdown = () =>
@@ -1343,6 +1453,25 @@ export default function StoryEditor() {
             onEntrySpeakerChange={handleEntrySpeakerChange}
             darkenEntries={brightBackground}
           />
+          {/* Režie Directoru: puls kampaně + brief pro další beat (viditelný krok před psaním AI) */}
+          {directorState && (showDirector || directorState.brief) && (
+            <DirectorPanel
+              state={directorState}
+              busy={directorBusy}
+              aiBusy={aiBusy}
+              suggestionPending={!!aiSuggestion && !!directorState.brief && aiSuggestion.briefId === directorState.brief.id}
+              canWrite={!!currentScene?.ai && !!currentNarrator}
+              threadOptions={threads.filter(t => OPEN_THREAD_STATUSES.includes(t.status)).map(t => t.title)}
+              questOptions={quests.filter(q => q.status === 'active' || q.status === 'available').map(q => q.title)}
+              onCreate={seed => void handleCreateBrief(seed)}
+              onPatch={patch => void handlePatchBrief(patch)}
+              onSkip={() => void handleSkipBrief()}
+              onWrite={() => { if (currentSceneId) runAi(currentSceneId).catch(() => { /* chyba je v aiError */ }) }}
+              onClose={() => setDirectorOpenFor(null)}
+              onPulseOverride={override => void handlePulseOverride(override)}
+              darken={brightBackground}
+            />
+          )}
           {/* Návrh AI vypravěče k přijetí / odmítnutí */}
           {aiSuggestion && aiSuggestion.sceneId === currentSceneId && (
             <AiSuggestionPanel
@@ -1389,6 +1518,9 @@ export default function StoryEditor() {
             onAddEntry={handleAddEntry}
             onGenerateAi={currentScene?.ai && currentNarrator ? handleGenerateAi : undefined}
             aiBusy={aiBusy}
+            onToggleDirector={currentScene?.ai && currentNarrator ? () => setDirectorOpenFor(prev => (prev === currentSceneId ? null : currentSceneId)) : undefined}
+            directorOpen={showDirector || !!directorState?.brief}
+            briefPending={!!directorState?.brief}
             brightBackground={brightBackground}
             onBrightBackgroundChange={setBrightBackground}
           />
@@ -1502,6 +1634,7 @@ export default function StoryEditor() {
         <RulesModal
           rules={rules}
           rulesInAi={rulesInAi}
+          rulesSystem={rulesSystem}
           onSubmit={handleRulesSave}
           onClose={() => setShowRulesModal(false)}
         />

@@ -39,7 +39,7 @@ function campaign(): GameDetail {
     setup: {
       characters: [character('chr_klara', 'Klára Nováková'), character('chr_julia', 'Julia Kreuzová'), character('chr_marek', 'Marek Horák', 'Starý přítel Kláry.')],
       narrators: [narrator],
-      backgroundImage: null, brightBackground: true, narrator: narrator.name, rules: '', rulesInAi: false,
+      backgroundImage: null, brightBackground: true, narrator: narrator.name, rules: '', rulesInAi: false, rulesSystem: 'none', pulseOverride: { tension: null, phase: null },
     },
     scenes: [
       scene({ id: 'scn_1', title: 'Úvod', order: 1, summary: 'Klára přijela do Prahy.' }),

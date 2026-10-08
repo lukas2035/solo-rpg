@@ -1,0 +1,2 @@
+ALTER TABLE "games" ADD COLUMN "rules_system" text DEFAULT 'none' NOT NULL;--> statement-breakpoint
+ALTER TABLE "games" ADD COLUMN "pulse_override" jsonb DEFAULT '{"tension":null,"phase":null}'::jsonb NOT NULL;

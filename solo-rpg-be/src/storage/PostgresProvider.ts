@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import type {
   Character,
   CharacterInput,
@@ -26,8 +26,8 @@ import type {
   StoryThread,
   ThreadInput,
 } from '@solo-rpg/shared'
-import { fullName, isRemoteImage, isValidGameName } from '@solo-rpg/shared'
-import { ConflictError, NotFoundError, ValidationError, type AssetInput, type GameEventInput, type StorageProvider } from '../vault/StorageProvider.js'
+import { fullName, isRemoteImage, isValidGameName, PulseOverrideSchema, RulesSystemSchema } from '@solo-rpg/shared'
+import { ConflictError, NotFoundError, ValidationError, type AssetInput, type GameEvent, type GameEventInput, type StorageProvider } from '../vault/StorageProvider.js'
 import { imageExtension, safeFileName } from '../vault/fsUtils.js'
 import { assetKey, sha256, type AssetStore } from './AssetStore.js'
 import type { Db } from './db.js'
@@ -525,6 +525,8 @@ export class PostgresProvider implements StorageProvider {
       narrator: narrator?.row.name ?? null,
       rules: g.rules,
       rulesInAi: g.rulesInAi,
+      rulesSystem: RulesSystemSchema.catch('none').parse(g.rulesSystem),
+      pulseOverride: PulseOverrideSchema.catch({ tension: null, phase: null }).parse(g.pulseOverride),
     }
   }
 
@@ -659,6 +661,8 @@ export class PostgresProvider implements StorageProvider {
           currentNarratorId: narrator?.row.id ?? null,
           rules: settings.rules,
           rulesInAi: settings.rulesInAi,
+          rulesSystem: settings.rulesSystem,
+          pulseOverride: settings.pulseOverride,
         })
         .where(eq(games.id, snap.game.id))
         .returning()
@@ -1335,6 +1339,21 @@ export class PostgresProvider implements StorageProvider {
   async appendEvent(gameName: string, event: GameEventInput): Promise<void> {
     const game = await this.requireGameRow(this.db, gameName)
     await this.db.insert(events).values({ tenantId: this.tenantId, gameId: game.id, sceneId: event.sceneId, kind: event.kind, payload: event.payload ?? {} })
+  }
+
+  async listEvents(gameName: string, query: { kinds: readonly string[]; sceneId?: string; limit?: number }): Promise<GameEvent[]> {
+    if (query.kinds.length === 0) return []
+    const game = await this.requireGameRow(this.db, gameName)
+    const limit = Math.min(Math.max(query.limit ?? 100, 1), 500)
+    const where = [eq(events.gameId, game.id), inArray(events.kind, [...query.kinds])]
+    if (query.sceneId) where.push(eq(events.sceneId, query.sceneId))
+    const rows = await this.db
+      .select()
+      .from(events)
+      .where(and(...where))
+      .orderBy(desc(events.createdAt), desc(events.id))
+      .limit(limit)
+    return rows.map(r => ({ id: r.id, sceneId: r.sceneId, kind: r.kind, payload: r.payload, createdAt: ms(r.createdAt) }))
   }
 
   // ---------- import (hromadný zápis se zachováním časů) ----------

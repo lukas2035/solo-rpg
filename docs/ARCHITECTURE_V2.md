@@ -226,7 +226,7 @@ FE: `utils/api.ts` přejde na generické entity endpointy; `vaultPath.ts`, `Vaul
 
 ## 6. Pořadí prací (nic nebourat najednou)
 
-> **Stav (8. 10. 2026):** krok 1 i krok 2 jsou implementované.
+> **Stav (8. 10. 2026):** kroky 1, 2 i 3 jsou implementované.
 > *Krok 1* (`solo-rpg-be/src/storage/*`: schéma, `PostgresProvider` nad v1
 > rozhraním `StorageProvider`, `FsAssetStore`, `VaultImporter`, `ObsidianExporter`, migrace v `solo-rpg-be/drizzle/`,
 > testy `solo-rpg-be/test/`, `scripts/backup.ps1`). FE beze změny – stále mluví jmény; překlad jméno ↔ id dělá
@@ -243,7 +243,15 @@ FE: `utils/api.ts` přejde na generické entity endpointy; `vaultPath.ts`, `Vaul
 > Rozhodnutí z `ask_user`: bez streamingu; reject‑důvod se zatím neváže na entity (až krok 4); žádný in‑memory index hry
 > (stačí `getGame` per request – řeší se, až to bude bolet). Testy: `test/contextBuilder.test.ts` (bez DB), `test/suggestions.test.ts` (Postgres, AI mock).
 > **Teď:** play‑test kroku 2 s reálným Mistralem – ověřit, že delší prompt (kontext + tajemství + odmítnuté návrhy) nezhorší
-> kvalitu odpovědí, doladit váhy skóre v `contextBuilder.ts`. Další krok: 3 (Director v1) – začít návrhem `CampaignPulse` a tabulek + `ask_user`.
+> kvalitu odpovědí, doladit váhy skóre v `contextBuilder.ts`.
+> *Krok 3* (`solo-rpg-be/src/director/*`, routy `…/scenes/:id/director*`, FE `DirectorPanel` + 🎬 v `InputArea`, select systému
+> pravidel v `RulesModal`): `CampaignPulse` se počítá z dat (nitě, questy, hodiny, historie beatů z `events`) s ruční korekcí
+> `GameSettings.pulseOverride`; seedované tabulky `tables/director-tables.json` → `NarrativeBrief`; rules adapter v1
+> (`GameSettings.rulesSystem`) jen překládá obtížnost 1–5, hráč hází sám a zadá výsledek. Rozhodnutí z `ask_user`: **viditelný krok**
+> (brief se ukáže před psaním, lze přehodit/upravit/přeskočit), puls automaticky + ruční přepis, jednoduchý adapter bez
+> implementace mechanik. Brief in‑memory per scéna, spotřebuje se přijetím návrhu (`director.beat.accepted`). Detaily v `COPILOT_HANDOFF.md` § Director v1.
+> **Další krok: 4** (Extrakce → Patch → events) – po přijetí návrhu AI navrhne `Patch` (stav nití/questů, hodiny, nové entity),
+> hráč schválí v panelu; teprve pak zápis + event. Před tím play‑test Directoru s reálným modelem.
 
 1. **Model + úložiště**: `shared` schémata (Entity/Link/Event/Brief/Suggestion/Patch, per‑kind Zod + verze), Drizzle schéma,
    `docker-compose.yml`, `FsAssetStore`, **importér ze stávajícího vaultu** (ať nepřijdeš o hry; mapování je v

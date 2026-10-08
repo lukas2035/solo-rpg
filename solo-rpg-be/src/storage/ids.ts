@@ -8,7 +8,7 @@ export type EntityKind = 'character' | 'narrator' | 'scene' | 'thread' | 'factio
 
 export const ENTITY_KINDS: readonly EntityKind[] = ['character', 'narrator', 'scene', 'thread', 'faction', 'quest', 'location', 'lore', 'session']
 
-const PREFIX: Record<EntityKind | 'game' | 'asset' | 'suggestion', string> = {
+const PREFIX: Record<EntityKind | 'game' | 'asset' | 'suggestion' | 'brief', string> = {
   character: 'chr',
   narrator: 'nar',
   scene: 'scn',
@@ -21,6 +21,7 @@ const PREFIX: Record<EntityKind | 'game' | 'asset' | 'suggestion', string> = {
   game: 'gam',
   asset: 'ast',
   suggestion: 'sug',
+  brief: 'brf',
 }
 
 /** Čitelný prefix + nanoid, např. `chr_v7k2mq9xw3tz` */

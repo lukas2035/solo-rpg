@@ -2,6 +2,7 @@ import type { AiSuggestion, AiSuggestionState, StoryEntry } from '@solo-rpg/shar
 import type { FastifyBaseLogger as Logger } from 'fastify'
 import { draftSceneReply } from '../ai/sceneAi.js'
 import type { Config } from '../config.js'
+import type { DirectorService } from '../director/directorService.js'
 import { newId } from '../storage/ids.js'
 import { NotFoundError, type StorageProvider } from '../vault/StorageProvider.js'
 
@@ -27,6 +28,8 @@ export class SuggestionService {
   constructor(
     private readonly storage: StorageProvider,
     private readonly config: Config,
+    /** Director: rozpracovaný brief scény jde do promptu a při přijetí návrhu se stane beatem */
+    private readonly director?: DirectorService,
   ) {}
 
   private key(game: string, sceneId: string): string {
@@ -52,7 +55,8 @@ export class SuggestionService {
   /** Vygeneruje nový návrh; případný dřívější nepřijatý návrh scény nahradí (bez záznamu důvodu) */
   async generate(game: string, sceneId: string, log?: Logger): Promise<AiSuggestion> {
     const s = this.state(game, sceneId)
-    const draft = await draftSceneReply(this.storage, this.config, game, sceneId, s.rejectedReasons, log)
+    const brief = this.director?.pending(game, sceneId) ?? null
+    const draft = await draftSceneReply(this.storage, this.config, game, sceneId, s.rejectedReasons, log, brief)
     const suggestion: AiSuggestion = {
       id: newId('suggestion'),
       sceneId,
@@ -60,13 +64,14 @@ export class SuggestionService {
       raw: draft.raw,
       rejectedReasons: [...s.rejectedReasons],
       contextIncluded: draft.context.included,
+      briefId: brief?.id ?? null,
       createdAt: Date.now(),
     }
     s.pending = suggestion
     await this.storage.appendEvent(game, {
       sceneId,
       kind: 'ai.suggestion.created',
-      payload: { suggestionId: suggestion.id, entries: suggestion.entries.length, rejectedReasons: suggestion.rejectedReasons, context: draft.context.included, contextTokens: draft.context.tokensUsed, contextDropped: draft.context.dropped },
+      payload: { suggestionId: suggestion.id, briefId: suggestion.briefId, entries: suggestion.entries.length, rejectedReasons: suggestion.rejectedReasons, context: draft.context.included, contextTokens: draft.context.tokensUsed, contextDropped: draft.context.dropped },
     })
     return suggestion
   }
@@ -92,8 +97,9 @@ export class SuggestionService {
     await this.storage.appendEvent(game, {
       sceneId,
       kind: 'ai.suggestion.accepted',
-      payload: { suggestionId, raw: suggestion.raw, entries: toAdd, edited, rejectedReasons: state.rejectedReasons },
+      payload: { suggestionId, briefId: suggestion.briefId, raw: suggestion.raw, entries: toAdd, edited, rejectedReasons: state.rejectedReasons },
     })
+    if (suggestion.briefId) await this.director?.consume(game, sceneId, suggestion.briefId, suggestionId)
     state.pending = null
     state.rejectedReasons = []
     return toAdd
@@ -116,5 +122,6 @@ export class SuggestionService {
   /** Zahodí stav scény (např. při smazání scény) */
   forget(game: string, sceneId: string): void {
     this.scenes.delete(this.key(game, sceneId))
+    this.director?.clear(game, sceneId)
   }
 }

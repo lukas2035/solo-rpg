@@ -182,11 +182,14 @@ describe('postavy a scény', () => {
 describe('vypravěči a setup', () => {
   it('aktuální vypravěč: saveSetup s neznámým = 404, smazání aktuálního = null', async () => {
     const n = await storage.createNarrator(G, { name: 'Vypravěč' })
-    await expect(storage.saveSetup(G, { backgroundImage: null, brightBackground: false, narrator: 'Nikdo', rules: '', rulesInAi: false })).rejects.toBeInstanceOf(NotFoundError)
-    const setup = await storage.saveSetup(G, { backgroundImage: 'https://x/bg.png', brightBackground: false, narrator: 'vypravěč', rules: 'VtM', rulesInAi: true })
+    const noPulse = { tension: null, phase: null }
+    await expect(storage.saveSetup(G, { backgroundImage: null, brightBackground: false, narrator: 'Nikdo', rules: '', rulesInAi: false, rulesSystem: 'none', pulseOverride: noPulse })).rejects.toBeInstanceOf(NotFoundError)
+    const setup = await storage.saveSetup(G, { backgroundImage: 'https://x/bg.png', brightBackground: false, narrator: 'vypravěč', rules: 'VtM', rulesInAi: true, rulesSystem: 'vtm5e', pulseOverride: { tension: 7, phase: null } })
     expect(setup.narrator).toBe('Vypravěč')
     expect(setup.backgroundImage).toBe('https://x/bg.png')
     expect(setup.rules).toBe('VtM')
+    expect(setup.rulesSystem).toBe('vtm5e')
+    expect(setup.pulseOverride).toEqual({ tension: 7, phase: null })
     await storage.deleteNarrator(G, n.id)
     expect((await storage.getGame(G))!.setup.narrator).toBeNull()
   })

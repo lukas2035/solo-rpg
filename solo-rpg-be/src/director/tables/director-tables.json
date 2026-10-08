@@ -1,0 +1,42 @@
+{
+  "$comment": "Žánrově neutrální tabulky Directoru v1 (docs/ARCHITECTURE_V2.md §4.1). Váhy jsou relativní; klíče fází = PacingPhase, pásma napětí: low 0–3, mid 4–6, high 7–10.",
+  "mode": {
+    "calm": { "continue": 60, "event": 40 },
+    "rising": { "continue": 50, "event": 50 },
+    "peak": { "continue": 40, "event": 60 },
+    "aftermath": { "continue": 70, "event": 30 }
+  },
+  "eventType": {
+    "calm": { "obstacle": 30, "neutral": 35, "opportunity": 25, "reward": 10 },
+    "rising": { "obstacle": 45, "neutral": 25, "opportunity": 20, "reward": 10 },
+    "peak": { "obstacle": 55, "neutral": 15, "opportunity": 20, "reward": 10 },
+    "aftermath": { "obstacle": 15, "neutral": 35, "opportunity": 25, "reward": 25 }
+  },
+  "beatKind": {
+    "calm": { "escalation": 45, "consequence": 15, "resolution": 25, "reveal": 15 },
+    "rising": { "escalation": 55, "consequence": 20, "resolution": 10, "reveal": 15 },
+    "peak": { "escalation": 35, "consequence": 25, "resolution": 25, "reveal": 15 },
+    "aftermath": { "escalation": 15, "consequence": 30, "resolution": 40, "reveal": 15 }
+  },
+  "difficulty": {
+    "low": { "1": 30, "2": 40, "3": 25, "4": 5, "5": 0 },
+    "mid": { "1": 10, "2": 30, "3": 40, "4": 15, "5": 5 },
+    "high": { "1": 0, "2": 15, "3": 35, "4": 35, "5": 15 }
+  },
+  "stakes": {
+    "low": { "low": 60, "medium": 35, "high": 5 },
+    "mid": { "low": 25, "medium": 55, "high": 20 },
+    "high": { "low": 5, "medium": 40, "high": 55 }
+  },
+  "twist": {
+    "$comment": "Šance na zvrat = base + perBeat × beatsSinceTwist, nejvýš max",
+    "base": 0.05,
+    "perBeat": 0.04,
+    "max": 0.45
+  },
+  "noRollChance": {
+    "$comment": "Pravděpodobnost, že beat nevyžaduje hod (difficulty = null)",
+    "continue": 0.5,
+    "event": 0.15
+  }
+}

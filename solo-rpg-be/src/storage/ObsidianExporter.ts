@@ -91,6 +91,8 @@ export class ObsidianExporter {
       narrator: detail.setup.narrator,
       rules: detail.setup.rules,
       rulesInAi: detail.setup.rulesInAi,
+      rulesSystem: detail.setup.rulesSystem,
+      pulseOverride: detail.setup.pulseOverride,
     })
   }
 

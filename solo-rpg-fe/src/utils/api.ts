@@ -38,6 +38,10 @@ import type {
   VaultInfo,
   PickResponse,
   BackupGameResponse,
+  BriefPatch,
+  BriefRequest,
+  DirectorState,
+  NarrativeBrief,
 } from '@solo-rpg/shared'
 import { isRemoteImage } from '@solo-rpg/shared'
 import { useSyncExternalStore } from 'react'
@@ -251,6 +255,23 @@ export const rejectAiSuggestion = (game: string, sceneId: string, suggestionId: 
     `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/ai/suggestions/${encodeURIComponent(suggestionId)}/reject`,
     { reason } satisfies AiSuggestionRejectRequest,
   )
+
+// ---------- Director: puls kampaně + režijní brief scény ----------
+
+const directorPath = (game: string, sceneId: string) => `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/director`
+
+/** Aktuální puls kampaně a rozpracovaný brief scény (pokud je) */
+export const getDirector = (game: string, sceneId: string) => request<DirectorState>('GET', directorPath(game, sceneId))
+
+/** Nový brief (nahradí rozpracovaný); bez seedu náhodný = „přehodit“ */
+export const createBrief = (game: string, sceneId: string, seed?: number) =>
+  request<NarrativeBrief>('POST', `${directorPath(game, sceneId)}/brief`, (seed === undefined ? {} : { seed }) satisfies BriefRequest)
+
+/** Ruční úprava briefu (typ, obtížnost, výsledek hodu, poznámka…) */
+export const patchBrief = (game: string, sceneId: string, patch: BriefPatch) => request<NarrativeBrief>('PATCH', `${directorPath(game, sceneId)}/brief`, patch)
+
+/** Přeskočit režii – další návrh AI vznikne bez briefu */
+export const clearBrief = (game: string, sceneId: string) => request<void>('DELETE', `${directorPath(game, sceneId)}/brief`)
 
 /** Nechá AI shrnout děj scény (nic neukládá – výsledek se vloží do pole „Shrnutí“ v dialogu scény) */
 export const summarizeScene = (game: string, sceneId: string) =>

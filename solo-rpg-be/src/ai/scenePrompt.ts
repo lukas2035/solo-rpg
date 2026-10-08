@@ -32,6 +32,8 @@ export interface ScenePromptContext {
   contextSections?: string[]
   /** Důvody, proč hráč odmítl předchozí návrhy v této scéně – model se jim má vyhnout */
   rejectedReasons?: string[]
+  /** Sekce „Režie“ z Directoru (`director/briefPrompt.ts`); prázdná = psáno bez režie */
+  briefSection?: string
   /** Rozpočet tokenů pro přepis scény; starší záznamy nad rozpočet se vynechají */
   transcriptBudgetTokens?: number
 }
@@ -111,6 +113,8 @@ export function buildMessages(ctx: ScenePromptContext): ChatMessage[] {
   if (reasons.length) {
     sections.push(`## Odmítnuté předchozí návrhy pokračování\nHráč odmítl předchozí návrhy z těchto důvodů – jsou to fakta o světě, respektuj je a napiš jiné pokračování:\n${reasons.map(r => `- ${r}`).join('\n')}`)
   }
+
+  if (ctx.briefSection?.trim()) sections.push(ctx.briefSection.trim())
 
   sections.push('## Úkol\nNavaž na poslední záznam a pokračuj ve scéně. Odpověz pouze řádky ve formátu `Jméno: text`.')
 

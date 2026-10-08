@@ -20,9 +20,11 @@ import {
   BackupGameRequestSchema,
   AiSuggestionAcceptRequestSchema,
   AiSuggestionRejectRequestSchema,
+  BriefPatchSchema,
+  BriefRequestSchema,
   isValidGameName,
 } from '@solo-rpg/shared'
-import type { AiSuggestion, AiSuggestionAcceptResponse, AiSuggestionState, RulesPromptResponse, SceneContextSuggestionResponse } from '@solo-rpg/shared'
+import type { AiSuggestion, AiSuggestionAcceptResponse, AiSuggestionState, DirectorState, NarrativeBrief, RulesPromptResponse, SceneContextSuggestionResponse } from '@solo-rpg/shared'
 import { ConflictError, NotFoundError, ValidationError } from '../vault/StorageProvider.js'
 import type { VaultManager } from '../vault/VaultManager.js'
 import { backupGameFolder } from '../vault/backup.js'
@@ -31,6 +33,7 @@ import { DialogBusyError } from '../system/dialogs.js'
 import type { Config } from '../config.js'
 import { AiError } from '../ai/types.js'
 import { SuggestionService } from '../narrative/suggestions.js'
+import { DirectorService } from '../director/directorService.js'
 import { summarizeScene } from '../ai/sceneSummary.js'
 import { suggestContextScenes } from '../ai/sceneContextScenes.js'
 import { buildRulesSection } from '../ai/rulesPrompt.js'
@@ -74,7 +77,8 @@ function sendError(reply: FastifyReply, error: unknown): FastifyReply {
 
 export async function registerGameRoutes(app: FastifyInstance, vault: VaultManager, config: Config, exporter: ObsidianExporter): Promise<void> {
   app.setErrorHandler((error, _request, reply) => sendError(reply, error))
-  const suggestions = new SuggestionService(vault.storage, config)
+  const director = new DirectorService(vault.storage)
+  const suggestions = new SuggestionService(vault.storage, config, director)
 
   // Vlastní zápisy BE do složky hry nemají vyvolat hlášení „změna ve vaultu“ – utišit watcher před i po zpracování
   const noteOwnChange = (request: { method: string; params: unknown }) => {
@@ -333,6 +337,34 @@ export async function registerGameRoutes(app: FastifyInstance, vault: VaultManag
     const { game, scene, suggestion } = SuggestionParams.parse(request.params)
     const { reason } = AiSuggestionRejectRequestSchema.parse(request.body)
     return suggestions.reject(game, scene, suggestion, reason)
+  })
+
+  // ---------- Director: puls kampaně + režijní brief scény ----------
+
+  /** Aktuální puls kampaně a rozpracovaný brief scény (pokud je) */
+  app.get('/api/games/:game/scenes/:scene/director', async (request): Promise<DirectorState> => {
+    const { game, scene } = SceneParams.parse(request.params)
+    return director.get(game, scene)
+  })
+
+  /** Nový brief (nahradí rozpracovaný); bez `seed` náhodný = „přehodit“ */
+  app.post('/api/games/:game/scenes/:scene/director/brief', async (request): Promise<NarrativeBrief> => {
+    const { game, scene } = SceneParams.parse(request.params)
+    const { seed } = BriefRequestSchema.parse(request.body ?? {})
+    return director.create(game, scene, seed)
+  })
+
+  /** Ruční úprava briefu hráčem (typ, obtížnost, výsledek hodu, poznámka…) */
+  app.patch('/api/games/:game/scenes/:scene/director/brief', async (request): Promise<NarrativeBrief> => {
+    const { game, scene } = SceneParams.parse(request.params)
+    return director.patch(game, scene, BriefPatchSchema.parse(request.body))
+  })
+
+  /** Přeskočit režii – další návrh AI vznikne bez briefu */
+  app.delete('/api/games/:game/scenes/:scene/director/brief', async (request, reply) => {
+    const { game, scene } = SceneParams.parse(request.params)
+    director.clear(game, scene)
+    return reply.code(204).send()
   })
 
   // AI shrnutí děje scény – nic neukládá, FE výsledek vloží do dialogu scény

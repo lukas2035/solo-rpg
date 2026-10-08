@@ -73,6 +73,8 @@ export interface StorageProvider {
 
   /** Neměnný log událostí hry (AI návrhy, později patche stavu) – viz tabulka `events` */
   appendEvent(name: string, event: GameEventInput): Promise<void>
+  /** Poslední události hry daných druhů, od nejnovější (`limit` nejvýš 500) */
+  listEvents(name: string, query: { kinds: readonly string[]; sceneId?: string; limit?: number }): Promise<GameEvent[]>
 }
 
 export interface GameEventInput {
@@ -80,6 +82,11 @@ export interface GameEventInput {
   /** Druh události, např. `ai.suggestion.accepted` */
   kind: string
   payload: unknown
+}
+
+export interface GameEvent extends GameEventInput {
+  id: number
+  createdAt: number
 }
 
 export class NotFoundError extends Error {}

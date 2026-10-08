@@ -25,9 +25,14 @@ interface InputAreaProps {
   onGenerateAi?: () => void
   /** AI právě generuje – tlačítko je neaktivní a pulzuje */
   aiBusy?: boolean
+  /** Otevře/zavře panel režie Directoru (puls kampaně + brief); undefined = bez tlačítka */
+  onToggleDirector?: () => void
+  directorOpen?: boolean
+  /** Scéna má rozpracovaný brief – tlačítko 🤖 ho použije */
+  briefPending?: boolean
 }
 
-export default function InputArea({ characters, showShortcutNumbers, onAddEntry, brightBackground, onBrightBackgroundChange, narratorName, onCreateNarrator, onGenerateAi, aiBusy = false }: InputAreaProps) {
+export default function InputArea({ characters, showShortcutNumbers, onAddEntry, brightBackground, onBrightBackgroundChange, narratorName, onCreateNarrator, onGenerateAi, aiBusy = false, onToggleDirector, directorOpen = false, briefPending = false }: InputAreaProps) {
   const [text, setText] = useState('')
   const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null)
   const [quoteMode, setQuoteMode] = useState(false)
@@ -210,12 +215,24 @@ export default function InputArea({ characters, showShortcutNumbers, onAddEntry,
             type="button"
             onClick={onGenerateAi}
             disabled={aiBusy}
-            title={aiBusy ? `${narratorName} píše…` : `Nechat AI (${narratorName}) napsat další text do scény (nebo Enter v prázdném políčku)`}
+            title={aiBusy ? `${narratorName} píše…` : briefPending ? `Nechat AI (${narratorName}) psát podle připravené režie (nebo Enter v prázdném políčku)` : `Připravit režii a nechat AI (${narratorName}) napsat další text do scény (nebo Enter v prázdném políčku)`}
             className={`px-3 py-2 rounded-lg text-sm font-bold whitespace-nowrap cursor-pointer transition-all bg-black/70 text-cyan-300 border-2 border-cyan-500/60 hover:border-cyan-400 hover:bg-cyan-950/60 disabled:cursor-wait ${
               aiBusy ? 'animate-pulse border-cyan-400' : ''
             }`}
           >
-            🤖 {aiBusy ? 'Píše…' : 'AI pokračuje'}
+            🤖 {aiBusy ? 'Píše…' : briefPending ? 'AI píše podle režie' : 'AI pokračuje'}
+          </button>
+        )}
+        {hasNarrator && onToggleDirector && (
+          <button
+            type="button"
+            onClick={onToggleDirector}
+            title="Režie Directoru: puls kampaně a co se má stát v dalším beatu"
+            className={`px-3 py-2 rounded-lg text-sm font-bold whitespace-nowrap cursor-pointer transition-all bg-black/70 border-2 ${
+              directorOpen ? 'text-amber-200 border-amber-400 bg-amber-950/60' : 'text-amber-300 border-amber-500/60 hover:border-amber-400 hover:bg-amber-950/60'
+            }`}
+          >
+            🎬
           </button>
         )}
 

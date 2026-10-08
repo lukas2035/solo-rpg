@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises'
-import type { StoryEntry } from '@solo-rpg/shared'
+import type { NarrativeBrief, StoryEntry } from '@solo-rpg/shared'
 import type { FastifyBaseLogger as Logger } from 'fastify'
 import type { Config } from '../config.js'
+import { buildBriefSection } from '../director/briefPrompt.js'
 import type { StorageProvider } from '../vault/StorageProvider.js'
 import { NotFoundError } from '../vault/StorageProvider.js'
 import { buildSceneContext, type SceneContext } from '../narrative/contextBuilder.js'
@@ -27,6 +28,7 @@ export async function draftSceneReply(
   sceneId: string,
   rejectedReasons: string[] = [],
   log?: Logger,
+  brief: NarrativeBrief | null = null,
 ): Promise<SceneReplyDraft> {
   const apiKey = requireApiKey(config)
 
@@ -63,12 +65,13 @@ export async function draftSceneReply(
     entries,
     contextSections: context.sections,
     rejectedReasons,
+    briefSection: brief ? buildBriefSection(brief, detail) : undefined,
     transcriptBudgetTokens: config.ai.transcriptTokens,
   })
   if (config.ai.debug) {
     const dump = messages.map(m => `───── ${m.role.toUpperCase()} ─────\n${m.content}`).join('\n\n')
     log?.info(
-      `[AI] provider=${PROVIDER_LABEL[config.ai.provider]} model=${config.ai.model} scéna="${scene.title}" hráč=[${playerCharacters.map(c => c.name).join(', ')}] AI=[${aiCharacters.map(c => c.name).join(', ')}] kontext≈${context.tokensUsed} tokenů (${context.included.length} položek, ${context.dropped} vynecháno)\n${dump}`,
+      `[AI] provider=${PROVIDER_LABEL[config.ai.provider]} model=${config.ai.model} scéna="${scene.title}" hráč=[${playerCharacters.map(c => c.name).join(', ')}] AI=[${aiCharacters.map(c => c.name).join(', ')}] kontext≈${context.tokensUsed} tokenů (${context.included.length} položek, ${context.dropped} vynecháno)${brief ? ` režie=${brief.id}` : ''}\n${dump}`,
     )
   }
   const raw = await chatCompletion(config.ai.provider, messages, {

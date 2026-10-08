@@ -28,6 +28,10 @@ export const games = pgTable(
     /** Popis pravidel hry pod příběhem (GameSettings.rules) */
     rules: text('rules').notNull().default(''),
     rulesInAi: boolean('rules_in_ai').notNull().default(false),
+    /** Systém pravidel pro rules adapter Directoru (GameSettings.rulesSystem) */
+    rulesSystem: text('rules_system').notNull().default('none'),
+    /** Ruční korekce pulsu kampaně (GameSettings.pulseOverride) */
+    pulseOverride: jsonb('pulse_override').notNull().default({ tension: null, phase: null }),
     brightBackground: boolean('bright_background').notNull().default(true),
     /** Pozadí hry: buď lokální asset, nebo vzdálená URL (nejvýš jedno) */
     backgroundAssetId: text('background_asset_id'),

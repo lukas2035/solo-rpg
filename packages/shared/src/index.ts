@@ -68,6 +68,24 @@ export const NarratorInputSchema = z.object({
 })
 export type NarratorInput = z.infer<typeof NarratorInputSchema>
 
+/**
+ * Systém pravidel pro rules adapter Directoru: abstraktní obtížnost 1–5 se překládá na konkrétní hodnotu systému
+ * (D&D 5e DC, VtM 5e Difficulty, Fate žebřík). `none` = v briefu zůstane jen 1–5.
+ */
+export const RulesSystemSchema = z.enum(['none', 'dnd5e', 'vtm5e', 'fate'])
+export type RulesSystem = z.infer<typeof RulesSystemSchema>
+
+/** Fáze pacingu kampaně (odvozená z napětí, nebo ručně přepsaná) */
+export const PacingPhaseSchema = z.enum(['calm', 'rising', 'peak', 'aftermath'])
+export type PacingPhase = z.infer<typeof PacingPhaseSchema>
+
+/** Ruční korekce pulsu kampaně hráčem; null = nechat dopočítat */
+export const PulseOverrideSchema = z.object({
+  tension: z.number().int().min(0).max(10).nullable(),
+  phase: PacingPhaseSchema.nullable(),
+})
+export type PulseOverride = z.infer<typeof PulseOverrideSchema>
+
 /** Nastavení hry bez postav a vypravěčů (ti mají vlastní CRUD endpointy) */
 export const GameSettingsSchema = z.object({
   backgroundImage: ImageRefSchema,
@@ -78,6 +96,10 @@ export const GameSettingsSchema = z.object({
   rules: z.string().max(20000),
   /** Posílat popis pravidel AI vypravěči při generování textů scény (shrnutí je dostává vždy); frontmatter `rulesInAi` */
   rulesInAi: z.boolean(),
+  /** Systém pravidel pro překlad obtížnosti v briefu Directoru; frontmatter `rulesSystem` */
+  rulesSystem: RulesSystemSchema,
+  /** Ruční korekce pulsu kampaně (napětí / fáze); frontmatter `pulseTension`, `pulsePhase` */
+  pulseOverride: PulseOverrideSchema,
 })
 export type GameSettings = z.infer<typeof GameSettingsSchema>
 
@@ -608,6 +630,8 @@ export const AiSuggestionSchema = z.object({
   rejectedReasons: z.array(z.string()),
   /** Stručně co z kampaně šlo do kontextu (pro ladění: `Nit: Zrada v cechu (thr_…)`) */
   contextIncluded: z.array(z.string()),
+  /** Brief Directoru, podle kterého návrh vznikl; null = psáno bez režie */
+  briefId: z.string().nullable(),
   createdAt: z.number(),
 })
 export type AiSuggestion = z.infer<typeof AiSuggestionSchema>
@@ -636,6 +660,116 @@ export const AiSuggestionRejectRequestSchema = z.object({
   reason: z.string().trim().max(2000),
 })
 export type AiSuggestionRejectRequest = z.infer<typeof AiSuggestionRejectRequestSchema>
+
+// ---------- Director (docs/ARCHITECTURE_V2.md §4.1) ----------
+
+/**
+ * Puls kampaně – stav, podle kterého Director mění váhy tabulek. Dopočítává se z nití (stav, hodiny), questů a
+ * historie přijatých beatů v `events`; hráč může napětí a fázi přepsat (`GameSettings.pulseOverride`).
+ */
+export const CampaignPulseSchema = z.object({
+  /** Napětí 0–10 */
+  tension: z.number().int().min(0).max(10),
+  phase: PacingPhaseSchema,
+  /** Kolik následků „dluží“ příběh hráči (neúspěchy bez odezvy); > 0 → Director vynutí beat typu consequence */
+  consequenceDebt: z.number().int().nonnegative(),
+  /** Počet přijatých beatů od posledního zvratu */
+  beatsSinceTwist: z.number().int().nonnegative(),
+  openThreads: z.number().int().nonnegative(),
+  escalatedThreads: z.number().int().nonnegative(),
+  openQuests: z.number().int().nonnegative(),
+  /** Které hodnoty jsou ručně přepsané */
+  overridden: z.object({ tension: z.boolean(), phase: z.boolean() }),
+  /** Čitelné vysvětlení, z čeho se napětí skládá (pro UI „proč“) */
+  signals: z.array(z.string()),
+})
+export type CampaignPulse = z.infer<typeof CampaignPulseSchema>
+
+/** `continue` = jen rozvíjet rozehranou situaci; `event` = Director vnese nový prvek */
+export const BriefModeSchema = z.enum(['continue', 'event'])
+export type BriefMode = z.infer<typeof BriefModeSchema>
+
+export const EventTypeSchema = z.enum(['obstacle', 'neutral', 'opportunity', 'reward'])
+export type EventType = z.infer<typeof EventTypeSchema>
+
+/** Dramatická funkce beatu */
+export const BeatKindSchema = z.enum(['escalation', 'consequence', 'resolution', 'reveal'])
+export type BeatKind = z.infer<typeof BeatKindSchema>
+
+export const StakesSchema = z.enum(['low', 'medium', 'high'])
+export type Stakes = z.infer<typeof StakesSchema>
+
+/** Výsledek hodu hráče podle jeho systému (zadává ručně před psaním AI) */
+export const RollOutcomeSchema = z.enum(['success', 'partial', 'fail'])
+export type RollOutcome = z.infer<typeof RollOutcomeSchema>
+
+/** Entity, kterých se beat týká – vybírá aplikace (ne AI); jména + id, aby je AI mohla citovat */
+export const BriefFocusSchema = z.object({
+  characters: z.array(z.string()),
+  thread: z.string().nullable(),
+  quest: z.string().nullable(),
+  faction: z.string().nullable(),
+  location: z.string().nullable(),
+})
+export type BriefFocus = z.infer<typeof BriefFocusSchema>
+
+/**
+ * Režijní zadání pro AI vypravěče – výstup Directoru. Hráč ho v panelu může přehodit (nový seed), upravit nebo
+ * přeskočit; teprve pak AI píše. Drží se in‑memory per scéna (jako `AiSuggestion`), do `events` jde při přijetí návrhu.
+ */
+export const NarrativeBriefSchema = z.object({
+  id: z.string().min(1),
+  sceneId: z.string().min(1),
+  /** Seed RNG – stejný seed nad stejným stavem dá stejný brief */
+  seed: z.number().int(),
+  mode: BriefModeSchema,
+  /** null při `mode = continue` */
+  eventType: EventTypeSchema.nullable(),
+  beatKind: BeatKindSchema,
+  /** Abstraktní obtížnost 1–5; null = beat nevyžaduje hod */
+  difficulty: z.number().int().min(1).max(5).nullable(),
+  /** Překlad obtížnosti do systému hry (`DC 15`, `Difficulty 4`, `+3 (Good)`); null bez systému / bez hodu */
+  difficultyLabel: z.string().nullable(),
+  stakes: StakesSchema,
+  /** Významný zvrat (zrada, odhalení, nová skutečnost) */
+  twist: z.boolean(),
+  focus: BriefFocusSchema,
+  /** Výsledek hodu hráče; null = ještě nehodil / hod není potřeba */
+  outcome: RollOutcomeSchema.nullable(),
+  /** Volná poznámka hráče pro AI („ať se objeví ten dopis“) */
+  notes: z.string(),
+  /** Snímek pulsu, ze kterého brief vznikl */
+  pulse: CampaignPulseSchema,
+  createdAt: z.number(),
+})
+export type NarrativeBrief = z.infer<typeof NarrativeBriefSchema>
+
+/** Odpověď `GET …/scenes/:scene/director` – aktuální puls a rozpracovaný brief scény */
+export const DirectorStateSchema = z.object({
+  pulse: CampaignPulseSchema,
+  brief: NarrativeBriefSchema.nullable(),
+})
+export type DirectorState = z.infer<typeof DirectorStateSchema>
+
+/** Tělo `POST …/director/brief` – volitelný seed (bez něj náhodný = „přehodit“) */
+export const BriefRequestSchema = z.object({
+  seed: z.number().int().optional(),
+})
+export type BriefRequest = z.infer<typeof BriefRequestSchema>
+
+/** Tělo `PATCH …/director/brief` – ruční úpravy hráče; `difficulty` se přepočítá i do `difficultyLabel` */
+export const BriefPatchSchema = z.object({
+  mode: BriefModeSchema.optional(),
+  eventType: EventTypeSchema.nullable().optional(),
+  beatKind: BeatKindSchema.optional(),
+  difficulty: z.number().int().min(1).max(5).nullable().optional(),
+  stakes: StakesSchema.optional(),
+  twist: z.boolean().optional(),
+  outcome: RollOutcomeSchema.nullable().optional(),
+  notes: z.string().trim().max(2000).optional(),
+  focus: BriefFocusSchema.partial().optional(),
+})
+export type BriefPatch = z.infer<typeof BriefPatchSchema>
 
 /** Odpověď `POST /api/games/:game/scenes/:scene/summary` – AI shrnutí děje scény (neukládá se, FE ho vloží do dialogu scény) */
 export const SceneSummaryResponseSchema = z.object({

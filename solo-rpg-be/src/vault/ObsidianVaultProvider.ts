@@ -40,8 +40,10 @@ import {
   LoreTruthSchema,
   LoreTypeSchema,
   ObjectiveStatusSchema,
+  PulseOverrideSchema,
   QuestStatusSchema,
   QuestTypeSchema,
+  RulesSystemSchema,
   ThreadCertaintySchema,
   ThreadHorizonSchema,
   ThreadStatusSchema,
@@ -52,6 +54,7 @@ import {
   NotFoundError,
   ValidationError,
   type AssetInput,
+  type GameEvent,
   type StorageProvider,
 } from './StorageProvider.js'
 import {
@@ -383,6 +386,11 @@ export class ObsidianVaultProvider implements StorageProvider {
       narrator: narrators.find(n => nameKey(n.name) === nameKey(narratorName ?? ''))?.name ?? null,
       rules: splitGameBody(file.body).rules,
       rulesInAi: file.data.rulesInAi === true,
+      rulesSystem: RulesSystemSchema.catch('none').parse(file.data.rulesSystem ?? 'none'),
+      pulseOverride: PulseOverrideSchema.catch({ tension: null, phase: null }).parse({
+        tension: typeof file.data.pulseTension === 'number' ? file.data.pulseTension : null,
+        phase: file.data.pulsePhase ?? null,
+      }),
     }
   }
 
@@ -887,6 +895,13 @@ export class ObsidianVaultProvider implements StorageProvider {
       file.data.brightBackground = settings.brightBackground
       file.data.narrator = narrator ? `[[${narrator.narrator.name}]]` : null
       file.data.rulesInAi = settings.rulesInAi
+      // YAML nezapisuje undefined – nepoužité klíče Directoru smazat
+      if (settings.rulesSystem === 'none') delete file.data.rulesSystem
+      else file.data.rulesSystem = settings.rulesSystem
+      if (settings.pulseOverride.tension === null) delete file.data.pulseTension
+      else file.data.pulseTension = settings.pulseOverride.tension
+      if (settings.pulseOverride.phase === null) delete file.data.pulsePhase
+      else file.data.pulsePhase = settings.pulseOverride.phase
       // Poznámky hráče v těle zůstávají, mění se jen sekce pravidel
       file.body = joinGameBody(splitGameBody(file.body).notes, settings.rules)
     })
@@ -2433,4 +2448,7 @@ export class ObsidianVaultProvider implements StorageProvider {
 
   /** Vault je jen cíl exportu / zdroj importu – log událostí nevede */
   async appendEvent(): Promise<void> {}
+  async listEvents(): Promise<GameEvent[]> {
+    return []
+  }
 }

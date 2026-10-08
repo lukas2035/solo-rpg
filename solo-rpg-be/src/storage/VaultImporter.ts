@@ -277,6 +277,8 @@ export class VaultImporter {
       narrator: detail.setup.narrator,
       rules: detail.setup.rules,
       rulesInAi: detail.setup.rulesInAi,
+      rulesSystem: detail.setup.rulesSystem,
+      pulseOverride: detail.setup.pulseOverride,
     })
     log(`Hotovo: ${report.entities} entit, ${report.links} vazeb, ${report.entries} replik, ${report.assets} obrázků${report.missingAssets.length ? `, chybí ${report.missingAssets.length} obrázků` : ''}`)
     return report

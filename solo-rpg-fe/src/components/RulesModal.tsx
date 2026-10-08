@@ -1,25 +1,37 @@
 import { useEffect, useState } from 'react'
+import type { RulesSystem } from '@solo-rpg/shared'
 import { inputClass } from '../utils/forms'
 
 export interface RulesFormValues {
   rules: string
   rulesInAi: boolean
+  rulesSystem: RulesSystem
 }
 
 interface RulesModalProps {
   rules: string
   rulesInAi: boolean
+  rulesSystem: RulesSystem
   onSubmit: (values: RulesFormValues) => Promise<void>
   onClose: () => void
 }
 
+const RULES_SYSTEM_OPTIONS: { value: RulesSystem; label: string }[] = [
+  { value: 'none', label: 'žádný / jiný – v režii zůstane jen obtížnost 1–5' },
+  { value: 'dnd5e', label: 'D&D 5e – obtížnost jako DC 10 / 13 / 15 / 18 / 20' },
+  { value: 'vtm5e', label: 'Vampire: The Masquerade 5e – Difficulty 2–6' },
+  { value: 'fate', label: 'Fate – žebřík +1 (Average) … +5 (Superb)' },
+]
+
 /**
  * Dialog „Pravidla pod příběhem“: markdown popis pravidlového systému, který hráč používá (VtM 5e, D&D 5e, Fate…,
- * případně tabulka pro výklad orákula), a přepínač, zda popis posílat AI. Do textového exportu hry se popis dává vždy.
+ * případně tabulka pro výklad orákula), přepínač, zda popis posílat AI, a systém pro překlad obtížnosti v režii.
+ * Do textového exportu hry se popis dává vždy.
  */
-export default function RulesModal({ rules: initialRules, rulesInAi: initialInAi, onSubmit, onClose }: RulesModalProps) {
+export default function RulesModal({ rules: initialRules, rulesInAi: initialInAi, rulesSystem: initialSystem, onSubmit, onClose }: RulesModalProps) {
   const [rules, setRules] = useState(initialRules)
   const [rulesInAi, setRulesInAi] = useState(initialInAi)
+  const [rulesSystem, setRulesSystem] = useState<RulesSystem>(initialSystem)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -35,7 +47,7 @@ export default function RulesModal({ rules: initialRules, rulesInAi: initialInAi
     setSaving(true)
     setError(null)
     try {
-      await onSubmit({ rules: rules.trim(), rulesInAi })
+      await onSubmit({ rules: rules.trim(), rulesInAi, rulesSystem })
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Uložení pravidel selhalo.')
@@ -91,6 +103,18 @@ export default function RulesModal({ rules: initialRules, rulesInAi: initialInAi
               příběhové scény bez hodů. Ke shrnutí scény a do textového exportu celé hry (📄) se pravidla přidávají vždy.
             </span>
           </span>
+        </label>
+
+        <label className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">
+          <span>
+            <span className="font-semibold">Systém pravidel pro režii (Director)</span>
+            <span className="block opacity-70">Když režie vyžaduje hod, přeloží abstraktní obtížnost 1–5 do hodnoty tvého systému. Házíš sám a výsledek zadáš do režie.</span>
+          </span>
+          <select value={rulesSystem} onChange={(e) => setRulesSystem(e.target.value as RulesSystem)} className={inputClass}>
+            {RULES_SYSTEM_OPTIONS.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
         </label>
 
         {error && <p className="text-sm text-red-300">{error}</p>}
