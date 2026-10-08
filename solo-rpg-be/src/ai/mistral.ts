@@ -6,15 +6,19 @@ import { AiError, type ChatMessage, type ChatOptions } from './types.js'
 
 interface MistralChatResponse {
   choices?: { message?: { content?: string | null } }[]
-  /** Mistral vrací chybu buď jako `message` na nejvyšší úrovni, nebo zabalenou v `error` */
+  /** Mistral vrací chybu buď jako `message` na nejvyšší úrovni, zabalenou v `error`, nebo (422) jako `detail` */
   message?: string
   error?: { message?: string } | string
+  detail?: unknown
 }
 
 function describeError(data: MistralChatResponse | null, fallback: string): string {
   if (!data) return fallback
   if (typeof data.error === 'string') return data.error
-  return data.error?.message ?? data.message ?? fallback
+  const message = data.error?.message ?? data.message
+  if (message) return message
+  if (data.detail !== undefined) return typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
+  return fallback
 }
 
 export async function mistralChatCompletion(messages: ChatMessage[], options: ChatOptions): Promise<string> {
@@ -34,14 +38,16 @@ export async function mistralChatCompletion(messages: ChatMessage[], options: Ch
     signal: AbortSignal.timeout(options.timeoutMs ?? 120_000),
   })
 
+  const text = await response.text()
   let data: MistralChatResponse | null = null
   try {
-    data = (await response.json()) as MistralChatResponse
+    data = JSON.parse(text) as MistralChatResponse
   } catch {
     // tělo není JSON – ošetří se níže
   }
   if (!response.ok) {
-    throw new AiError(502, describeError(data, `Mistral AI odpověděl HTTP ${response.status}.`))
+    const detail = data ? describeError(data, text) : text
+    throw new AiError(502, `Mistral AI odpověděl HTTP ${response.status}: ${detail.slice(0, 500)}`)
   }
   const content = data?.choices?.[0]?.message?.content
   if (typeof content !== 'string' || !content.trim()) {

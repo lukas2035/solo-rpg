@@ -54,7 +54,11 @@ function sendError(reply: FastifyReply, error: unknown): FastifyReply {
   if (error instanceof NotFoundError) return reply.code(404).send({ error: error.message })
   if (error instanceof ConflictError) return reply.code(409).send({ error: error.message })
   if (error instanceof DialogBusyError) return reply.code(409).send({ error: error.message })
-  if (error instanceof AiError) return reply.code(error.status).send({ error: error.message })
+  if (error instanceof AiError) {
+    // Chyby providera / nastavení (5xx) zalogovat, aby byl důvod vidět i bez FE
+    if (error.status >= 500) reply.log.warn({ status: error.status }, `[AI] ${error.message}`)
+    return reply.code(error.status).send({ error: error.message })
+  }
   // Chyby Fastify / @fastify/static s vlastním HTTP kódem (nevalidní JSON, 403 mimo kořen, …)
   const statusCode = (error as { statusCode?: unknown }).statusCode
   if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {
