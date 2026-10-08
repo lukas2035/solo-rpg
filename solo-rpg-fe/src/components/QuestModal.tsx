@@ -152,10 +152,6 @@ export default function QuestModal({
       titleRef.current?.focus()
       return
     }
-    if (!type) {
-      setError('Zvol typ questu.')
-      return
-    }
     setSaving(true)
     setError(null)
     try {
@@ -163,7 +159,7 @@ export default function QuestModal({
       const pendingReward = newReward.trim()
       await onSubmit({
         title: trimmed,
-        type,
+        type: type ?? 'side',
         status,
         objectives: [
           ...objectives.map(({ key: _key, ...o }) => ({ ...o, title: o.title.trim() })).filter(o => o.title),
@@ -243,7 +239,7 @@ export default function QuestModal({
         </label>
 
         <ChipGroup
-          label={<>Typ {!type && <span className="opacity-60">(povinný)</span>}</>}
+          label={<>Typ {!type && <span className="opacity-60">(nepovinný – bez výběru „vedlejší“)</span>}</>}
           options={QUEST_TYPES}
           value={type}
           labels={Object.fromEntries(QUEST_TYPES.map(t => [t, `${QUEST_TYPE_ICONS[t]} ${QUEST_TYPE_LABELS[t]}`])) as Record<QuestType, string>}

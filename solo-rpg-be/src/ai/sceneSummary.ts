@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
-import type { Narrator, SceneSummaryResponse } from '@solo-rpg/shared'
+import { QuestProposalSchema, type Narrator, type Quest, type QuestProposal, type SceneSummaryResponse } from '@solo-rpg/shared'
+import { z } from 'zod'
 import type { FastifyBaseLogger as Logger } from 'fastify'
 import type { Config } from '../config.js'
 import type { StorageProvider } from '../vault/StorageProvider.js'
@@ -45,8 +46,9 @@ export async function summarizeScene(storage: StorageProvider, config: Config, g
     sections.push(`## Postavy ve scéně\n${characters.map(c => (c.nickname === c.name ? `- ${c.name}` : `- ${c.nickname} (${c.name})`)).join('\n')}`)
   }
   if (scene.summary.trim()) sections.push(`## Dosavadní shrnutí (nahraď novým, aktualizovaným)\n${scene.summary.trim()}`)
+  sections.push(formatExistingQuests(detail.quests))
   sections.push(`## Přepis scény\n${formatTranscript(entries, characters, narrator)}`)
-  sections.push('## Úkol\nShrň děj této scény podle pokynů.')
+  sections.push('## Úkol\nShrň děj této scény podle pokynů a na konec přidej JSON blok s novými questy (nebo prázdným seznamem).')
 
   const messages: ChatMessage[] = [
     // Pravidla se ke shrnutí přikládají vždy (přepínač rulesInAi se týká jen generování textů vypravěče)
@@ -66,5 +68,44 @@ export async function summarizeScene(storage: StorageProvider, config: Config, g
   })
   if (config.ai.debug) log?.info(`[AI shrnutí] odpověď modelu:\n${raw}`)
 
-  return { summary: raw.trim(), raw }
+  const { summary, quests } = parseSummaryReply(raw, detail.quests)
+  return { summary, quests, raw }
+}
+
+/** Seznam existujících questů pro model – aby nenavrhoval duplikáty (název, stav, první řádek popisu) */
+export function formatExistingQuests(quests: readonly Quest[]): string {
+  if (!quests.length) return '## Existující questy\n(zatím žádné)'
+  const lines = quests.map(q => {
+    const firstLine = q.description.trim().split('\n').find(l => l.trim())?.trim() ?? ''
+    return `- ${q.title} [${q.status}]${firstLine ? ` – ${firstLine}` : ''}`
+  })
+  return `## Existující questy (nenavrhuj znovu ani pod jiným názvem)\n${lines.join('\n')}`
+}
+
+const QuestBlockSchema = z.object({ quests: z.array(QuestProposalSchema).default([]) })
+
+/**
+ * Oddělí od odpovědi závěrečný ```json blok s navrženými questy. Bez bloku / s nevalidním JSON → shrnutí celé, questy prázdné.
+ * Návrhy shodné názvem (bez ohledu na velikost písmen) s existujícím questem se vyhodí – pojistka proti duplikaci.
+ */
+export function parseSummaryReply(raw: string, existing: readonly Pick<Quest, 'title'>[]): { summary: string; quests: QuestProposal[] } {
+  const text = raw.trim()
+  const match = /```(?:json)?\s*(\{[\s\S]*?\})\s*```\s*$/i.exec(text)
+  if (!match) return { summary: text, quests: [] }
+  const summary = text.slice(0, match.index).trim()
+  let quests: QuestProposal[]
+  try {
+    quests = QuestBlockSchema.parse(JSON.parse(match[1])).quests
+  } catch {
+    return { summary, quests: [] }
+  }
+  const taken = new Set(existing.map(q => q.title.trim().toLocaleLowerCase('cs')))
+  const unique: QuestProposal[] = []
+  for (const q of quests) {
+    const key = q.title.trim().toLocaleLowerCase('cs')
+    if (!key || taken.has(key)) continue
+    taken.add(key)
+    unique.push({ title: q.title.trim(), description: q.description.trim() })
+  }
+  return { summary, quests: unique }
 }

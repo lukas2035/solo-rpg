@@ -1117,7 +1117,7 @@ export class PostgresProvider implements StorageProvider {
       const id = await this.insertEntity(tx, snap.game.id, 'quest', {
         name: title,
         fields: {
-          type: input.type,
+          type: input.type ?? 'side',
           status: input.status ?? 'available',
           objectives: this.normalizeObjectives(input.objectives, []),
           rewards: trimList(input.rewards),
@@ -1141,7 +1141,7 @@ export class PostgresProvider implements StorageProvider {
         name: title,
         fields: {
           ...current.fields,
-          type: input.type,
+          type: input.type ?? current.fields.type,
           status: input.status ?? current.fields.status,
           objectives: input.objectives ? this.normalizeObjectives(input.objectives, current.fields.objectives) : current.fields.objectives,
           rewards: input.rewards ? trimList(input.rewards) : current.fields.rewards,

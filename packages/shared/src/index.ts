@@ -390,10 +390,10 @@ export const QuestObjectiveInputSchema = z.object({
 })
 export type QuestObjectiveInput = z.infer<typeof QuestObjectiveInputSchema>
 
-/** Vstup pro vytvoření/úpravu questu; nevyplněná pole při úpravě zůstávají beze změny */
+/** Vstup pro vytvoření/úpravu questu; povinný je jen název, nevyplněná pole při úpravě zůstávají beze změny (typ při vytvoření = `side`) */
 export const QuestInputSchema = z.object({
   title: z.string().trim().min(1).max(100),
-  type: QuestTypeSchema,
+  type: QuestTypeSchema.optional(),
   status: QuestStatusSchema.optional(),
   objectives: z.array(QuestObjectiveInputSchema).max(100).optional(),
   questGiver: z.string().trim().min(1).nullable().optional(),
@@ -776,9 +776,19 @@ export const BriefPatchSchema = z.object({
 })
 export type BriefPatch = z.infer<typeof BriefPatchSchema>
 
+/** Quest, který AI při shrnutí scény navrhla jako nový (hráč ho v UI schválí → `POST /quests`, nebo zamítne) */
+export const QuestProposalSchema = z.object({
+  title: z.string().trim().min(1).max(100),
+  /** Co quest znamená – cíl, proč vznikl, co o něm postavy vědí */
+  description: z.string(),
+})
+export type QuestProposal = z.infer<typeof QuestProposalSchema>
+
 /** Odpověď `POST /api/games/:game/scenes/:scene/summary` – AI shrnutí děje scény (neukládá se, FE ho vloží do dialogu scény) */
 export const SceneSummaryResponseSchema = z.object({
   summary: z.string(),
+  /** Nové questy, které podle AI scéna otevírá a které ještě v seznamu questů nejsou (prázdné = žádné) */
+  quests: z.array(QuestProposalSchema),
   /** Surová odpověď modelu (pro ladění promptu) */
   raw: z.string(),
 })

@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AiSuggestion, BriefPatch, Character, CharacterInput, DirectorState, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, PulseOverride, Quest, QuestInput, QuestStatus, RulesSystem, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
+import type { AiSuggestion, BriefPatch, Character, CharacterInput, DirectorState, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, PulseOverride, Quest, QuestInput, QuestProposal, QuestStatus, RulesSystem, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
 import { OPEN_THREAD_STATUSES, locationPath } from '@solo-rpg/shared'
 import CharacterBar from '../components/CharacterBar'
 import StoryPanel from '../components/StoryPanel'
@@ -12,6 +12,7 @@ import NarratorModal, { type NarratorFormValues } from '../components/NarratorMo
 import AiSceneModal, { type AiSceneSettings } from '../components/AiSceneModal'
 import AiSuggestionPanel from '../components/AiSuggestionPanel'
 import DirectorPanel from '../components/DirectorPanel'
+import QuestProposalsPanel, { type PendingQuestProposal } from '../components/QuestProposalsPanel'
 import RulesModal, { type RulesFormValues } from '../components/RulesModal'
 import ImportTranscriptModal from '../components/ImportTranscriptModal'
 import SessionModal from '../components/SessionModal'
@@ -120,6 +121,8 @@ export default function StoryEditor() {
   const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null)
   /** Průběh hromadného doplňování shrnutí scén (null = neběží) */
   const [bulkSummary, setBulkSummary] = useState<{ done: number; total: number; title: string } | null>(null)
+  /** Nové questy navržené AI při shrnutí scén – čekají na schválení/zamítnutí hráčem */
+  const [questProposals, setQuestProposals] = useState<PendingQuestProposal[]>([])
   const [showSessionModal, setShowSessionModal] = useState(false)
   /** Stopky herního sezení (persistované v localStorage, běží i se zavřeným dialogem) */
   const sessionTimer = useSessionTimer(gameName)
@@ -1020,9 +1023,10 @@ export default function StoryEditor() {
       for (const [i, scene] of missing.entries()) {
         setBulkSummary({ done: i, total: missing.length, title: scene.title })
         try {
-          const { summary } = await api.summarizeScene(gameName, scene.id)
+          const { summary, quests: proposed } = await api.summarizeScene(gameName, scene.id)
           const saved = await api.updateScene(gameName, scene.id, { title: scene.title, summary })
           setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))
+          addQuestProposals(proposed, scene.title)
           filled++
         } catch (error) {
           // 400 = scéna bez záznamů; 503 (bez klíče) nemá smysl zkoušet dál
@@ -1212,6 +1216,25 @@ export default function StoryEditor() {
 
   const upsertQuest = (saved: Quest) =>
     setQuests(prev => (prev.some(q => q.id === saved.id) ? prev.map(q => (q.id === saved.id ? saved : q)) : [saved, ...prev]))
+
+  /** Přidá questy navržené AI při shrnutí scény k posouzení; vynechá názvy, které už mezi questy nebo návrhy jsou */
+  const addQuestProposals = (proposed: QuestProposal[], sceneTitle: string) => {
+    if (!proposed.length) return
+    setQuestProposals(prev => {
+      const taken = new Set([...quests.map(q => q.title), ...prev.map(p => p.title)].map(t => t.trim().toLocaleLowerCase('cs')))
+      const fresh = proposed
+        .filter(p => !taken.has(p.title.trim().toLocaleLowerCase('cs')))
+        .map((p, i) => ({ ...p, key: `${Date.now()}-${i}-${p.title}`, sceneTitle }))
+      return fresh.length ? [...prev, ...fresh] : prev
+    })
+  }
+
+  /** Schválení návrhu questu: vznikne quest jen s názvem a popisem (stav „k dispozici“), návrh zmizí ze seznamu */
+  const acceptQuestProposal = async (proposal: PendingQuestProposal) => {
+    const saved = await api.createQuest(gameName, { title: proposal.title, description: proposal.description, status: 'available' })
+    upsertQuest(saved)
+    setQuestProposals(prev => prev.filter(p => p.key !== proposal.key))
+  }
 
   const handleQuestSubmit = async (input: QuestInput) => {
     const editing = editingQuest
@@ -1454,6 +1477,14 @@ export default function StoryEditor() {
             speakerOptions={{ characters: displayCharacters, narrators: displayNarrators }}
             onEntrySpeakerChange={handleEntrySpeakerChange}
             darkenEntries={brightBackground}
+          />
+          {/* Nové questy navržené AI při shrnutí scén – schválit / zamítnout */}
+          <QuestProposalsPanel
+            proposals={questProposals}
+            onAccept={acceptQuestProposal}
+            onReject={key => setQuestProposals(prev => prev.filter(p => p.key !== key))}
+            onClose={() => setQuestProposals([])}
+            darken={brightBackground}
           />
           {/* Režie Directoru: puls kampaně + brief pro další beat (viditelný krok před psaním AI) */}
           {directorState && (showDirector || directorState.brief) && (
@@ -1795,7 +1826,7 @@ export default function StoryEditor() {
           required={scenes.length === 0}
           onSubmit={handleSceneSubmit}
           onCreateCharacter={createCharacterFromSceneModal}
-          onSummarize={editingScene ? () => api.summarizeScene(gameName, editingScene.id).then(r => r.summary) : undefined}
+          onSummarize={editingScene ? () => api.summarizeScene(gameName, editingScene.id).then(r => { addQuestProposals(r.quests, editingScene.title); return r.summary }) : undefined}
           onSuggestContextScenes={editingScene ? () => api.suggestContextScenes(gameName, editingScene.id).then(r => r.scenes) : undefined}
           onDelete={editingScene ? () => deleteScene(editingScene.id) : undefined}
           onClose={() => setSceneModal(null)}

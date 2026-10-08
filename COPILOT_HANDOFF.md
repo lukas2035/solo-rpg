@@ -324,7 +324,7 @@ POST /api/games/:name/characters             PUT/DELETE /api/games/:name/charact
 POST /api/games/:name/narrators              PUT/DELETE /api/games/:name/narrators/:id   ({ name, description?, aiPrompt?, image? })
 GET/POST /api/games/:name/threads            PUT/DELETE /api/games/:name/threads/:id     (ThreadInput; title+type povinné)
 GET/POST /api/games/:name/factions           PUT/DELETE /api/games/:name/factions/:id    (FactionInput; title+type povinné)
-GET/POST /api/games/:name/quests             PUT/DELETE /api/games/:name/quests/:id      (QuestInput; title+type povinné)
+GET/POST /api/games/:name/quests             PUT/DELETE /api/games/:name/quests/:id      (QuestInput; jen title povinný, type default side)
 POST /api/games/:name/assets (multipart: kind portrait|narrator|faction|background|scene, ownerName?, file)
 POST /api/games/:name/assets/from-url ({ kind, url, ownerName? })
 GET/POST /api/games/:name/scenes ({title, description?, image?, characters?, location?, ai?, aiCharacters?})
@@ -347,7 +347,7 @@ POST /api/games/:name/scenes/:id/import ({ text, resolutions? } – import odehr
   vypravěči scény) i ostatní vypravěči hry pod svým jménem; tučné neznámé jméno (≤3 slova) = dočasná postava, netučné
   `Něco: text` = pokračování předchozího záznamu (markdown). Postavy hry mluvící v přepisu, které ve scéně chybí, import do
   scény doplní. FE: ikona 📥 v `CharacterBar` → `ImportTranscriptModal` → `handleImportTranscript`.
-POST /api/games/:name/scenes/:id/summary (AI shrnutí děje scény – `ai/sceneSummary.ts`, prompt `prompts/scene-summary-prompt.md`, teplota max 0.3; nic neukládá → { summary, raw }; 400 bez záznamů)
+POST /api/games/:name/scenes/:id/summary (AI shrnutí děje scény – `ai/sceneSummary.ts`, prompt `prompts/scene-summary-prompt.md`, teplota max 0.3; nic neukládá → { summary, quests: navržené nové questy [{title, description}], raw }; 400 bez záznamů)
   Oba AI endpointy (ai i summary) připojují k system promptu `ai/rulesPrompt.ts#buildRulesSection`: obsah
   `prompts/rules-prompt.md` (`AI_RULES_PROMPT_PATH` – orákulum, hody zapsané v textu jsou fakta, AI nehází) +
   `## Herní pravidla pod příběhem` = `setup.rules` (nebo věta „žádný konkrétní systém“, když je prázdné).
@@ -389,6 +389,13 @@ GET  /vault/*  (statické soubory z aktuálně otevřené složky s hrami)
   počet replik (ze `scene_entries`, ve `Snapshot.entryCounts`). FE `utils/scenes.ts#needsSummary` = `summaryStale || (entryCount > 0 && !summary)`;
   takové scény mají ⚠️ v `SceneBar` a tlačítko „🤖 Doplnit shrnutí (n)“ je postupně shrne a uloží (`SceneModal` ukazuje „⚠️ zastaralé“).
   `updateEntity` při přepisu `fields` zapisuje i aktuální `schema_version` (`CURRENT_VERSION_BY_KIND`), jinak by se migrace v1→v2 spouštěla znovu.
+- **Návrhy nových questů ze shrnutí** – prompt dostává sekci „Existující questy (nenavrhuj znovu…)“ (`formatExistingQuests`:
+  název, stav, první řádek popisu) a má odpověď zakončit blokem ```` ```json {"quests":[{title,description}]} ```` (vždy, i prázdným).
+  `parseSummaryReply` blok oddělí (bez bloku / rozbitý JSON → jen shrnutí), vyhodí návrhy se shodným názvem (case‑insensitive)
+  s existujícím questem → `SceneSummaryResponse.quests: QuestProposal[]`. FE `QuestProposalsPanel` pod scénou (žlutý) – návrhy
+  z dialogu scény i z hromadného doplnění (`addQuestProposals`, dedup proti questům i čekajícím návrhům), „✅ Vytvořit quest“ =
+  `createQuest({title, description, status:'available'})`, „❌ Zamítnout“, ✏️ úprava před schválením. `QuestInput.type` je
+  **nepovinný** (BE default `side`, při úpravě zachová původní); `QuestModal` typ nevyžaduje. Test `test/sceneSummary.test.ts`.
 - **Výběr scén pro kontext (`SceneMeta.contextScenes`)** – vazba scéna → scéna (`links.kind = contextScenes`, frontmatter wikilinky).
   Prázdné = `contextBuilder` posílá shrnutí všech předchozích scén (od nejnovější do 30 % rozpočtu); neprázdné = jen těchto scén
   (i pozdějších). `ai/sceneContextScenes.ts#suggestContextScenes` (prompt `prompts/scene-context-prompt.md`, `AI_CONTEXT_PROMPT_PATH`,

@@ -1927,7 +1927,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     const quest: Quest = {
       id: `quest-${now}`,
       title,
-      type: input.type,
+      type: input.type ?? 'side',
       status: input.status ?? 'available',
       objectives: this.normalizeObjectives(input.objectives, []),
       questGiver: await this.normalizeCharacterRef(dir, input.questGiver ?? null),
@@ -1963,7 +1963,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     const quest: Quest = {
       ...previous,
       title,
-      type: input.type,
+      type: input.type ?? previous.type,
       status: input.status ?? previous.status,
       objectives: input.objectives ? this.normalizeObjectives(input.objectives, previous.objectives) : previous.objectives,
       questGiver: input.questGiver === undefined ? previous.questGiver : await this.normalizeCharacterRef(dir, input.questGiver),
