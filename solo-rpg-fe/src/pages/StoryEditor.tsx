@@ -108,6 +108,8 @@ export default function StoryEditor() {
   const [aiError, setAiError] = useState<string | null>(null)
   /** Nepřijatý návrh AI pro aktuální scénu (kánonem se stane až po „Přijmout“) */
   const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null)
+  /** Průběh hromadného doplňování shrnutí scén (null = neběží) */
+  const [bulkSummary, setBulkSummary] = useState<{ done: number; total: number; title: string } | null>(null)
   const [showSessionModal, setShowSessionModal] = useState(false)
   /** Stopky herního sezení (persistované v localStorage, běží i se zavřeným dialogem) */
   const sessionTimer = useSessionTimer(gameName)
@@ -886,6 +888,40 @@ export default function StoryEditor() {
 
   const handleCreateScene = () => setSceneModal({ mode: 'create' })
 
+  /** Projde všechny scény bez shrnutí, nechá je shrnout AI a výsledek rovnou uloží (scény bez záznamů přeskočí) */
+  const fillMissingSummaries = async () => {
+    if (bulkSummary) return
+    const missing = scenes.filter(s => !s.summary.trim())
+    if (missing.length === 0) return
+    if (!window.confirm(`Doplnit pomocí AI shrnutí ${missing.length === 1 ? '1 scéně' : `${missing.length} scénám`} bez shrnutí? Scény se zpracují postupně.`)) return
+    setAiError(null)
+    let filled = 0
+    let skipped = 0
+    const failed: string[] = []
+    try {
+      for (const [i, scene] of missing.entries()) {
+        setBulkSummary({ done: i, total: missing.length, title: scene.title })
+        try {
+          const { summary } = await api.summarizeScene(gameName, scene.id)
+          const saved = await api.updateScene(gameName, scene.id, { title: scene.title, summary })
+          setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))
+          filled++
+        } catch (error) {
+          // 400 = scéna bez záznamů; 503 (bez klíče) nemá smysl zkoušet dál
+          if (error instanceof api.ApiError && error.status === 400) { skipped++; continue }
+          failed.push(scene.title)
+          if (error instanceof api.ApiError && error.status === 503) {
+            setAiError(error.message)
+            return
+          }
+        }
+      }
+    } finally {
+      setBulkSummary(null)
+    }
+    if (failed.length) setAiError(`Shrnutí se nepodařilo u scén: ${failed.join(', ')} (doplněno ${filled}, přeskočeno bez záznamů ${skipped}).`)
+  }
+
   /** Submit dialogu scény: vytvoří/aktualizuje soubor scény a uloží její obrázek pod jejím názvem */
   const handleSceneSubmit = async (values: SceneFormValues) => {
     const editing = editingScene
@@ -1250,6 +1286,8 @@ export default function StoryEditor() {
         onSelect={handleSelectScene}
         onCreate={handleCreateScene}
         onEdit={(id) => setSceneModal({ mode: 'edit', id })}
+        onFillSummaries={fillMissingSummaries}
+        summaryProgress={bulkSummary}
       />
 
       {loadError && (
