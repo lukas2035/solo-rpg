@@ -89,7 +89,8 @@ describe('SuggestionService', () => {
     await storage.saveSceneEntries(G, sceneId, [...current, { id: 'p2', characterName: 'Julia KreuzovÃƒÂ¡', text: 'MezitÃƒÂ­m.', timestamp: 2 }])
     // HrÃƒÂ¡Ã„Â upravil text prvnÃƒÂ­ repliky a druhou smazal
     const edited = [{ ...s.entries[0], text: 'UpravenÃƒÂ½ text.' }]
-    const added = await service.accept(G, sceneId, s.id, edited)
+    const { entries: added, suggestion: rest } = await service.accept(G, sceneId, s.id, edited)
+    expect(rest).toBeNull()
     expect(added).toHaveLength(1)
     const entries = (await storage.getSceneEntries(G, sceneId))!
     expect(entries.map(e => e.id)).toEqual(['p1', 'p2', s.entries[0].id])
@@ -121,6 +122,29 @@ describe('SuggestionService', () => {
   it('forget zahodÃƒÂ­ stav scÃƒÂ©ny', async () => {
     await service.generate(G, sceneId)
     service.forget(G, sceneId)
+    expect(service.get(G, sceneId)).toEqual({ suggestion: null, rejectedReasons: [] })
+  })
+  it('partial accept připíše jen vybrané repliky, zbytek zůstane jako návrh; reject zbytek zahodí', async () => {
+    const s = await service.generate(G, sceneId)
+    expect(s.entries).toHaveLength(2)
+    const before = (await storage.getSceneEntries(G, sceneId))!.length
+    const first = await service.accept(G, sceneId, s.id, [{ ...s.entries[0], text: 'Jen první.' }], true)
+    expect(first.entries.map(e => e.text)).toEqual(['Jen první.'])
+    expect(first.suggestion?.id).toBe(s.id)
+    expect(first.suggestion?.entries.map(e => e.id)).toEqual([s.entries[1].id])
+    expect(service.get(G, sceneId).suggestion?.entries).toHaveLength(1)
+    expect((await storage.getSceneEntries(G, sceneId))!.length).toBe(before + 1)
+    // Zbytek odmítnout → návrh zmizí, přijaté repliky ve scéně zůstanou
+    const state = await service.reject(G, sceneId, s.id, 'druhá replika nesedí')
+    expect(state.suggestion).toBeNull()
+    expect(state.rejectedReasons).toEqual(['druhá replika nesedí'])
+    expect((await storage.getSceneEntries(G, sceneId))!.length).toBe(before + 1)
+    // Poslední replika přijatá přes partial = návrh vyřízen celý (důvody se vynulují)
+    const s2 = await service.generate(G, sceneId)
+    const a1 = await service.accept(G, sceneId, s2.id, [s2.entries[0]], true)
+    expect(a1.suggestion?.entries).toHaveLength(1)
+    const a2 = await service.accept(G, sceneId, s2.id, a1.suggestion!.entries, true)
+    expect(a2.suggestion).toBeNull()
     expect(service.get(G, sceneId)).toEqual({ suggestion: null, rejectedReasons: [] })
   })
 })

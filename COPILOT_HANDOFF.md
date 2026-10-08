@@ -277,8 +277,11 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
   scény) / `reject(reason)` / `forget`; každý krok → `storage.appendEvent` → tabulka `events` (`ai.suggestion.created|accepted|rejected`)).
   Env: `AI_CONTEXT_TOKENS` (12000), `AI_TRANSCRIPT_TOKENS` (8000). Shared: `AiSuggestion`, `AiSuggestionState`,
   `AiSuggestionAcceptRequest/Response`, `AiSuggestionRejectRequest`. Testy: `test/contextBuilder.test.ts`, `test/suggestions.test.ts`.
-- **FE návrhy:** `AiSuggestionPanel` pod `StoryPanel` – per replika select mluvčího + textarea + „✕ odebrat“; ✅ Přijmout,
-  ❌ Odmítnout… (důvod → „Odmítnout a zkusit znovu“ / „Jen odmítnout“), 🔄 Zkusit znovu, rozbalovací „kontext (n)“.
+- **FE návrhy – hodnocení po replikách:** `AiSuggestionPanel` pod `StoryPanel` ukáže vždy jen **první zbývající repliku**
+  (jako text: mluvčí + odstavec; „✏️ upravit“ přepne na select mluvčího + textarea). ✅ Přijmout (a další) → `accept` s
+  `partial: true` – BE repliku připíše a vrátí zbylé jako `suggestion` (poslední → null, teprve pak se spotřebuje brief a vynulují
+  důvody). ❌ Odmítnout… / 🔄 Zkusit znovu zahodí **tuto i všechny další** repliky (`reject`) a AI pokračuje od tohoto místa
+  (už přijaté repliky jsou ve scéně). Rozbalovací „kontext (n)“. Panel se remountuje přes `key = id návrhu : id repliky`.
   `StoryEditor`: `aiSuggestion` stav, `runAi` jen nastaví návrh, při přepnutí scény `getAiSuggestion`; accept → `resolveEntries` + append.
 - **FE:** `AiSceneModal` (zapnout/vypnout, karta vypravěče s „✏️ Prompt“/„🎭 Vybrat“, řádek na postavu s přepínačem 🧑 Já / 🤖 AI,
   „Nechat AI pokračovat“ = uložit + `runAi`), `NarratorModal` má textarea „🤖 AI prompt“, `CharacterBar` má 🤖 (cyan zvýraznění +
@@ -328,7 +331,7 @@ GET/POST /api/games/:name/scenes ({title, description?, image?, characters?, loc
 GET(záznamy)/PUT(záznamy)/PATCH(meta)/DELETE /api/games/:name/scenes/:id
 POST /api/games/:name/scenes/:id/ai  (AI vypravěč navrhne pokračování, NEUKLÁDÁ; → AiSuggestion; 503 bez klíče, 400 bez vypravěče, 502 chyba providera)
 GET  /api/games/:name/scenes/:id/ai/suggestion  (→ { suggestion | null, rejectedReasons })
-POST /api/games/:name/scenes/:id/ai/suggestions/:sug/accept ({ entries } – upravené repliky; → { entries }; 404 neaktuální návrh)
+POST /api/games/:name/scenes/:id/ai/suggestions/:sug/accept ({ entries, partial? } – upravené repliky; → { entries, suggestion: zbylý návrh | null }; partial nechá nepřijaté repliky jako návrh; 404 neaktuální návrh)
 POST /api/games/:name/scenes/:id/ai/suggestions/:sug/reject ({ reason } → AiSuggestionState; 404 neaktuální návrh)
 POST /api/games/:name/scenes/:id/context-scenes  (AI vybere předchozí scény relevantní pro scénu; → { scenes, raw }; neukládá; 400 bez předchozích scén se shrnutím)
 GET  /api/games/:name/scenes/:id/director        (→ DirectorState { pulse: CampaignPulse, brief: NarrativeBrief | null })

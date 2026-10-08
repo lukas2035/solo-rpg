@@ -84,8 +84,11 @@ export class SuggestionService {
     return { state, suggestion: state.pending }
   }
 
-  /** Přijme návrh: `entries` (hráčem upravené) připíše na konec scény; důvody odmítnutí scény se vynulují */
-  async accept(game: string, sceneId: string, suggestionId: string, entries: StoryEntry[]): Promise<StoryEntry[]> {
+  /**
+   * Přijme návrh: `entries` (hráčem upravené) připíše na konec scény. Celé přijetí vynuluje důvody odmítnutí a spotřebuje brief;
+   * `partial` nechá zbylé (nepřijaté) repliky jako návrh k dalšímu hodnocení – vrací je jako `suggestion`.
+   */
+  async accept(game: string, sceneId: string, suggestionId: string, entries: StoryEntry[], partial = false): Promise<{ entries: StoryEntry[]; suggestion: AiSuggestion | null }> {
     const { state, suggestion } = this.requirePending(game, sceneId, suggestionId)
     // Scéna se mezitím mohla změnit (hráč psal) → připojit k aktuálnímu stavu
     const current = await this.storage.getSceneEntries(game, sceneId)
@@ -93,16 +96,22 @@ export class SuggestionService {
     const ids = new Set(current.map(e => e.id))
     const toAdd = entries.filter(e => !ids.has(e.id))
     if (toAdd.length) await this.storage.saveSceneEntries(game, sceneId, [...current, ...toAdd])
-    const edited = JSON.stringify(toAdd) !== JSON.stringify(suggestion.entries)
+    const acceptedIds = new Set(entries.map(e => e.id))
+    const remaining = partial ? suggestion.entries.filter(e => !acceptedIds.has(e.id)) : []
+    const edited = JSON.stringify(toAdd) !== JSON.stringify(partial ? suggestion.entries.filter(e => acceptedIds.has(e.id)) : suggestion.entries)
     await this.storage.appendEvent(game, {
       sceneId,
       kind: 'ai.suggestion.accepted',
-      payload: { suggestionId, briefId: suggestion.briefId, raw: suggestion.raw, entries: toAdd, edited, rejectedReasons: state.rejectedReasons },
+      payload: { suggestionId, briefId: suggestion.briefId, raw: suggestion.raw, entries: toAdd, edited, partial: remaining.length > 0, remaining: remaining.length, rejectedReasons: state.rejectedReasons },
     })
+    if (remaining.length) {
+      state.pending = { ...suggestion, entries: remaining }
+      return { entries: toAdd, suggestion: state.pending }
+    }
     if (suggestion.briefId) await this.director?.consume(game, sceneId, suggestion.briefId, suggestionId)
     state.pending = null
     state.rejectedReasons = []
-    return toAdd
+    return { entries: toAdd, suggestion: null }
   }
 
   /** Odmítne návrh; neprázdný důvod se uloží a půjde do dalšího pokusu */

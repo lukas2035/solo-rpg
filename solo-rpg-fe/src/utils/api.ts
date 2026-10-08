@@ -240,12 +240,15 @@ export const generateAiSuggestion = (game: string, sceneId: string) =>
 export const getAiSuggestion = (game: string, sceneId: string) =>
   request<AiSuggestionState>('GET', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/ai/suggestion`)
 
-/** Přijme návrh – `entries` jsou (hráčem případně upravené) záznamy, které BE připíše na konec scény */
-export const acceptAiSuggestion = (game: string, sceneId: string, suggestionId: string, entries: StoryEntry[]) =>
+/**
+ * Přijme návrh – `entries` jsou (hráčem případně upravené) záznamy, které BE připíše na konec scény.
+ * `partial` = přijetí jen části (hodnocení po replikách); zbylé repliky vrátí BE jako `suggestion`.
+ */
+export const acceptAiSuggestion = (game: string, sceneId: string, suggestionId: string, entries: StoryEntry[], partial = false) =>
   request<AiSuggestionAcceptResponse>(
     'POST',
     `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/ai/suggestions/${encodeURIComponent(suggestionId)}/accept`,
-    { entries } satisfies AiSuggestionAcceptRequest,
+    { entries, partial } satisfies AiSuggestionAcceptRequest,
   )
 
 /** Odmítne návrh; neprázdný důvod dostane model při dalším pokusu */

@@ -326,10 +326,10 @@ export async function registerGameRoutes(app: FastifyInstance, vault: VaultManag
   /** Přijme návrh (záznamy případně upravené hráčem) – teprve teď se zapíše do scény */
   app.post('/api/games/:game/scenes/:scene/ai/suggestions/:suggestion/accept', async (request): Promise<AiSuggestionAcceptResponse> => {
     const { game, scene, suggestion } = SuggestionParams.parse(request.params)
-    const { entries } = AiSuggestionAcceptRequestSchema.parse(request.body)
-    const added = await suggestions.accept(game, scene, suggestion, entries)
+    const { entries, partial } = AiSuggestionAcceptRequestSchema.parse(request.body)
+    const result = await suggestions.accept(game, scene, suggestion, entries, partial ?? false)
     vault.watcher.noteOwnChange(game)
-    return { entries: added }
+    return result
   })
 
   /** Odmítne návrh; důvod (je-li) dostane model při dalším pokusu */

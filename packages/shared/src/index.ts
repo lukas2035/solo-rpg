@@ -643,15 +643,20 @@ export const AiSuggestionStateSchema = z.object({
 })
 export type AiSuggestionState = z.infer<typeof AiSuggestionStateSchema>
 
-/** Tělo `POST …/ai/suggestions/:id/accept` – záznamy k uložení (hráčem případně upravené; prázdné pole = nic nepřidat) */
+/**
+ * Tělo `POST …/ai/suggestions/:id/accept` – záznamy k uložení (hráčem případně upravené; prázdné pole = nic nepřidat).
+ * `partial: true` = přijetí jen části návrhu (hodnocení po replikách): zbylé repliky zůstanou jako návrh k dalšímu hodnocení.
+ */
 export const AiSuggestionAcceptRequestSchema = z.object({
   entries: z.array(StoryEntrySchema),
+  partial: z.boolean().optional(),
 })
 export type AiSuggestionAcceptRequest = z.infer<typeof AiSuggestionAcceptRequestSchema>
 
-/** Odpověď `accept` – záznamy připsané na konec scény (už uložené) */
+/** Odpověď `accept` – záznamy připsané na konec scény (už uložené) + zbylý návrh (null = návrh vyřízen celý) */
 export const AiSuggestionAcceptResponseSchema = z.object({
   entries: z.array(StoryEntrySchema),
+  suggestion: AiSuggestionSchema.nullable(),
 })
 export type AiSuggestionAcceptResponse = z.infer<typeof AiSuggestionAcceptResponseSchema>
 

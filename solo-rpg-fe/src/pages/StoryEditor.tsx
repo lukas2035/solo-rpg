@@ -681,23 +681,25 @@ export default function StoryEditor() {
     }
   }
 
-  /** Přijetí návrhu AI – BE záznamy (případně upravené) připíše do scény, tady je jen přidáme do stavu */
-  const handleAcceptSuggestion = async (entries: ApiStoryEntry[]) => {
+  /** Přijetí jedné repliky návrhu AI – BE ji připíše do scény a vrátí zbylé repliky jako nový stav návrhu (null = vyřízeno) */
+  const handleAcceptSuggestion = async (entry: ApiStoryEntry) => {
     if (!aiSuggestion || !currentSceneId || aiBusy) return
     const sceneId = currentSceneId
     setAiBusy(true)
     setAiError(null)
     try {
-      const result = await api.acceptAiSuggestion(gameName, sceneId, aiSuggestion.id, entries)
+      const result = await api.acceptAiSuggestion(gameName, sceneId, aiSuggestion.id, [entry], true)
       if (currentSceneIdRef.current !== sceneId) return
       const resolved = resolveEntries(result.entries, charactersRef.current, narrators)
       setCharacters(resolved.characters)
       setStoryEntries(prev => [...prev, ...resolved.entries])
       setScenes(prev => prev.map(s => (s.id === sceneId ? { ...s, summaryStale: true, entryCount: s.entryCount + result.entries.length } : s)))
-      setAiSuggestion(null)
-      // Brief se přijetím spotřeboval → puls se přepočítá z nového beatu
-      setDirectorOpenFor(null)
-      void refreshDirector(sceneId)
+      setAiSuggestion(result.suggestion)
+      if (!result.suggestion) {
+        // Brief se přijetím poslední repliky spotřeboval → puls se přepočítá z nového beatu
+        setDirectorOpenFor(null)
+        void refreshDirector(sceneId)
+      }
     } catch (error) {
       setAiError(error instanceof Error ? error.message : 'Přijetí návrhu selhalo.')
       if (error instanceof api.ApiError && error.status === 404) setAiSuggestion(null)
@@ -1473,13 +1475,13 @@ export default function StoryEditor() {
             />
           )}
           {/* Návrh AI vypravěče k přijetí / odmítnutí */}
-          {aiSuggestion && aiSuggestion.sceneId === currentSceneId && (
+          {aiSuggestion && aiSuggestion.sceneId === currentSceneId && aiSuggestion.entries.length > 0 && (
             <AiSuggestionPanel
-              key={aiSuggestion.id}
+              key={`${aiSuggestion.id}:${aiSuggestion.entries[0]?.id ?? ''}`}
               suggestion={aiSuggestion}
               speakerOptions={{ characters: displayCharacters, narrators: displayNarrators }}
               busy={aiBusy}
-              onAccept={entries => void handleAcceptSuggestion(entries)}
+              onAccept={entry => void handleAcceptSuggestion(entry)}
               onReject={(reason, regenerate) => void handleRejectSuggestion(reason, regenerate)}
               darken={brightBackground}
             />
