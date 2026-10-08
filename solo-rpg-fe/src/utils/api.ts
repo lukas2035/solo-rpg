@@ -1,5 +1,9 @@
 import type {
-  AiGenerateResponse,
+  AiSuggestion,
+  AiSuggestionAcceptRequest,
+  AiSuggestionAcceptResponse,
+  AiSuggestionRejectRequest,
+  AiSuggestionState,
   AssetKind,
   AssetResponse,
   Character,
@@ -221,11 +225,31 @@ export const deleteScene = (game: string, sceneId: string) =>
 export const importSceneTranscript = (game: string, sceneId: string, text: string, resolutions?: Record<string, string>) =>
   request<SceneImportResponse>('POST', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/import`, { text, resolutions } satisfies SceneImportRequest)
 
-// ---------- AI vypravěč ----------
+// ---------- AI vypravěč: návrh → přijmout / odmítnout ----------
 
-/** Nechá aktuálního vypravěče odpovědět (OpenRouter); vrací nové záznamy, které BE už připsal do scény */
-export const generateAiReply = (game: string, sceneId: string) =>
-  request<AiGenerateResponse>('POST', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/ai`)
+/** Nechá aktuálního vypravěče navrhnout pokračování; nic se neukládá, návrh se zobrazí k přijetí/odmítnutí */
+export const generateAiSuggestion = (game: string, sceneId: string) =>
+  request<AiSuggestion>('POST', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/ai`)
+
+/** Rozpracovaný (nepřijatý) návrh scény + nasbírané důvody odmítnutí */
+export const getAiSuggestion = (game: string, sceneId: string) =>
+  request<AiSuggestionState>('GET', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/ai/suggestion`)
+
+/** Přijme návrh – `entries` jsou (hráčem případně upravené) záznamy, které BE připíše na konec scény */
+export const acceptAiSuggestion = (game: string, sceneId: string, suggestionId: string, entries: StoryEntry[]) =>
+  request<AiSuggestionAcceptResponse>(
+    'POST',
+    `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/ai/suggestions/${encodeURIComponent(suggestionId)}/accept`,
+    { entries } satisfies AiSuggestionAcceptRequest,
+  )
+
+/** Odmítne návrh; neprázdný důvod dostane model při dalším pokusu */
+export const rejectAiSuggestion = (game: string, sceneId: string, suggestionId: string, reason: string) =>
+  request<AiSuggestionState>(
+    'POST',
+    `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/ai/suggestions/${encodeURIComponent(suggestionId)}/reject`,
+    { reason } satisfies AiSuggestionRejectRequest,
+  )
 
 /** Nechá AI shrnout děj scény (nic neukládá – výsledek se vloží do pole „Shrnutí“ v dialogu scény) */
 export const summarizeScene = (game: string, sceneId: string) =>

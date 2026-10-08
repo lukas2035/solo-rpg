@@ -18,9 +18,11 @@ import {
   LoreInputSchema,
   GameSessionInputSchema,
   BackupGameRequestSchema,
+  AiSuggestionAcceptRequestSchema,
+  AiSuggestionRejectRequestSchema,
   isValidGameName,
 } from '@solo-rpg/shared'
-import type { RulesPromptResponse } from '@solo-rpg/shared'
+import type { AiSuggestion, AiSuggestionAcceptResponse, AiSuggestionState, RulesPromptResponse } from '@solo-rpg/shared'
 import { ConflictError, NotFoundError, ValidationError } from '../vault/StorageProvider.js'
 import type { VaultManager } from '../vault/VaultManager.js'
 import { backupGameFolder } from '../vault/backup.js'
@@ -28,7 +30,7 @@ import type { ObsidianExporter } from '../storage/ObsidianExporter.js'
 import { DialogBusyError } from '../system/dialogs.js'
 import type { Config } from '../config.js'
 import { AiError } from '../ai/types.js'
-import { generateSceneReply } from '../ai/sceneAi.js'
+import { SuggestionService } from '../narrative/suggestions.js'
 import { summarizeScene } from '../ai/sceneSummary.js'
 import { buildRulesSection } from '../ai/rulesPrompt.js'
 import { importSceneTranscript } from '../vault/sceneImport.js'
@@ -47,6 +49,7 @@ const QuestParams = GameParams.extend({ quest: z.string().min(1) })
 const LocationParams = GameParams.extend({ location: z.string().min(1) })
 const LoreParams = GameParams.extend({ lore: z.string().min(1) })
 const SessionParams = GameParams.extend({ session: z.string().min(1) })
+const SuggestionParams = SceneParams.extend({ suggestion: z.string().min(1) })
 
 function sendError(reply: FastifyReply, error: unknown): FastifyReply {
   if (error instanceof z.ZodError) return reply.code(400).send({ error: z.prettifyError(error) })
@@ -70,6 +73,7 @@ function sendError(reply: FastifyReply, error: unknown): FastifyReply {
 
 export async function registerGameRoutes(app: FastifyInstance, vault: VaultManager, config: Config, exporter: ObsidianExporter): Promise<void> {
   app.setErrorHandler((error, _request, reply) => sendError(reply, error))
+  const suggestions = new SuggestionService(vault.storage, config)
 
   // Vlastní zápisy BE do složky hry nemají vyvolat hlášení „změna ve vaultu“ – utišit watcher před i po zpracování
   const noteOwnChange = (request: { method: string; params: unknown }) => {
@@ -288,6 +292,7 @@ export async function registerGameRoutes(app: FastifyInstance, vault: VaultManag
   app.delete('/api/games/:game/scenes/:scene', async (request, reply) => {
     const { game, scene } = SceneParams.parse(request.params)
     await vault.storage.deleteScene(game, scene)
+    suggestions.forget(game, scene)
     return reply.code(204).send()
   })
 
@@ -298,15 +303,35 @@ export async function registerGameRoutes(app: FastifyInstance, vault: VaultManag
     return importSceneTranscript(vault.storage, game, scene, text, resolutions)
   })
 
-  // ---------- AI vypravěč ----------
+  // ---------- AI vypravěč: návrh → přijmout / odmítnout ----------
 
-  /** Nechá aktuálního vypravěče odpovědět přes OpenRouter; nové záznamy se rovnou uloží do scény */
-  app.post('/api/games/:game/scenes/:scene/ai', async (request) => {
+  /** Nechá aktuálního vypravěče navrhnout pokračování; nic se neukládá, FE zobrazí návrh k přijetí/odmítnutí */
+  app.post('/api/games/:game/scenes/:scene/ai', async (request): Promise<AiSuggestion> => {
     const { game, scene } = SceneParams.parse(request.params)
-    const result = await generateSceneReply(vault.storage, config, game, scene, request.log)
-    // Zápis proběhl až po dlouhém volání modelu – utišit watcher znovu těsně před odpovědí
+    return suggestions.generate(game, scene, request.log)
+  })
+
+  /** Rozpracovaný návrh scény (po přepnutí scény / obnovení stránky) */
+  app.get('/api/games/:game/scenes/:scene/ai/suggestion', async (request): Promise<AiSuggestionState> => {
+    const { game, scene } = SceneParams.parse(request.params)
+    if (!(await vault.storage.getGame(game))) throw new NotFoundError(`Hra „${game}“ neexistuje.`)
+    return suggestions.get(game, scene)
+  })
+
+  /** Přijme návrh (záznamy případně upravené hráčem) – teprve teď se zapíše do scény */
+  app.post('/api/games/:game/scenes/:scene/ai/suggestions/:suggestion/accept', async (request): Promise<AiSuggestionAcceptResponse> => {
+    const { game, scene, suggestion } = SuggestionParams.parse(request.params)
+    const { entries } = AiSuggestionAcceptRequestSchema.parse(request.body)
+    const added = await suggestions.accept(game, scene, suggestion, entries)
     vault.watcher.noteOwnChange(game)
-    return result
+    return { entries: added }
+  })
+
+  /** Odmítne návrh; důvod (je-li) dostane model při dalším pokusu */
+  app.post('/api/games/:game/scenes/:scene/ai/suggestions/:suggestion/reject', async (request): Promise<AiSuggestionState> => {
+    const { game, scene, suggestion } = SuggestionParams.parse(request.params)
+    const { reason } = AiSuggestionRejectRequestSchema.parse(request.body)
+    return suggestions.reject(game, scene, suggestion, reason)
   })
 
   // AI shrnutí děje scény – nic neukládá, FE výsledek vloží do dialogu scény

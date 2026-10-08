@@ -1,4 +1,5 @@
 import type { Character, Narrator, SceneMeta, StoryEntry } from '@solo-rpg/shared'
+import { transcriptCutoff } from '../narrative/contextBuilder.js'
 import type { ChatMessage } from './types.js'
 
 /**
@@ -9,8 +10,10 @@ import type { ChatMessage } from './types.js'
  *     (`prompts/rules-prompt.md` + popis pravidel hry) – system zpráva
  *  2. postavy hráče a postavy hrané AI (s popisem, pokud je)
  *  3. popis scény (+ volitelný doplňující popis situace ze scény `aiPrompt`)
- *  4. celý dosavadní průběh scény ve formátu „kopírovat do schránky“ (`**Jméno**: text`)
+ *  3b. kontext kampaně vybraný `narrative/contextBuilder.ts` (shrnutí předchozích scén, lokace, questy, nitě, frakce, lore, tajemství)
+ *  4. dosavadní průběh scény ve formátu „kopírovat do schránky“ (`**Jméno**: text`), ořezaný na rozpočet tokenů od nejstarších
  *  5. doplňkový prompt aktuálního vypravěče
+ *  6. důvody odmítnutí předchozích návrhů ve scéně (jsou-li)
  * Odpověď modelu = řádky `Jméno: text`, které se převedou na záznamy scény.
  */
 
@@ -25,6 +28,12 @@ export interface ScenePromptContext {
   /** Postavy scény hrané AI */
   aiCharacters: Character[]
   entries: StoryEntry[]
+  /** Hotové sekce kontextu kampaně z `narrative/contextBuilder.ts` (vloží se mezi scénu a přepis) */
+  contextSections?: string[]
+  /** Důvody, proč hráč odmítl předchozí návrhy v této scéně – model se jim má vyhnout */
+  rejectedReasons?: string[]
+  /** Rozpočet tokenů pro přepis scény; starší záznamy nad rozpočet se vynechají */
+  transcriptBudgetTokens?: number
 }
 
 /** Zobrazované jméno mluvčího – stejné jako v exportu do schránky (nickname postavy / jméno vypravěče) */
@@ -88,10 +97,20 @@ export function buildMessages(ctx: ScenePromptContext): ChatMessage[] {
 
   if (scene.aiPrompt.trim()) sections.push(`## Doplňující popis situace (pro vypravěče)\n${scene.aiPrompt.trim()}`)
 
-  const transcript = formatTranscript(entries, [...playerCharacters, ...aiCharacters], narrator)
-  sections.push(`## Dosavadní průběh scény\n${transcript || '(scéna zatím nezačala – uveď ji úvodním popisem)'}`)
+  if (ctx.contextSections?.length) sections.push(...ctx.contextSections)
+
+  const allCharacters = [...playerCharacters, ...aiCharacters]
+  const cutoff = ctx.transcriptBudgetTokens ? transcriptCutoff(entries.map(e => e.text), ctx.transcriptBudgetTokens) : 0
+  const transcript = formatTranscript(entries.slice(cutoff), allCharacters, narrator)
+  const transcriptNote = cutoff > 0 ? `(starších ${cutoff} záznamů vynecháno – viz shrnutí výše)\n\n` : ''
+  sections.push(`## Dosavadní průběh scény\n${transcriptNote}${transcript || '(scéna zatím nezačala – uveď ji úvodním popisem)'}`)
 
   if (narrator.aiPrompt.trim()) sections.push(`## Pokyny vypravěče „${narrator.name}“\n${narrator.aiPrompt.trim()}`)
+
+  const reasons = (ctx.rejectedReasons ?? []).map(r => r.trim()).filter(Boolean)
+  if (reasons.length) {
+    sections.push(`## Odmítnuté předchozí návrhy pokračování\nHráč odmítl předchozí návrhy z těchto důvodů – jsou to fakta o světě, respektuj je a napiš jiné pokračování:\n${reasons.map(r => `- ${r}`).join('\n')}`)
+  }
 
   sections.push('## Úkol\nNavaž na poslední záznam a pokračuj ve scéně. Odpověz pouze řádky ve formátu `Jméno: text`.')
 

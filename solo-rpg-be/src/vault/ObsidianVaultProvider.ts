@@ -2417,4 +2417,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     await this.writeSessions(dir, existing.filter(s => s.id !== id))
     await this.touchGame(dir)
   }
+
+  /** Vault je jen cíl exportu / zdroj importu – log událostí nevede */
+  async appendEvent(): Promise<void> {}
 }

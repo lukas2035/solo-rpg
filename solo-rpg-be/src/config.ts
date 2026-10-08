@@ -32,6 +32,10 @@ export interface Config {
     /** Limit délky odpovědi modelu (tokeny) */
     maxTokens: number
     temperature: number
+    /** Rozpočet tokenů pro kontext kampaně v promptu (nitě, questy, frakce, lokace, lore, shrnutí scén) – AI_CONTEXT_TOKENS */
+    contextTokens: number
+    /** Rozpočet tokenů pro přepis scény v promptu (ořezává se od nejstarších záznamů) – AI_TRANSCRIPT_TOKENS */
+    transcriptTokens: number
     /** Logovat celý odeslaný prompt a surovou odpověď modelu (AI_DEBUG=1) */
     debug: boolean
   }
@@ -57,6 +61,14 @@ export function loadConfig(): Config {
   const rulesPromptPath = path.resolve(process.cwd(), process.env.AI_RULES_PROMPT_PATH ?? 'prompts/rules-prompt.md')
   const maxTokens = Number(process.env.AI_MAX_TOKENS ?? 1500)
   const temperature = Number(process.env.AI_TEMPERATURE ?? 0.9)
+  const contextTokens = Number(process.env.AI_CONTEXT_TOKENS ?? 12000)
+  const transcriptTokens = Number(process.env.AI_TRANSCRIPT_TOKENS ?? 8000)
   const debug = /^(1|true|yes)$/i.test(process.env.AI_DEBUG ?? '')
-  return { vaultPath, port, databaseUrl, dataDir, ai: { provider, apiKey, model, promptPath, summaryPromptPath, rulesPromptPath, maxTokens, temperature, debug } }
+  return {
+    vaultPath,
+    port,
+    databaseUrl,
+    dataDir,
+    ai: { provider, apiKey, model, promptPath, summaryPromptPath, rulesPromptPath, maxTokens, temperature, contextTokens, transcriptTokens, debug },
+  }
 }

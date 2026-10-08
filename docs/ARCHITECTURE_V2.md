@@ -194,6 +194,7 @@ AI **nikdy nezapisuje přímo**.
 
 ### 4.4 Kontext pro AI (největší technické riziko)
 - `ContextBuilder` nad **in‑memory indexem hry** (načíst jednou, invalidovat při zápisu), ne čtení z úložiště per request.
+  *(Krok 2 zatím staví graf z `getGame()` per request – čistá funkce nad `GameDetail`; index až když bude výkon bolet.)*
 - Výběr: entity scény → graf do hloubky N → váha relevance (hrany, recency, otevřené nitě) → token budget → ořez.
 - Do promptu **ID i jméno** (`Julia Kreuzová (id: npc_julia)`); ve structured outputu vyžadovat ID.
 - Resolver zpět: `id → přesné jméno → alias → fuzzy shoda s potvrzením uživatele → nová entita`.
@@ -225,19 +226,29 @@ FE: `utils/api.ts` přejde na generické entity endpointy; `vaultPath.ts`, `Vaul
 
 ## 6. Pořadí prací (nic nebourat najednou)
 
-> **Stav (6. 10. 2026):** krok 1 je implementovaný (`solo-rpg-be/src/storage/*`: schéma, `PostgresProvider` nad v1
+> **Stav (8. 10. 2026):** krok 1 i krok 2 jsou implementované.
+> *Krok 1* (`solo-rpg-be/src/storage/*`: schéma, `PostgresProvider` nad v1
 > rozhraním `StorageProvider`, `FsAssetStore`, `VaultImporter`, `ObsidianExporter`, migrace v `solo-rpg-be/drizzle/`,
 > testy `solo-rpg-be/test/`, `scripts/backup.ps1`). FE beze změny – stále mluví jmény; překlad jméno ↔ id dělá
 > `PostgresProvider` (`Snapshot`). `ObsidianVaultProvider` zůstává jen jako čtečka pro import a zapisovač pro export.
 > Složka vaultu v UI („Změnit složku“) teď znamená *kam exportovat*. `GameWatcher` je nahrazen `NoopNotifier` (SSE jen heartbeat).
 > Záloha/obnova ověřena (včetně obnovy do úplně prázdné DB). Obě hry importované z `c:\Lukas\ttrpg games` (vault zůstává jako v1 záloha).
-> **Teď:** Lukáš několik dní play‑testuje obě hry ve FE nad Postgresem – případné odchylky od chování v1 opravit před krokem 2.
-> Další krok: 2 (zahájit krátkým návrhem + `ask_user` na sporné body: ukládat reject‑důvod už teď?, token budget, streaming).
+> *Krok 2* (`solo-rpg-be/src/narrative/contextBuilder.ts` + `suggestions.ts`, routy `…/scenes/:id/ai*`, FE `AiSuggestionPanel`):
+> AI vypravěč už **neukládá rovnou**, vrací `AiSuggestion`, kterou hráč v panelu pod scénou upraví (text, mluvčí, smazat řádek) a
+> přijme / odmítne (s důvodem → důvody jdou do dalšího pokusu, max 5) / zkusí znovu. Stav návrhu je in‑memory per scéna
+> (restart BE = ztráta, FE si ho načte přes GET). Každý krok (`ai.suggestion.created/accepted/rejected`) je první zapisovač do `events`.
+> `ContextBuilder` = čistá funkce nad `GameDetail` (graf podle jmen, BFS hloubka 2 od postav + lokace scény, skóre vzdálenost/recency/stav,
+> token budget `AI_CONTEXT_TOKENS` 12k při 3,5 zn/token, 30 % na shrnutí předchozích scén, tajemství v oddělené sekci
+> „Tajemství (hráč nezná)“, entity v promptu s `(id: …)`), přepis ořezaný od nejstarších (`AI_TRANSCRIPT_TOKENS` 8k).
+> Rozhodnutí z `ask_user`: bez streamingu; reject‑důvod se zatím neváže na entity (až krok 4); žádný in‑memory index hry
+> (stačí `getGame` per request – řeší se, až to bude bolet). Testy: `test/contextBuilder.test.ts` (bez DB), `test/suggestions.test.ts` (Postgres, AI mock).
+> **Teď:** play‑test kroku 2 s reálným Mistralem – ověřit, že delší prompt (kontext + tajemství + odmítnuté návrhy) nezhorší
+> kvalitu odpovědí, doladit váhy skóre v `contextBuilder.ts`. Další krok: 3 (Director v1) – začít návrhem `CampaignPulse` a tabulek + `ask_user`.
 
 1. **Model + úložiště**: `shared` schémata (Entity/Link/Event/Brief/Suggestion/Patch, per‑kind Zod + verze), Drizzle schéma,
    `docker-compose.yml`, `FsAssetStore`, **importér ze stávajícího vaultu** (ať nepřijdeš o hry; mapování je v
    `COPILOT_HANDOFF.md` § Layout vaultu), `ObsidianExporter`, `scripts\backup.ps1`. FE přepnout na nové API při zachování UI.
-2. **Smyčka Suggestion/Accept/Reject + ContextBuilder** na *dnešním* scénovém módu – rychlá výhra, otestuje UX.
+2. ~~**Smyčka Suggestion/Accept/Reject + ContextBuilder** na *dnešním* scénovém módu~~ – hotovo (viz Stav).
 3. **Director v1**: `CampaignPulse` + 3–4 tabulky + `NarrativeBrief` + rules adapter (1–5 ↔ DC).
 4. **Extrakce → Patch → events**, diff UI, resolver jmen, reject‑reason → constraint.
 5. Příprava na SaaS: auth, metering tokenů per uživatel, kvóty assetů, eager migrace, aplikační export/import hry, `S3AssetStore` (R2), billing.

@@ -267,9 +267,19 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
   z `entries.narratorName`; sekce Vypravěč v promptu na přepnutí upozorní, parser tyto řádky uloží pod aktuálního vypravěče),
   postava podle celého jména či nicku, řádky bez mluvčího =
   pokračování (markdown), code fence se odstraní, „neznámé jméno“ jen ≤ 3 slova bez uvozovek, jinak pokračování),
-  `sceneAi.ts` (`generateSceneReply`: getGame → aktuální vypravěč (400 bez něj) → postavy scény rozdělené podle `aiCharacters`
-  → entries → prompt → OpenRouter → parse → **připojí k aktuálnímu stavu scény** (znovu načte, kdyby hráč mezitím psal) →
-  vrací `{ entries: nové, raw }`). Route `POST /api/games/:game/scenes/:scene/ai` (+ `watcher.noteOwnChange` těsně před odpovědí).
+  `sceneAi.ts` (`draftSceneReply`: getGame → aktuální vypravěč (400 bez něj) → postavy scény rozdělené podle `aiCharacters`
+  → entries → `buildSceneContext` → prompt (+ odmítnuté důvody) → provider → parse → vrací `{ entries, raw, context }` – **neukládá**).
+- **Návrhy AI (krok 2 v2, `src/narrative/`):** `contextBuilder.ts` (`buildSceneContext(detail, scene, {budgetTokens})` – graf
+  podle jmen, BFS hloubka 2 od postav + lokace scény, skóre vzdálenost/recency/stav, sekce Shrnutí předchozích scén (30 % budgetu)
+  → Lokace → Questy → Nitě → Frakce → Postavy mimo scénu → Lore → „Tajemství (hráč nezná)“ (`secrets`, `revealCondition`);
+  entity s `(id: …)`; `transcriptCutoff` ořeže přepis od nejstarších). `suggestions.ts` (`SuggestionService` – in‑memory stav per
+  `hra::scéna` {pending, rejectedReasons ≤ 5}; `generate` / `get` / `accept(entries)` (dedup podle id, připojí za aktuální stav
+  scény) / `reject(reason)` / `forget`; každý krok → `storage.appendEvent` → tabulka `events` (`ai.suggestion.created|accepted|rejected`)).
+  Env: `AI_CONTEXT_TOKENS` (12000), `AI_TRANSCRIPT_TOKENS` (8000). Shared: `AiSuggestion`, `AiSuggestionState`,
+  `AiSuggestionAcceptRequest/Response`, `AiSuggestionRejectRequest`. Testy: `test/contextBuilder.test.ts`, `test/suggestions.test.ts`.
+- **FE návrhy:** `AiSuggestionPanel` pod `StoryPanel` – per replika select mluvčího + textarea + „✕ odebrat“; ✅ Přijmout,
+  ❌ Odmítnout… (důvod → „Odmítnout a zkusit znovu“ / „Jen odmítnout“), 🔄 Zkusit znovu, rozbalovací „kontext (n)“.
+  `StoryEditor`: `aiSuggestion` stav, `runAi` jen nastaví návrh, při přepnutí scény `getAiSuggestion`; accept → `resolveEntries` + append.
 - **FE:** `AiSceneModal` (zapnout/vypnout, karta vypravěče s „✏️ Prompt“/„🎭 Vybrat“, řádek na postavu s přepínačem 🧑 Já / 🤖 AI,
   „Nechat AI pokračovat“ = uložit + `runAi`), `NarratorModal` má textarea „🤖 AI prompt“, `CharacterBar` má 🤖 (cyan zvýraznění +
   tečka při zapnuté AI, pulz při generování) a odznak „🤖 AI“ + cyan rámeček u AI postav (`DisplayCharacter.ai`), `InputArea`
@@ -316,7 +326,10 @@ POST /api/games/:name/assets (multipart: kind portrait|narrator|faction|backgrou
 POST /api/games/:name/assets/from-url ({ kind, url, ownerName? })
 GET/POST /api/games/:name/scenes ({title, description?, image?, characters?, location?, ai?, aiCharacters?})
 GET(záznamy)/PUT(záznamy)/PATCH(meta)/DELETE /api/games/:name/scenes/:id
-POST /api/games/:name/scenes/:id/ai  (AI vypravěč odpoví a záznamy uloží; → { entries, raw }; 503 bez klíče, 400 bez vypravěče, 502 chyba OpenRouteru)
+POST /api/games/:name/scenes/:id/ai  (AI vypravěč navrhne pokračování, NEUKLÁDÁ; → AiSuggestion; 503 bez klíče, 400 bez vypravěče, 502 chyba providera)
+GET  /api/games/:name/scenes/:id/ai/suggestion  (→ { suggestion | null, rejectedReasons })
+POST /api/games/:name/scenes/:id/ai/suggestions/:sug/accept ({ entries } – upravené repliky; → { entries }; 404 neaktuální návrh)
+POST /api/games/:name/scenes/:id/ai/suggestions/:sug/reject ({ reason } → AiSuggestionState; 404 neaktuální návrh)
 POST /api/games/:name/scenes/:id/import ({ text, resolutions? } – import odehraného přepisu, `vault/sceneImport.ts`; → { entries, addedCharacters, ambiguous }; 400 prázdný/nerozpoznaný text)
   Přepis `**Jméno**: text` / `**Jméno:** text` (tučné nepovinné) parsuje `ai/scenePrompt.ts#parseSpeakerLines` (společné jádro
   s `parseAiReply`) s volbou `unknownSpeaker: 'bold-character'` a vlastním `matchCharacter`: celé jméno → jednoznačné; jinak
@@ -362,7 +375,7 @@ GET  /vault/*  (statické soubory z aktuálně otevřené složky s hrami)
 - FE: `SceneModal` má textarea „Shrnutí děje scény“ + tlačítko „🤖 Shrnout pomocí AI“ (jen u existující scény, prop
   `onSummarize`); výsledek se vloží do pole a uloží až „Uložit“ (`api.summarizeScene`). Při neprázdném poli se ptá na přepsání.
 - Ověřeno reálným voláním OpenRouteru (Mistral Large): odstavec + Klíčové body + Otevřené otázky podle promptu.
-- Nápad na příště: shrnutí předchozích scén přidat do promptu AI vypravěče (`scenePrompt.ts`) jako kontext kampaně.
+- ~~Nápad na příště: shrnutí předchozích scén přidat do promptu AI vypravěče~~ – hotovo v kroku 2 v2 (`contextBuilder.ts`).
 
 ### Ověřeno
 - `npm.cmd run build` (shared, BE, FE) prochází; `npm.cmd run lint` – jen 1 pre-existující warning v `InputArea.tsx`.
@@ -396,10 +409,11 @@ cd c:\development\solo-rpg
 npm.cmd run dev          # BE http://127.0.0.1:3001 + FE http://localhost:5173
 ```
 
-## 5. Co je DALŠÍ na řadě (Lukáš ještě nevybral, zeptej se)
-1. **AI vypravěč – další kroky:** ověřit s reálným klíčem OpenRouteru a doladit prompt/parser; SSE streaming odpovědi;
-   `ModelRouter` (přepínání modelů, mature flag); AI context builder pro nitě/frakce/questy/lokace/lore (oddělit `description`
-   od `secrets` – tajemství zná jen AI vypravěč); strukturované návrhy změn cílů/stavu questů a nití po scéně.
+## 5. Co je DALŠÍ na řadě
+**Řídí se `docs/ARCHITECTURE_V2.md` §6** – kroky 1 a 2 hotové, další je krok 3 (Director v1). Níže starší v1 nápady, část už pokrytá:
+1. **AI vypravěč – další kroky:** ~~AI context builder pro nitě/frakce/questy/lokace/lore (oddělit `description` od `secrets`)~~ hotovo (krok 2);
+   play‑test kroku 2 s reálným Mistralem a doladění vah v `contextBuilder.ts`; SSE streaming odpovědi;
+   `ModelRouter` (přepínání modelů, mature flag); strukturované návrhy změn cílů/stavu questů a nití po scéně (krok 4).
 2. **Další typy poznámek ve vaultu:** lokace (`locations/*.md`) – vazby na nitě, frakce (sídlo `headquarters`, území) a questy
    (přidat pole + hooky rename/delete jako u postav/scén). Rozšíření postav (typ PC/NPC, vztahy, backlinky „frakce/questy postavy“).
    **Quests – další krok:** vazba scéna → quest (Related Scenes), AI návrhy změn cílů/stavu po scéně (strukturované akce).

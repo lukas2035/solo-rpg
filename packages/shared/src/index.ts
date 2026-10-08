@@ -584,13 +584,48 @@ export type AssetResponse = z.infer<typeof AssetResponseSchema>
 export const ApiErrorSchema = z.object({ error: z.string() })
 export type ApiError = z.infer<typeof ApiErrorSchema>
 
-/** Odpověď `POST /api/games/:game/scenes/:scene/ai` – záznamy, které AI připsala na konec scény (už uložené ve vaultu) */
-export const AiGenerateResponseSchema = z.object({
+/**
+ * Návrh AI vypravěče (`POST /api/games/:game/scenes/:scene/ai`). Nic se neukládá – záznamy se stanou kánonem až
+ * po `accept` (hráč je může před přijetím upravit), `reject` s důvodem je pošle do dalšího pokusu.
+ */
+export const AiSuggestionSchema = z.object({
+  id: z.string().min(1),
+  sceneId: z.string().min(1),
   entries: z.array(StoryEntrySchema),
   /** Surová odpověď modelu (pro ladění promptu) */
   raw: z.string(),
+  /** Důvody odmítnutí předchozích návrhů ve scéně, které model při tomto pokusu dostal */
+  rejectedReasons: z.array(z.string()),
+  /** Stručně co z kampaně šlo do kontextu (pro ladění: `Nit: Zrada v cechu (thr_…)`) */
+  contextIncluded: z.array(z.string()),
+  createdAt: z.number(),
 })
-export type AiGenerateResponse = z.infer<typeof AiGenerateResponseSchema>
+export type AiSuggestion = z.infer<typeof AiSuggestionSchema>
+
+/** Odpověď `GET …/ai/suggestion` – rozpracovaný (nepřijatý) návrh pro scénu, pokud existuje */
+export const AiSuggestionStateSchema = z.object({
+  suggestion: AiSuggestionSchema.nullable(),
+  rejectedReasons: z.array(z.string()),
+})
+export type AiSuggestionState = z.infer<typeof AiSuggestionStateSchema>
+
+/** Tělo `POST …/ai/suggestions/:id/accept` – záznamy k uložení (hráčem případně upravené; prázdné pole = nic nepřidat) */
+export const AiSuggestionAcceptRequestSchema = z.object({
+  entries: z.array(StoryEntrySchema),
+})
+export type AiSuggestionAcceptRequest = z.infer<typeof AiSuggestionAcceptRequestSchema>
+
+/** Odpověď `accept` – záznamy připsané na konec scény (už uložené) */
+export const AiSuggestionAcceptResponseSchema = z.object({
+  entries: z.array(StoryEntrySchema),
+})
+export type AiSuggestionAcceptResponse = z.infer<typeof AiSuggestionAcceptResponseSchema>
+
+/** Tělo `POST …/ai/suggestions/:id/reject` – důvod odmítnutí (prázdný = jen zahodit) */
+export const AiSuggestionRejectRequestSchema = z.object({
+  reason: z.string().trim().max(2000),
+})
+export type AiSuggestionRejectRequest = z.infer<typeof AiSuggestionRejectRequestSchema>
 
 /** Odpověď `POST /api/games/:game/scenes/:scene/summary` – AI shrnutí děje scény (neukládá se, FE ho vloží do dialogu scény) */
 export const SceneSummaryResponseSchema = z.object({

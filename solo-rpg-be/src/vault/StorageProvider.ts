@@ -70,6 +70,16 @@ export interface StorageProvider {
   createSession(name: string, input: GameSessionInput): Promise<GameSession>
   updateSession(name: string, sessionId: string, input: GameSessionInput): Promise<GameSession>
   deleteSession(name: string, sessionId: string): Promise<void>
+
+  /** Neměnný log událostí hry (AI návrhy, později patche stavu) – viz tabulka `events` */
+  appendEvent(name: string, event: GameEventInput): Promise<void>
+}
+
+export interface GameEventInput {
+  sceneId: string | null
+  /** Druh události, např. `ai.suggestion.accepted` */
+  kind: string
+  payload: unknown
 }
 
 export class NotFoundError extends Error {}

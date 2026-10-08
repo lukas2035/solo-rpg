@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Character, CharacterInput, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, Quest, QuestInput, QuestStatus, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
+import type { AiSuggestion, Character, CharacterInput, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, Quest, QuestInput, QuestStatus, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
 import { OPEN_THREAD_STATUSES, locationPath } from '@solo-rpg/shared'
 import CharacterBar from '../components/CharacterBar'
 import StoryPanel from '../components/StoryPanel'
@@ -10,6 +10,7 @@ import FloatingPortrait from '../components/FloatingPortrait'
 import NarratorPickerModal from '../components/NarratorPickerModal'
 import NarratorModal, { type NarratorFormValues } from '../components/NarratorModal'
 import AiSceneModal, { type AiSceneSettings } from '../components/AiSceneModal'
+import AiSuggestionPanel from '../components/AiSuggestionPanel'
 import RulesModal, { type RulesFormValues } from '../components/RulesModal'
 import ImportTranscriptModal from '../components/ImportTranscriptModal'
 import SessionModal from '../components/SessionModal'
@@ -105,6 +106,8 @@ export default function StoryEditor() {
   /** AI právě generuje odpověď (jen jedna najednou) */
   const [aiBusy, setAiBusy] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
+  /** Nepřijatý návrh AI pro aktuální scénu (kánonem se stane až po „Přijmout“) */
+  const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null)
   const [showSessionModal, setShowSessionModal] = useState(false)
   /** Stopky herního sezení (persistované v localStorage, běží i se zavřeným dialogem) */
   const sessionTimer = useSessionTimer(gameName)
@@ -543,18 +546,16 @@ export default function StoryEditor() {
     charactersRef.current = characters
   }, [currentSceneId, characters])
 
-  /** Nechá AI vypravěče pokračovat ve scéně (po dokončení rozpracovaného uložení); nové záznamy BE už uložil, tady je jen přidáme do stavu */
+  /** Nechá AI vypravěče navrhnout pokračování scény (po dokončení rozpracovaného uložení); návrh se zobrazí k přijetí, nic se neukládá */
   const runAi = useCallback(async (sceneId: string): Promise<void> => {
     if (aiBusy) return
     setAiBusy(true)
     setAiError(null)
     try {
       await pendingSaveRef.current
-      const result = await api.generateAiReply(gameName, sceneId)
+      const suggestion = await api.generateAiSuggestion(gameName, sceneId)
       if (currentSceneIdRef.current !== sceneId) return
-      const resolved = resolveEntries(result.entries, charactersRef.current, narrators)
-      setCharacters(resolved.characters)
-      setStoryEntries(prev => [...prev, ...resolved.entries])
+      setAiSuggestion(suggestion)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Odpověď AI selhala.'
       setAiError(message)
@@ -562,7 +563,55 @@ export default function StoryEditor() {
     } finally {
       setAiBusy(false)
     }
-  }, [aiBusy, gameName, narrators, resolveEntries])
+  }, [aiBusy, gameName])
+
+  // Při přepnutí scény načíst její rozpracovaný návrh (přežije obnovení stránky, ne restart BE); panel se zobrazí jen pro aktuální scénu
+  useEffect(() => {
+    if (!currentSceneId) return
+    let cancelled = false
+    api.getAiSuggestion(gameName, currentSceneId)
+      .then(state => { if (!cancelled) setAiSuggestion(state.suggestion) })
+      .catch(() => { /* bez návrhu */ })
+    return () => { cancelled = true }
+  }, [gameName, currentSceneId])
+
+  /** Přijetí návrhu AI – BE záznamy (případně upravené) připíše do scény, tady je jen přidáme do stavu */
+  const handleAcceptSuggestion = async (entries: ApiStoryEntry[]) => {
+    if (!aiSuggestion || !currentSceneId || aiBusy) return
+    const sceneId = currentSceneId
+    setAiBusy(true)
+    setAiError(null)
+    try {
+      const result = await api.acceptAiSuggestion(gameName, sceneId, aiSuggestion.id, entries)
+      if (currentSceneIdRef.current !== sceneId) return
+      const resolved = resolveEntries(result.entries, charactersRef.current, narrators)
+      setCharacters(resolved.characters)
+      setStoryEntries(prev => [...prev, ...resolved.entries])
+      setAiSuggestion(null)
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : 'Přijetí návrhu selhalo.')
+      if (error instanceof api.ApiError && error.status === 404) setAiSuggestion(null)
+    } finally {
+      setAiBusy(false)
+    }
+  }
+
+  /** Odmítnutí návrhu AI – důvod jde do dalšího pokusu; volitelně hned vygenerovat nový */
+  const handleRejectSuggestion = async (reason: string, regenerate: boolean) => {
+    if (!aiSuggestion || !currentSceneId || aiBusy) return
+    const sceneId = currentSceneId
+    setAiError(null)
+    try {
+      await api.rejectAiSuggestion(gameName, sceneId, aiSuggestion.id, reason)
+    } catch (error) {
+      if (!(error instanceof api.ApiError && error.status === 404)) {
+        setAiError(error instanceof Error ? error.message : 'Odmítnutí návrhu selhalo.')
+        return
+      }
+    }
+    setAiSuggestion(null)
+    if (regenerate) runAi(sceneId).catch(() => { /* chyba je v aiError */ })
+  }
 
   /** Import odehraného přepisu: BE záznamy uložil (a případně doplnil postavy do scény), tady je jen přidáme do stavu */
   const handleImportTranscript = async (text: string, resolutions?: Record<string, string>) => {
@@ -1250,6 +1299,18 @@ export default function StoryEditor() {
             onEntrySpeakerChange={handleEntrySpeakerChange}
             darkenEntries={brightBackground}
           />
+          {/* Návrh AI vypravěče k přijetí / odmítnutí */}
+          {aiSuggestion && aiSuggestion.sceneId === currentSceneId && (
+            <AiSuggestionPanel
+              key={aiSuggestion.id}
+              suggestion={aiSuggestion}
+              speakerOptions={{ characters: displayCharacters, narrators: displayNarrators }}
+              busy={aiBusy}
+              onAccept={entries => void handleAcceptSuggestion(entries)}
+              onReject={(reason, regenerate) => void handleRejectSuggestion(reason, regenerate)}
+              darken={brightBackground}
+            />
+          )}
           {/* Stav AI vypravěče: generování / chyba */}
           {(aiBusy || aiError) && (
             <div

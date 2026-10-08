@@ -27,13 +27,13 @@ import type {
   ThreadInput,
 } from '@solo-rpg/shared'
 import { fullName, isRemoteImage, isValidGameName } from '@solo-rpg/shared'
-import { ConflictError, NotFoundError, ValidationError, type AssetInput, type StorageProvider } from '../vault/StorageProvider.js'
+import { ConflictError, NotFoundError, ValidationError, type AssetInput, type GameEventInput, type StorageProvider } from '../vault/StorageProvider.js'
 import { imageExtension, safeFileName } from '../vault/fsUtils.js'
 import { assetKey, sha256, type AssetStore } from './AssetStore.js'
 import type { Db } from './db.js'
 import { newId, type EntityKind } from './ids.js'
 import { currentVersion, FactionRelationData, parseFields, type FieldsOf } from './kinds.js'
-import { assets, DEFAULT_TENANT, entities, games, links, sceneEntries, type EntityRow, type GameRow, type LinkRow } from './schema.js'
+import { assets, DEFAULT_TENANT, entities, events, games, links, sceneEntries, type EntityRow, type GameRow, type LinkRow } from './schema.js'
 
 /** Veřejná cesta lokálního obrázku (`ImageRef`) – FE ji skládá do URL `/vault/<hra>/assets/<id><ext>` */
 export const ASSET_PATH_PREFIX = 'assets/'
@@ -1301,6 +1301,13 @@ export class PostgresProvider implements StorageProvider {
       snap.require('session', id)
       await tx.delete(entities).where(eq(entities.id, id))
     })
+  }
+
+  // ---------- události ----------
+
+  async appendEvent(gameName: string, event: GameEventInput): Promise<void> {
+    const game = await this.requireGameRow(this.db, gameName)
+    await this.db.insert(events).values({ tenantId: this.tenantId, gameId: game.id, sceneId: event.sceneId, kind: event.kind, payload: event.payload ?? {} })
   }
 
   // ---------- import (hromadný zápis se zachováním časů) ----------
