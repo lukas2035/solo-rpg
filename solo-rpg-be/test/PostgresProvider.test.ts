@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { sql } from 'drizzle-orm'
 import { openDatabase, type Database } from '../src/storage/db.js'
 import { FsAssetStore } from '../src/storage/AssetStore.js'
 import { PostgresProvider } from '../src/storage/PostgresProvider.js'
@@ -126,6 +127,44 @@ describe('postavy a scény', () => {
     expect(read?.[2].characterName).toBe('Tmp')
     await storage.updateCharacter(G, aria.id, { firstName: 'Aria', lastName: 'Nox', nickname: 'Ari' })
     expect(await storage.getSceneEntries(G, 'scn_nope')).toBeNull()
+  })
+
+  it('příznak summaryStale: změna replik/popisu ho nastaví, nové shrnutí vynuluje, no‑op uložení nemění; entryCount', async () => {
+    const scene = await storage.createScene(G, { title: 'Scéna pro shrnutí' })
+    expect(scene).toMatchObject({ summaryStale: false, entryCount: 0 })
+    const find = async () => (await storage.listScenes(G)).find(s => s.id === scene.id)!
+
+    const entries = [{ id: 's1', characterName: null, narratorName: null, text: 'Začátek', timestamp: 1 }]
+    await storage.saveSceneEntries(G, scene.id, entries)
+    expect(await find()).toMatchObject({ summaryStale: true, entryCount: 1 })
+
+    // Uložení shrnutí příznak vynuluje (i když se zároveň změní popis)
+    await storage.updateScene(G, scene.id, { title: scene.title, description: 'Popis', summary: 'Shrnutí v1' })
+    expect(await find()).toMatchObject({ summaryStale: false, summary: 'Shrnutí v1' })
+    // Stejné shrnutí znovu + beze změny popisu = nic
+    await storage.updateScene(G, scene.id, { title: 'Přejmenovaná', summary: 'Shrnutí v1' })
+    expect(await find()).toMatchObject({ summaryStale: false })
+    // Změna popisu bez nového shrnutí → zastaralé
+    await storage.updateScene(G, scene.id, { title: 'Přejmenovaná', description: 'Jiný popis' })
+    expect(await find()).toMatchObject({ summaryStale: true })
+    await storage.updateScene(G, scene.id, { title: 'Přejmenovaná', summary: 'Shrnutí v2' })
+    expect(await find()).toMatchObject({ summaryStale: false })
+
+    // No‑op uložení stejných replik příznak nenastaví, změna textu ano
+    await storage.saveSceneEntries(G, scene.id, entries)
+    expect(await find()).toMatchObject({ summaryStale: false, entryCount: 1 })
+    await storage.saveSceneEntries(G, scene.id, [{ ...entries[0], text: 'Jiný začátek' }])
+    expect(await find()).toMatchObject({ summaryStale: true, entryCount: 1 })
+
+    // Řádek ve staré verzi fields (v1 bez příznaku): čtení zmigruje, zápis fields uloží aktuální verzi – příznak pak přežije
+    await database.db.execute(sql`UPDATE entities SET fields = fields - 'summaryStale', schema_version = 1 WHERE id = ${scene.id}`)
+    expect(await find()).toMatchObject({ summaryStale: false })
+    await storage.saveSceneEntries(G, scene.id, [{ ...entries[0], text: 'Zase jiný' }])
+    expect(await find()).toMatchObject({ summaryStale: true })
+    const [row] = await database.db.execute(sql`SELECT schema_version FROM entities WHERE id = ${scene.id}`).then(r => r.rows as { schema_version: number }[])
+    expect(row.schema_version).toBe(2)
+
+    await storage.deleteScene(G, scene.id)
   })
 })
 

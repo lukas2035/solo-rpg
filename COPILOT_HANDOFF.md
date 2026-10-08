@@ -376,6 +376,11 @@ GET  /vault/*  (statické soubory z aktuálně otevřené složky s hrami)
   `onSummarize`); výsledek se vloží do pole a uloží až „Uložit“ (`api.summarizeScene`). Při neprázdném poli se ptá na přepsání.
 - Ověřeno reálným voláním OpenRouteru (Mistral Large): odstavec + Klíčové body + Otevřené otázky podle promptu.
 - ~~Nápad na příště: shrnutí předchozích scén přidat do promptu AI vypravěče~~ – hotovo v kroku 2 v2 (`contextBuilder.ts`).
+- **Příznak `SceneMeta.summaryStale`** (fields scény v2, frontmatter `summaryStale`): nastaví se při změně replik (`saveSceneEntries`
+  porovnává id+text, no‑op uložení ho nemění) nebo popisu scény; vynuluje ho uložení jiného `summary`. `SceneMeta.entryCount` =
+  počet replik (ze `scene_entries`, ve `Snapshot.entryCounts`). FE `utils/scenes.ts#needsSummary` = `summaryStale || (entryCount > 0 && !summary)`;
+  takové scény mají ⚠️ v `SceneBar` a tlačítko „🤖 Doplnit shrnutí (n)“ je postupně shrne a uloží (`SceneModal` ukazuje „⚠️ zastaralé“).
+  `updateEntity` při přepisu `fields` zapisuje i aktuální `schema_version` (`CURRENT_VERSION_BY_KIND`), jinak by se migrace v1→v2 spouštěla znovu.
 
 ### Ověřeno
 - `npm.cmd run build` (shared, BE, FE) prochází; `npm.cmd run lint` – jen 1 pre-existující warning v `InputArea.tsx`.

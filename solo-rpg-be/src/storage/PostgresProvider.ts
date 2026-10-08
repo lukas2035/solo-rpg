@@ -31,7 +31,7 @@ import { ConflictError, NotFoundError, ValidationError, type AssetInput, type Ga
 import { imageExtension, safeFileName } from '../vault/fsUtils.js'
 import { assetKey, sha256, type AssetStore } from './AssetStore.js'
 import type { Db } from './db.js'
-import { newId, type EntityKind } from './ids.js'
+import { ENTITY_KINDS, newId, type EntityKind } from './ids.js'
 import { currentVersion, FactionRelationData, parseFields, type FieldsOf } from './kinds.js'
 import { assets, DEFAULT_TENANT, entities, events, games, links, sceneEntries, type EntityRow, type GameRow, type LinkRow } from './schema.js'
 
@@ -45,6 +45,12 @@ export function nameKey(name: string): string {
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
 type Executor = Db | Tx
+
+/** Přepsaná `fields` mají vždy aktuální tvar → zapsat k nim i aktuální verzi podle `kind` řádku (jinak by se migrace pouštěla znovu) */
+const CURRENT_VERSION_BY_KIND = sql<number>`CASE ${entities.kind} ${sql.join(
+  ENTITY_KINDS.map(k => sql`WHEN ${k} THEN ${currentVersion(k)}::int`),
+  sql` `,
+)} END`
 
 interface Entity<K extends EntityKind = EntityKind> {
   row: EntityRow
@@ -63,6 +69,8 @@ class Snapshot {
     readonly game: GameRow,
     rows: EntityRow[],
     linkRows: LinkRow[],
+    /** Počet záznamů per scéna (id scény → počet) */
+    readonly entryCounts: ReadonlyMap<string, number> = new Map(),
   ) {
     for (const row of rows) {
       const kind = row.kind as EntityKind
@@ -255,7 +263,12 @@ export class PostgresProvider implements StorageProvider {
     // Sekvenčně – uvnitř transakce je jeden klient a pg paralelní dotazy na něm nepodporuje
     const rows = await exec.select().from(entities).where(eq(entities.gameId, game.id))
     const linkRows = await exec.select().from(links).where(eq(links.gameId, game.id))
-    return new Snapshot(game, rows, linkRows)
+    const counts = await exec
+      .select({ sceneId: sceneEntries.sceneId, count: sql<number>`count(*)::int` })
+      .from(sceneEntries)
+      .where(eq(sceneEntries.gameId, game.id))
+      .groupBy(sceneEntries.sceneId)
+    return new Snapshot(game, rows, linkRows, new Map(counts.map(c => [c.sceneId, c.count])))
   }
 
   private async snapshot(exec: Executor, name: string): Promise<Snapshot> {
@@ -376,6 +389,8 @@ export class PostgresProvider implements StorageProvider {
       aiCharacters: snap.manyNames(e, 'aiCharacters'),
       aiPrompt: e.fields.aiPrompt,
       summary: e.fields.summary,
+      summaryStale: e.fields.summaryStale,
+      entryCount: snap.entryCounts.get(e.row.id) ?? 0,
       createdAt: ms(e.row.createdAt),
       updatedAt: ms(e.row.updatedAt),
     }
@@ -562,7 +577,7 @@ export class PostgresProvider implements StorageProvider {
       .update(entities)
       .set({
         ...(data.name !== undefined ? { name: data.name } : {}),
-        ...(data.fields !== undefined ? { fields: data.fields } : {}),
+        ...(data.fields !== undefined ? { fields: data.fields, schemaVersion: CURRENT_VERSION_BY_KIND } : {}),
         ...(data.notes !== undefined ? { notes: data.notes } : {}),
         ...(data.sortOrder !== undefined ? { sortOrder: data.sortOrder } : {}),
         ...(data.image ? { imageAssetId: data.image.imageAssetId, imageUrl: data.image.imageUrl } : {}),
@@ -768,7 +783,7 @@ export class PostgresProvider implements StorageProvider {
       const id = await this.insertEntity(tx, snap.game.id, 'scene', {
         name: title,
         // Doplňující popis situace (aiPrompt) je specifický pro scénu – nedědí se
-        fields: { description: input.description ?? '', ai, aiPrompt: input.aiPrompt ?? '', summary: input.summary ?? '' },
+        fields: { description: input.description ?? '', ai, aiPrompt: input.aiPrompt ?? '', summary: input.summary ?? '', summaryStale: false },
         sortOrder: position,
         image: this.imageColumns(input.image ?? null, paths),
       })
@@ -797,12 +812,18 @@ export class PostgresProvider implements StorageProvider {
       // AI může hrát jen postavy, které ve scéně jsou
       const aiCharacterIds = aiCandidates.filter(id => characterIds.includes(id))
 
+      const description = input.description ?? current.fields.description
+      const summary = input.summary ?? current.fields.summary
+      // Nové shrnutí příznak vynuluje; změna popisu (bez nového shrnutí) ho nastaví
+      const summaryStale = summary !== current.fields.summary ? false : description !== current.fields.description ? true : current.fields.summaryStale
+
       await this.updateEntity(tx, sceneId, {
         name: title,
         fields: {
           ...current.fields,
-          description: input.description ?? current.fields.description,
-          summary: input.summary ?? current.fields.summary,
+          description,
+          summary,
+          summaryStale,
           ai: input.ai ?? current.fields.ai,
           aiPrompt: input.aiPrompt ?? current.fields.aiPrompt,
         },
@@ -844,7 +865,10 @@ export class PostgresProvider implements StorageProvider {
 
   async saveSceneEntries(name: string, sceneId: string, entries: StoryEntry[]): Promise<void> {
     await this.mutate(name, async (tx, snap) => {
-      snap.require('scene', sceneId)
+      const scene = snap.require('scene', sceneId)
+      // Porovnat obsah před přepisem – no‑op uložení nemá zneplatnit shrnutí
+      const before = await tx.select({ id: sceneEntries.id, text: sceneEntries.text }).from(sceneEntries).where(eq(sceneEntries.sceneId, sceneId)).orderBy(asc(sceneEntries.position))
+      const changed = before.length !== entries.length || before.some((b, i) => b.id !== entries[i].id || b.text !== entries[i].text)
       await tx.delete(sceneEntries).where(eq(sceneEntries.sceneId, sceneId))
       const seen = new Set<string>()
       const values = entries.flatMap((entry, position) => {
@@ -870,7 +894,7 @@ export class PostgresProvider implements StorageProvider {
         ]
       })
       if (values.length > 0) await tx.insert(sceneEntries).values(values)
-      await this.updateEntity(tx, sceneId, {})
+      await this.updateEntity(tx, sceneId, changed && !scene.fields.summaryStale ? { fields: { ...scene.fields, summaryStale: true } } : {})
     })
   }
 

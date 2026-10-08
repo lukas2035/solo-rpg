@@ -1002,6 +1002,9 @@ export class ObsidianVaultProvider implements StorageProvider {
           order: typeof data.order === 'number' ? data.order : Number.isFinite(orderFromName) ? orderFromName : index + 1,
           description,
           summary,
+          summaryStale: data.summaryStale === true,
+          // Orientační počet replik (řádky `**Mluvčí**:`); přesně je parsuje až getSceneEntries
+          entryCount: entries.trim() ? (entries.match(/^\*\*[^*\n]+\*\*:/gm)?.length ?? 1) : 0,
           image: stringOrNull(data.image),
           characters: data.characters === undefined ? (allCharacterNames ?? []) : parseCharacterLinks(data.characters),
           location: parseLink(data.location),
@@ -1051,6 +1054,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       ai: meta.ai,
       aiCharacters: toCharacterLinks(meta.aiCharacters),
       aiPrompt: meta.aiPrompt.trim() ? meta.aiPrompt.trim() : null,
+      summaryStale: meta.summaryStale ? true : null,
       createdAt: toIso(meta.createdAt),
       updatedAt: toIso(meta.updatedAt),
     }
@@ -1118,6 +1122,8 @@ export class ObsidianVaultProvider implements StorageProvider {
       order: position,
       description: input.description ?? '',
       summary: input.summary ?? '',
+      summaryStale: false,
+      entryCount: 0,
       image: input.image ?? null,
       characters,
       location: await this.normalizeLocationRef(dir, input.location ?? null),
@@ -1166,11 +1172,14 @@ export class ObsidianVaultProvider implements StorageProvider {
 
     const characters = input.characters ? await this.normalizeSceneCharacters(dir, input.characters) : previous.characters
     const aiCharacters = input.aiCharacters ? await this.normalizeSceneCharacters(dir, input.aiCharacters) : previous.aiCharacters
+    const description = input.description ?? previous.description
+    const summary = input.summary ?? previous.summary
     const meta: SceneMeta = {
       ...previous,
       title,
-      description: input.description ?? previous.description,
-      summary: input.summary ?? previous.summary,
+      description,
+      summary,
+      summaryStale: summary !== previous.summary ? false : description !== previous.description ? true : previous.summaryStale,
       image,
       characters,
       location: input.location === undefined ? previous.location : await this.normalizeLocationRef(dir, input.location),
@@ -1218,7 +1227,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     const characters = await this.readCharacters(dir)
     const nicknames = new Map(characters.map(c => [c.character.name, c.character.nickname]))
 
-    const meta: SceneMeta = { ...scene.meta, updatedAt: Date.now() }
+    const meta: SceneMeta = { ...scene.meta, summaryStale: true, entryCount: entries.length, updatedAt: Date.now() }
     await this.writeSceneFile(dir, meta, serializeEntries(entries, nicknames), scene.data)
     await this.touchGame(dir)
   }

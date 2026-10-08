@@ -114,6 +114,10 @@ export const SceneMetaSchema = z.object({
   aiPrompt: z.string(),
   /** Celkové zhodnocení / shrnutí děje scény (markdown; tělo souboru za značkou `<!-- summary -->`) – rychlý kontext pro hráče i AI */
   summary: z.string(),
+  /** Shrnutí je zastaralé – od jeho posledního uložení se změnily záznamy nebo popis scény (frontmatter `summaryStale`) */
+  summaryStale: z.boolean(),
+  /** Počet záznamů (replik) ve scéně – FE podle něj pozná, že scéna má co shrnout */
+  entryCount: z.number().int().nonnegative(),
   createdAt: z.number(),
   updatedAt: z.number(),
 })

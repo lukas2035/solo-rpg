@@ -162,7 +162,7 @@ export class VaultImporter {
     for (const s of [...detail.scenes].sort((a, b) => a.order - b.order)) {
       await add('scene', s.title, {
         name: s.title,
-        fields: { description: s.description, ai: s.ai, aiPrompt: s.aiPrompt, summary: s.summary },
+        fields: { description: s.description, ai: s.ai, aiPrompt: s.aiPrompt, summary: s.summary, summaryStale: s.summaryStale },
         sortOrder: s.order,
         image: await image(s.image, 'scene'),
         createdAt: s.createdAt,

@@ -1,4 +1,5 @@
 import type { SceneMeta } from '@solo-rpg/shared'
+import { needsSummary } from '../utils/scenes'
 
 interface SceneBarProps {
   scenes: SceneMeta[]
@@ -16,7 +17,7 @@ interface SceneBarProps {
 /** Tenký pás pro přepínání scén (každá scéna = samostatný .md soubor ve vaultu) */
 export default function SceneBar({ scenes, currentSceneId, onSelect, onCreate, onEdit, onFillSummaries, summaryProgress = null }: SceneBarProps) {
   const current = scenes.find(s => s.id === currentSceneId) ?? null
-  const missingSummaries = scenes.filter(s => !s.summary.trim()).length
+  const missingSummaries = scenes.filter(needsSummary).length
 
   return (
     <div className="relative z-10 flex items-center gap-2 px-4 py-1.5 bg-black/60 border-b border-[var(--accent)]/40 text-sm">
@@ -29,7 +30,7 @@ export default function SceneBar({ scenes, currentSceneId, onSelect, onCreate, o
         {scenes.length === 0 && <option value="">— žádná scéna —</option>}
         {scenes.map(scene => (
           <option key={scene.id} value={scene.id}>
-            {String(scene.order).padStart(2, '0')} · {scene.title}
+            {String(scene.order).padStart(2, '0')} · {scene.title}{needsSummary(scene) ? ' ⚠️' : ''}
           </option>
         ))}
       </select>
@@ -58,7 +59,7 @@ export default function SceneBar({ scenes, currentSceneId, onSelect, onCreate, o
           disabled={!!summaryProgress}
           title={summaryProgress
             ? `Shrnuje se scéna „${summaryProgress.title}“`
-            : `Nechat AI doplnit shrnutí ${missingSummaries} scénám, které ho zatím nemají`}
+            : `Nechat AI doplnit shrnutí ${missingSummaries} scénám, které ho nemají nebo ho mají zastaralé (⚠️)`}
           className={`h-7 px-2 rounded-md border border-cyan-500/60 bg-black/50 flex items-center gap-1 text-xs text-cyan-200 hover:bg-black/80 hover:border-cyan-400 transition-all disabled:cursor-wait ${summaryProgress ? 'animate-pulse' : ''}`}
         >
           🤖 {summaryProgress ? `Shrnutí ${summaryProgress.done + 1}/${summaryProgress.total}…` : `Doplnit shrnutí (${missingSummaries})`}

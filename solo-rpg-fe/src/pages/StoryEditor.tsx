@@ -18,6 +18,7 @@ import { useSessionTimer } from '../hooks/useSessionTimer'
 import CharacterModal, { type CharacterFormValues } from '../components/CharacterModal'
 import SceneModal, { type SceneFormValues } from '../components/SceneModal'
 import SceneBar from '../components/SceneBar'
+import { needsSummary } from '../utils/scenes'
 import ThreadsPanel from '../components/ThreadsPanel'
 import ThreadModal from '../components/ThreadModal'
 import FactionsPanel, { type DisplayFaction } from '../components/FactionsPanel'
@@ -393,7 +394,10 @@ export default function StoryEditor() {
 
   const persistStory = (entries: StoryEntry[]): Promise<void> => {
     if (!currentSceneId) return Promise.resolve()
-    const saving = api.saveSceneEntries(gameName, currentSceneId, toApiEntries(entries))
+    const sceneId = currentSceneId
+    const saving = api.saveSceneEntries(gameName, sceneId, toApiEntries(entries))
+      // BE při změně záznamů označí shrnutí za zastaralé – promítnout bez dalšího načítání
+      .then(() => setScenes(prev => prev.map(s => (s.id === sceneId && (s.entryCount !== entries.length || !s.summaryStale) ? { ...s, summaryStale: true, entryCount: entries.length } : s))))
       .catch(error => console.error('Uložení scény selhalo:', error))
     pendingSaveRef.current = saving
     return saving
@@ -589,6 +593,7 @@ export default function StoryEditor() {
       const resolved = resolveEntries(result.entries, charactersRef.current, narrators)
       setCharacters(resolved.characters)
       setStoryEntries(prev => [...prev, ...resolved.entries])
+      setScenes(prev => prev.map(s => (s.id === sceneId ? { ...s, summaryStale: true, entryCount: s.entryCount + result.entries.length } : s)))
       setAiSuggestion(null)
     } catch (error) {
       setAiError(error instanceof Error ? error.message : 'Přijetí návrhu selhalo.')
@@ -625,9 +630,9 @@ export default function StoryEditor() {
     const resolved = resolveEntries(result.entries, charactersRef.current, narrators)
     setCharacters(resolved.characters)
     setStoryEntries(prev => [...prev, ...resolved.entries])
-    if (result.addedCharacters.length) {
-      setScenes(prev => prev.map(s => (s.id === sceneId ? { ...s, characters: [...s.characters, ...result.addedCharacters.filter(n => !s.characters.includes(n))] } : s)))
-    }
+    setScenes(prev => prev.map(s => (s.id === sceneId
+      ? { ...s, summaryStale: true, entryCount: s.entryCount + result.entries.length, characters: [...s.characters, ...result.addedCharacters.filter(n => !s.characters.includes(n))] }
+      : s)))
     return result
   }
 
@@ -866,6 +871,7 @@ export default function StoryEditor() {
     try {
       await api.saveSceneEntries(gameName, currentSceneId, [])
       setStoryEntries([])
+      setScenes(prev => prev.map(s => (s.id === currentSceneId ? { ...s, summaryStale: true, entryCount: 0 } : s)))
       return true
     } catch (error) {
       console.error('Vymazání scény selhalo:', error)
@@ -888,12 +894,12 @@ export default function StoryEditor() {
 
   const handleCreateScene = () => setSceneModal({ mode: 'create' })
 
-  /** Projde všechny scény bez shrnutí, nechá je shrnout AI a výsledek rovnou uloží (scény bez záznamů přeskočí) */
+  /** Projde scény, které potřebují shrnutí (zastaralé, nebo s replikami a bez shrnutí), nechá je shrnout AI a výsledek rovnou uloží */
   const fillMissingSummaries = async () => {
     if (bulkSummary) return
-    const missing = scenes.filter(s => !s.summary.trim())
+    const missing = scenes.filter(needsSummary)
     if (missing.length === 0) return
-    if (!window.confirm(`Doplnit pomocí AI shrnutí ${missing.length === 1 ? '1 scéně' : `${missing.length} scénám`} bez shrnutí? Scény se zpracují postupně.`)) return
+    if (!window.confirm(`Doplnit pomocí AI shrnutí ${missing.length === 1 ? '1 scéně' : `${missing.length} scénám`} (bez shrnutí nebo se zastaralým)? Scény se zpracují postupně.`)) return
     setAiError(null)
     let filled = 0
     let skipped = 0

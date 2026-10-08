@@ -35,7 +35,7 @@ const legacy = { _legacy: z.unknown().optional() }
 
 export const CharacterFields = z.object({ firstName: z.string(), lastName: z.string(), nickname: z.string(), ...legacy })
 export const NarratorFields = z.object({ description: z.string(), aiPrompt: z.string(), ...legacy })
-export const SceneFields = z.object({ description: z.string(), ai: z.boolean(), aiPrompt: z.string(), summary: z.string(), ...legacy })
+export const SceneFields = z.object({ description: z.string(), ai: z.boolean(), aiPrompt: z.string(), summary: z.string(), summaryStale: z.boolean(), ...legacy })
 export const ThreadFields = z.object({
   type: ThreadTypeSchema,
   status: ThreadStatusSchema,
@@ -102,7 +102,8 @@ type Migration = (old: unknown) => unknown
 export const KIND_VERSIONS: Record<EntityKind, { current: number; migrations: Record<number, Migration> }> = {
   character: { current: 1, migrations: {} },
   narrator: { current: 1, migrations: {} },
-  scene: { current: 1, migrations: {} },
+  // v2: příznak zastaralého shrnutí; starší scény bez shrnutí FE pozná podle entryCount, takže výchozí false
+  scene: { current: 2, migrations: { 1: old => ({ ...(old as object), summaryStale: false }) } },
   thread: { current: 1, migrations: {} },
   faction: { current: 1, migrations: {} },
   quest: { current: 1, migrations: {} },

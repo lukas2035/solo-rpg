@@ -248,6 +248,11 @@ export default function SceneModal({ scene, scenes, image, defaultTitle = '', de
             <span>
               Shrnutí děje scény <span className="opacity-60">(markdown – rychlý kontext pro tebe i AI, uloží se za značku <code>&lt;!-- summary --&gt;</code>)</span>
             </span>
+            {isEdit && scene?.summaryStale && (
+              <span className="text-xs text-amber-300" title="Od posledního uložení shrnutí se změnily záznamy nebo popis scény">
+                ⚠️ zastaralé
+              </span>
+            )}
             {isEdit && onSummarize && (
               <button
                 type="button"
