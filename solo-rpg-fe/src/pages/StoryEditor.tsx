@@ -606,12 +606,16 @@ export default function StoryEditor() {
     }
   }, [gameName])
 
-  // Při přepnutí scény načíst stav Directoru; panel se otevře sám, pokud má scéna brief
+  // Při přepnutí scény načíst stav Directoru; panel se otevře sám, pokud má scéna brief (křížkem ho lze skrýt)
   useEffect(() => {
     if (!currentSceneId) return
     let cancelled = false
     api.getDirector(gameName, currentSceneId)
-      .then(state => { if (!cancelled) setDirectorBySceneId({ sceneId: currentSceneId, state }) })
+      .then(state => {
+        if (cancelled) return
+        setDirectorBySceneId({ sceneId: currentSceneId, state })
+        if (state.brief) setDirectorOpenFor(currentSceneId)
+      })
       .catch(() => { /* bez Directoru */ })
     return () => { cancelled = true }
   }, [gameName, currentSceneId])
@@ -1487,7 +1491,7 @@ export default function StoryEditor() {
             darken={brightBackground}
           />
           {/* Režie Directoru: puls kampaně + brief pro další beat (viditelný krok před psaním AI) */}
-          {directorState && (showDirector || directorState.brief) && (
+          {directorState && showDirector && (
             <DirectorPanel
               state={directorState}
               busy={directorBusy}
