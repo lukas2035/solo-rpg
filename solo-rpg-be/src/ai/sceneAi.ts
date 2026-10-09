@@ -55,6 +55,8 @@ export async function draftSceneReply(
   }
 
   const context = buildSceneContext(detail, scene, { budgetTokens: config.ai.contextTokens })
+  // Beat uvnitř probíhající události: AI dostane i její dosavadní průběh
+  const event = brief?.eventId ? ((await storage.getSceneDirector(gameName, sceneId))?.event ?? null) : null
   const messages = buildMessages({
     defaultPrompt,
     rulesPrompt: await buildRulesSection(config, detail.setup, true),
@@ -65,7 +67,7 @@ export async function draftSceneReply(
     entries,
     contextSections: context.sections,
     rejectedReasons,
-    briefSection: brief ? buildBriefSection(brief, detail) : undefined,
+    briefSection: brief ? buildBriefSection(brief, detail, event) : undefined,
     transcriptBudgetTokens: config.ai.transcriptTokens,
   })
   if (config.ai.debug) {

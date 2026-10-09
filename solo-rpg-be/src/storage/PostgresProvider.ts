@@ -19,6 +19,7 @@ import type {
   Quest,
   QuestInput,
   QuestObjective,
+  SceneDirector,
   SceneInput,
   SceneMeta,
   StoryEntry,
@@ -788,7 +789,7 @@ export class PostgresProvider implements StorageProvider {
       const id = await this.insertEntity(tx, snap.game.id, 'scene', {
         name: title,
         // Doplňující popis situace (aiPrompt) je specifický pro scénu – nedědí se
-        fields: { description: input.description ?? '', ai, aiPrompt: input.aiPrompt ?? '', summary: input.summary ?? '', summaryStale: false },
+        fields: { description: input.description ?? '', ai, aiPrompt: input.aiPrompt ?? '', summary: input.summary ?? '', summaryStale: false, director: null },
         sortOrder: position,
         image: this.imageColumns(input.image ?? null, paths),
       })
@@ -1354,6 +1355,24 @@ export class PostgresProvider implements StorageProvider {
       .orderBy(desc(events.createdAt), desc(events.id))
       .limit(limit)
     return rows.map(r => ({ id: r.id, sceneId: r.sceneId, kind: r.kind, payload: r.payload, createdAt: ms(r.createdAt) }))
+  }
+
+  // ---------- Director (stav u scény) ----------
+
+  async getSceneDirector(gameName: string, sceneId: string): Promise<SceneDirector | null> {
+    const game = await this.requireGameRow(this.db, gameName)
+    const snap = await this.loadSnapshot(this.db, game)
+    const scene = snap.get('scene', sceneId)
+    return scene ? (scene.fields.director ?? { brief: null, event: null }) : null
+  }
+
+  /** Ukládá se bez posunu `updatedAt` scény – režie není změna obsahu scény */
+  async saveSceneDirector(gameName: string, sceneId: string, director: SceneDirector): Promise<void> {
+    await this.mutate(gameName, async (tx, snap) => {
+      const scene = snap.require('scene', sceneId)
+      const stored: SceneDirector | null = director.brief || director.event ? director : null
+      await this.updateEntity(tx, sceneId, { fields: { ...scene.fields, director: stored }, updatedAt: scene.row.updatedAt })
+    })
   }
 
   // ---------- import (hromadný zápis se zachováním časů) ----------

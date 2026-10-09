@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AiSuggestion, BriefPatch, Character, CharacterInput, DirectorState, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, PulseOverride, Quest, QuestInput, QuestProposal, QuestStatus, RulesSystem, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
+import type { AiSuggestion, BriefPatch, Character, CharacterInput, DirectorState, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, PulseOverride, Quest, QuestInput, QuestProposal, QuestStatus, RollOutcome, RulesSystem, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
 import { OPEN_THREAD_STATUSES, locationPath } from '@solo-rpg/shared'
 import CharacterBar from '../components/CharacterBar'
 import StoryPanel from '../components/StoryPanel'
@@ -614,7 +614,7 @@ export default function StoryEditor() {
       .then(state => {
         if (cancelled) return
         setDirectorBySceneId({ sceneId: currentSceneId, state })
-        if (state.brief) setDirectorOpenFor(currentSceneId)
+        if (state.brief || state.event) setDirectorOpenFor(currentSceneId)
       })
       .catch(() => { /* bez Directoru */ })
     return () => { cancelled = true }
@@ -629,17 +629,17 @@ export default function StoryEditor() {
     })
   }
 
-  /** Vytvoří (nebo přehodí) brief pro aktuální scénu a otevře panel režie */
-  const handleCreateBrief = async (seed?: number) => {
+  /** Vytvoří (nebo přehodí) brief pro aktuální scénu a otevře panel režie; `resolve` = uzavřít probíhající událost rozuzlením */
+  const handleCreateBrief = async (seed?: number, resolve?: { outcome: RollOutcome | null }) => {
     if (!currentSceneId || directorBusy) return
     const sceneId = currentSceneId
     setDirectorBusy(true)
     setAiError(null)
     try {
       await pendingSaveRef.current
-      const brief = await api.createBrief(gameName, sceneId, seed)
+      const brief = await api.createBrief(gameName, sceneId, seed, resolve)
       if (currentSceneIdRef.current !== sceneId) return
-      setDirectorState(sceneId, () => ({ pulse: brief.pulse, brief }))
+      setDirectorState(sceneId, prev => ({ pulse: brief.pulse, brief, event: prev?.event ?? null }))
       setDirectorOpenFor(sceneId)
     } catch (error) {
       setAiError(error instanceof Error ? error.message : 'Příprava režie selhala.')
@@ -654,14 +654,14 @@ export default function StoryEditor() {
     try {
       const brief = await api.patchBrief(gameName, sceneId, patch)
       if (currentSceneIdRef.current !== sceneId) return
-      setDirectorState(sceneId, prev => (prev ? { ...prev, brief } : { pulse: brief.pulse, brief }))
+      setDirectorState(sceneId, prev => (prev ? { ...prev, brief } : { pulse: brief.pulse, brief, event: null }))
     } catch (error) {
       setAiError(error instanceof Error ? error.message : 'Úprava režie selhala.')
       if (error instanceof api.ApiError && error.status === 404) void refreshDirector(sceneId)
     }
   }
 
-  /** Přeskočit režii: brief zahodit a nechat AI psát volně */
+  /** Přeskočit režii: brief zahodit a nechat AI psát volně (událost zůstává) */
   const handleSkipBrief = async () => {
     if (!currentSceneId || aiBusy) return
     const sceneId = currentSceneId
@@ -671,6 +671,23 @@ export default function StoryEditor() {
     setDirectorState(sceneId, prev => (prev ? { ...prev, brief: null } : prev))
     setDirectorOpenFor(null)
     runAi(sceneId).catch(() => { /* chyba je v aiError */ })
+  }
+
+  /** Zahodit probíhající událost bez rozuzlení */
+  const handleAbandonEvent = async () => {
+    if (!currentSceneId || directorBusy || aiBusy) return
+    const sceneId = currentSceneId
+    if (!window.confirm('Zahodit probíhající událost bez rozuzlení? Přijaté beaty zůstanou v historii.')) return
+    setDirectorBusy(true)
+    try {
+      const state = await api.abandonEvent(gameName, sceneId)
+      if (currentSceneIdRef.current !== sceneId) return
+      setDirectorState(sceneId, () => state)
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : 'Zahození události selhalo.')
+    } finally {
+      setDirectorBusy(false)
+    }
   }
 
   /** Ruční korekce pulsu – uloží se do nastavení hry (autosave) a puls se přepočítá */
@@ -773,7 +790,14 @@ export default function StoryEditor() {
   /** Tlačítko 🤖 v InputArea: bez briefu nejdřív připravit režii (viditelný krok), s briefem nechat AI psát */
   const handleGenerateAi = () => {
     if (!currentSceneId || !currentScene?.ai || aiBusy) return
-    if (directorState?.brief) {
+    const brief = directorState?.brief
+    if (brief) {
+      // Hráč hodil / dobojoval, ale výsledek nezadal – otevřít panel místo psaní
+      if (brief.rollPhase === 'after' && !brief.outcome) {
+        setDirectorOpenFor(currentSceneId)
+        setAiError('Nejdřív v režii zadej výsledek hodu / střetu.')
+        return
+      }
       runAi(currentSceneId).catch(() => { /* chyba je v aiError */ })
       return
     }
@@ -1506,6 +1530,8 @@ export default function StoryEditor() {
               onWrite={() => { if (currentSceneId) runAi(currentSceneId).catch(() => { /* chyba je v aiError */ }) }}
               onClose={() => setDirectorOpenFor(null)}
               onPulseOverride={override => void handlePulseOverride(override)}
+              onResolveEvent={outcome => void handleCreateBrief(undefined, { outcome })}
+              onAbandonEvent={() => void handleAbandonEvent()}
               darken={brightBackground}
             />
           )}

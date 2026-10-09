@@ -1,4 +1,4 @@
-import type { Character, CharacterInput, Faction, FactionInput, GameDetail, GameMeta, GameSession, GameSessionInput, GameSettings, GameSetup, LocationInput, LoreEntry, LoreInput, Narrator, NarratorInput, Quest, QuestInput, SceneInput, SceneMeta, StoryEntry, StoryLocation, StoryThread, ThreadInput, AssetKind } from '@solo-rpg/shared'
+import type { Character, CharacterInput, Faction, FactionInput, GameDetail, GameMeta, GameSession, GameSessionInput, GameSettings, GameSetup, LocationInput, LoreEntry, LoreInput, Narrator, NarratorInput, Quest, QuestInput, SceneDirector, SceneInput, SceneMeta, StoryEntry, StoryLocation, StoryThread, ThreadInput, AssetKind } from '@solo-rpg/shared'
 
 export interface AssetInput {
   kind: AssetKind
@@ -75,6 +75,10 @@ export interface StorageProvider {
   appendEvent(name: string, event: GameEventInput): Promise<void>
   /** Poslední události hry daných druhů, od nejnovější (`limit` nejvýš 500) */
   listEvents(name: string, query: { kinds: readonly string[]; sceneId?: string; limit?: number }): Promise<GameEvent[]>
+
+  /** Stav Directoru scény (rozpracovaný brief + probíhající událost); null = scéna neexistuje */
+  getSceneDirector(name: string, sceneId: string): Promise<SceneDirector | null>
+  saveSceneDirector(name: string, sceneId: string, director: SceneDirector): Promise<void>
 }
 
 export interface GameEventInput {

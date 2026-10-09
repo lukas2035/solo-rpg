@@ -718,6 +718,13 @@ export type Stakes = z.infer<typeof StakesSchema>
 export const RollOutcomeSchema = z.enum(['success', 'partial', 'fail'])
 export type RollOutcome = z.infer<typeof RollOutcomeSchema>
 
+/**
+ * Fáze hodu v beatu: `none` bez hodu; `before` AI dovede scénu k hodu / střetu a zastaví se (hráč pak hází či bojuje);
+ * `after` hráč už hodil / odehrál střet – do briefu zadá `outcome` a AI popíše dopad
+ */
+export const RollPhaseSchema = z.enum(['none', 'before', 'after'])
+export type RollPhase = z.infer<typeof RollPhaseSchema>
+
 /** Entity, kterých se beat týká – vybírá aplikace (ne AI); jména + id, aby je AI mohla citovat */
 export const BriefFocusSchema = z.object({
   characters: z.array(z.string()),
@@ -730,7 +737,7 @@ export type BriefFocus = z.infer<typeof BriefFocusSchema>
 
 /**
  * Režijní zadání pro AI vypravěče – výstup Directoru. Hráč ho v panelu může přehodit (nový seed), upravit nebo
- * přeskočit; teprve pak AI píše. Drží se in‑memory per scéna (jako `AiSuggestion`), do `events` jde při přijetí návrhu.
+ * přeskočit; teprve pak AI píše. Uložen u scény (`SceneDirector`), do `events` jde při přijetí návrhu.
  */
 export const NarrativeBriefSchema = z.object({
   id: z.string().min(1),
@@ -747,6 +754,8 @@ export const NarrativeBriefSchema = z.object({
   difficulty: z.number().int().min(1).max(5).nullable(),
   /** Překlad obtížnosti do systému hry (`DC 15`, `Difficulty 4`, `+3 (Good)`); null bez systému / bez hodu */
   difficultyLabel: z.string().nullable(),
+  /** Fáze hodu: `before` = zastavit před hodem/střetem, `after` = výsledek už padl (`outcome` povinný před psaním) */
+  rollPhase: RollPhaseSchema,
   stakes: StakesSchema,
   /** Významný zvrat (zrada, odhalení, nová skutečnost) */
   twist: z.boolean(),
@@ -755,22 +764,70 @@ export const NarrativeBriefSchema = z.object({
   outcome: RollOutcomeSchema.nullable(),
   /** Volná poznámka hráče pro AI („ať se objeví ten dopis“) */
   notes: z.string(),
+  /** Probíhající událost scény, jejímž beatem tento brief je; null = pokračování nebo první beat nové události */
+  eventId: z.string().nullable(),
   /** Snímek pulsu, ze kterého brief vznikl */
   pulse: CampaignPulseSchema,
   createdAt: z.number(),
 })
 export type NarrativeBrief = z.infer<typeof NarrativeBriefSchema>
 
-/** Odpověď `GET …/scenes/:scene/director` – aktuální puls a rozpracovaný brief scény */
+/** Jeden přijatý beat uvnitř události */
+export const EventBeatSchema = z.object({
+  briefId: z.string(),
+  suggestionId: z.string(),
+  beatKind: BeatKindSchema,
+  rollPhase: RollPhaseSchema,
+  difficulty: z.number().int().min(1).max(5).nullable(),
+  outcome: RollOutcomeSchema.nullable(),
+  twist: z.boolean(),
+  createdAt: z.number(),
+})
+export type EventBeat = z.infer<typeof EventBeatSchema>
+
+export const DirectorEventStatusSchema = z.enum(['active', 'resolved', 'abandoned'])
+export type DirectorEventStatus = z.infer<typeof DirectorEventStatusSchema>
+
+/**
+ * Událost Directoru – trvá přes několik beatů (uvedení → hod/střet → dopad → rozuzlení). Vzniká přijetím prvního beatu
+ * briefu `mode = event`, uzavře ji beat `resolution` (nebo hráč ručně). Scéna má nejvýš jednu aktivní; uložena u scény.
+ */
+export const DirectorEventSchema = z.object({
+  id: z.string().min(1),
+  sceneId: z.string().min(1),
+  eventType: EventTypeSchema,
+  obstacleKind: ObstacleKindSchema.nullable(),
+  stakes: StakesSchema,
+  focus: BriefFocusSchema,
+  status: DirectorEventStatusSchema,
+  beats: z.array(EventBeatSchema),
+  createdAt: z.number(),
+  resolvedAt: z.number().nullable(),
+})
+export type DirectorEvent = z.infer<typeof DirectorEventSchema>
+
+/** Stav Directoru uložený u scény (přežije restart BE) */
+export const SceneDirectorSchema = z.object({
+  brief: NarrativeBriefSchema.nullable(),
+  event: DirectorEventSchema.nullable(),
+})
+export type SceneDirector = z.infer<typeof SceneDirectorSchema>
+
+/** Odpověď `GET …/scenes/:scene/director` – aktuální puls, rozpracovaný brief a probíhající událost scény */
 export const DirectorStateSchema = z.object({
   pulse: CampaignPulseSchema,
   brief: NarrativeBriefSchema.nullable(),
+  event: DirectorEventSchema.nullable(),
 })
 export type DirectorState = z.infer<typeof DirectorStateSchema>
 
-/** Tělo `POST …/director/brief` – volitelný seed (bez něj náhodný = „přehodit“) */
+/**
+ * Tělo `POST …/director/brief` – volitelný seed (bez něj náhodný = „přehodit“). `resolve` při aktivní události
+ * vynutí beat rozuzlení s daným celkovým výsledkem (null = bez hodu) – „uzavřít událost“.
+ */
 export const BriefRequestSchema = z.object({
   seed: z.number().int().optional(),
+  resolve: z.object({ outcome: RollOutcomeSchema.nullable() }).optional(),
 })
 export type BriefRequest = z.infer<typeof BriefRequestSchema>
 
@@ -781,6 +838,7 @@ export const BriefPatchSchema = z.object({
   obstacleKind: ObstacleKindSchema.nullable().optional(),
   beatKind: BeatKindSchema.optional(),
   difficulty: z.number().int().min(1).max(5).nullable().optional(),
+  rollPhase: RollPhaseSchema.optional(),
   stakes: StakesSchema.optional(),
   twist: z.boolean().optional(),
   outcome: RollOutcomeSchema.nullable().optional(),

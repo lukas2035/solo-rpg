@@ -341,17 +341,17 @@ export async function registerGameRoutes(app: FastifyInstance, vault: VaultManag
 
   // ---------- Director: puls kampaně + režijní brief scény ----------
 
-  /** Aktuální puls kampaně a rozpracovaný brief scény (pokud je) */
+  /** Aktuální puls kampaně, rozpracovaný brief a probíhající událost scény */
   app.get('/api/games/:game/scenes/:scene/director', async (request): Promise<DirectorState> => {
     const { game, scene } = SceneParams.parse(request.params)
     return director.get(game, scene)
   })
 
-  /** Nový brief (nahradí rozpracovaný); bez `seed` náhodný = „přehodit“ */
+  /** Nový brief (nahradí rozpracovaný); bez `seed` náhodný = „přehodit“; `resolve` uzavře probíhající událost rozuzlením */
   app.post('/api/games/:game/scenes/:scene/director/brief', async (request): Promise<NarrativeBrief> => {
     const { game, scene } = SceneParams.parse(request.params)
-    const { seed } = BriefRequestSchema.parse(request.body ?? {})
-    return director.create(game, scene, seed)
+    const { seed, resolve } = BriefRequestSchema.parse(request.body ?? {})
+    return director.create(game, scene, seed, resolve)
   })
 
   /** Ruční úprava briefu hráčem (typ, obtížnost, výsledek hodu, poznámka…) */
@@ -363,8 +363,14 @@ export async function registerGameRoutes(app: FastifyInstance, vault: VaultManag
   /** Přeskočit režii – další návrh AI vznikne bez briefu */
   app.delete('/api/games/:game/scenes/:scene/director/brief', async (request, reply) => {
     const { game, scene } = SceneParams.parse(request.params)
-    director.clear(game, scene)
+    await director.clear(game, scene)
     return reply.code(204).send()
+  })
+
+  /** Zahodit probíhající událost bez rozuzlení */
+  app.delete('/api/games/:game/scenes/:scene/director/event', async (request): Promise<DirectorState> => {
+    const { game, scene } = SceneParams.parse(request.params)
+    return director.abandonEvent(game, scene)
   })
 
   // AI shrnutí děje scény – nic neukládá, FE výsledek vloží do dialogu scény

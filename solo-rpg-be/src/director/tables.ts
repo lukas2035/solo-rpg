@@ -21,6 +21,12 @@ const perBand = <T extends z.ZodTypeAny>(inner: T) => z.object({ low: inner, mid
 
 export const DIFFICULTIES = ['1', '2', '3', '4', '5'] as const
 
+/** Kontext losu beatu uvnitř události: hráč právě hodil (`afterRoll`), nebo výsledek minulého beatu / bez hodu */
+export const EVENT_BEAT_CONTEXTS = ['afterRoll', 'fail', 'partial', 'success', 'none'] as const
+export type EventBeatContext = (typeof EVENT_BEAT_CONTEXTS)[number]
+
+const beatWeights = weights(BeatKindSchema.options)
+
 const DirectorTablesSchema = z.object({
   mode: perPhase(weights(BriefModeSchema.options)),
   eventType: perPhase(weights(EventTypeSchema.options)),
@@ -30,6 +36,13 @@ const DirectorTablesSchema = z.object({
   stakes: perBand(weights(StakesSchema.options)),
   twist: z.object({ base: z.number().min(0).max(1), perBeat: z.number().min(0).max(1), max: z.number().min(0).max(1) }),
   noRollChance: z.object({ continue: z.number().min(0).max(1), event: z.number().min(0).max(1) }),
+  eventBeat: z.object({
+    kind: z.object(Object.fromEntries(EVENT_BEAT_CONTEXTS.map(c => [c, beatWeights])) as Record<EventBeatContext, typeof beatWeights>),
+    resolveAfterBeats: z.number().int().min(1),
+    resolvePush: z.number().min(1),
+    /** Šance, že eskalační beat uvnitř události vyvolá nový hod (u podob překážky, které se házejí) */
+    rollChance: z.number().min(0).max(1),
+  }),
 })
 export type DirectorTables = z.infer<typeof DirectorTablesSchema>
 

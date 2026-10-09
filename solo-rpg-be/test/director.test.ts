@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { GameDetail, Quest, SceneMeta, StoryThread } from '@solo-rpg/shared'
+import type { DirectorEvent, GameDetail, Quest, SceneMeta, StoryThread } from '@solo-rpg/shared'
 import { applyBriefPatch, buildBrief } from '../src/director/briefBuilder.js'
 import { buildBriefSection } from '../src/director/briefPrompt.js'
 import { beatFromPayload, computePulse, phaseFromTension, type BeatRecord } from '../src/director/pulse.js'
@@ -200,6 +200,9 @@ describe('buildBrief', () => {
         if (b.obstacleKind === 'encounter' || b.obstacleKind === 'dilemma') {
           expect(b.difficulty).toBeNull()
           expect(b.outcome).toBeNull()
+          expect(b.rollPhase).toBe(b.obstacleKind === 'encounter' ? 'before' : 'none')
+        } else {
+          expect(b.rollPhase).toBe(b.difficulty === null ? 'none' : 'before')
         }
       } else {
         expect(b.obstacleKind).toBeNull()
@@ -213,10 +216,14 @@ describe('buildBrief', () => {
     expect(p1.difficulty).toBe(3)
     const p2 = applyBriefPatch(p1, { obstacleKind: 'encounter', outcome: 'success' }, 'dnd5e')
     expect(p2.difficulty).toBeNull()
-    expect(p2.outcome).toBeNull()
     expect(p2.difficultyLabel).toBeNull()
+    // boj se „hází“ celý: výsledek střetu lze zadat → fáze po boji
+    expect(p2.outcome).toBe('success')
+    expect(p2.rollPhase).toBe('after')
     const p3 = applyBriefPatch(p2, { eventType: 'opportunity' }, 'dnd5e')
     expect(p3.obstacleKind).toBeNull()
+    expect(p3.outcome).toBeNull()
+    expect(p3.rollPhase).toBe('none')
   })
 })
 
@@ -240,7 +247,7 @@ describe('buildBriefSection', () => {
     const b = applyBriefPatch(base, { mode: 'event', difficulty: 2, outcome: 'partial', notes: 'ať se objeví dopis', twist: true }, 'dnd5e')
     const text = buildBriefSection(b, detail)
     expect(text).toContain('ČÁSTEČNÝ ÚSPĚCH')
-    expect(text).toContain('Výsledek NEMĚŇ')
+    expect(text).toContain('výsledek NEMĚŇ')
     expect(text).toContain('ZVRAT')
     expect(text).toContain('Pokyn hráče: ať se objeví dopis')
     const c = applyBriefPatch(base, { mode: 'continue', difficulty: null, twist: false, beatKind: 'escalation' }, 'none')
@@ -258,9 +265,61 @@ describe('buildBriefSection', () => {
     const t2 = buildBriefSection(fight, detail)
     expect(t2).toContain('Podoba překážky: STŘET / BOJ')
     expect(t2).toContain('ZASTAV SE před první výměnou')
-    expect(t2).toContain('střet rozehraje hráč podle svých pravidel')
+    expect(t2).toContain('boj rozehraje hráč podle svých pravidel')
     expect(t2).not.toContain('obtížnost 4/5')
     const choice = applyBriefPatch(base, { mode: 'event', eventType: 'obstacle', obstacleKind: 'dilemma' }, 'dnd5e')
     expect(buildBriefSection(choice, detail)).toContain('jde o volbu hráče')
+  })
+
+  it('beat uvnitř události: průběh, fáze po hodu/boji, rozuzlení s celkovým výsledkem', () => {
+    const event: DirectorEvent = {
+      id: 'evt_1',
+      sceneId: detail.scenes[0].id,
+      eventType: 'obstacle',
+      obstacleKind: 'encounter',
+      stakes: 'high',
+      focus: base.focus,
+      status: 'active',
+      beats: [{ briefId: 'brf_a', suggestionId: 'sug_a', beatKind: 'escalation', rollPhase: 'before', difficulty: null, outcome: null, twist: false, createdAt: NOW }],
+      createdAt: NOW,
+      resolvedAt: null,
+    }
+    const pulse = computePulse(detail, [], NO_OVERRIDE)
+    const after = buildBrief({ detail, scene: detail.scenes[0], pulse, seed: 3, rulesSystem: 'dnd5e', now: NOW, event })
+    expect(after.eventId).toBe('evt_1')
+    expect(after.mode).toBe('event')
+    expect(after.obstacleKind).toBe('encounter')
+    expect(after.stakes).toBe('high')
+    expect(after.rollPhase).toBe('after')
+    expect(['consequence', 'resolution']).toContain(after.beatKind)
+    const waiting = buildBriefSection(after, detail, event)
+    expect(waiting).toContain('PROBÍHAJÍCÍ UDÁLOST (2. beat)')
+    expect(waiting).toContain('zastaveno před hodem/střetem')
+    expect(waiting).toContain('NEPIŠ, dokud ho nezadá')
+    const done = applyBriefPatch(after, { outcome: 'fail' }, 'dnd5e')
+    expect(done.rollPhase).toBe('after')
+    const text = buildBriefSection(done, detail, event)
+    expect(text).toContain('Střet už hráč odehrál')
+    expect(text).toContain('NEÚSPĚCH')
+
+    // uzavření: rozuzlení s celkovým výsledkem, bez dalšího hodu
+    const closing = buildBrief({ detail, scene: detail.scenes[0], pulse, seed: 3, rulesSystem: 'dnd5e', now: NOW, event, resolve: { outcome: 'partial' } })
+    expect(closing.beatKind).toBe('resolution')
+    expect(closing.rollPhase).toBe('none')
+    expect(closing.outcome).toBe('partial')
+    const closingText = buildBriefSection(closing, detail, event)
+    expect(closingText).toContain('událost tímto beatem KONČÍ')
+    expect(closingText).toContain('celkový výsledek události: ČÁSTEČNÝ ÚSPĚCH')
+    // patch beze změny hodu výsledek rozuzlení nesmaže
+    expect(applyBriefPatch(closing, { notes: 'x' }, 'dnd5e').outcome).toBe('partial')
+
+    // po mnoha beatech bez hodu tlačí tabulka na rozuzlení
+    const long = { ...event, beats: Array.from({ length: 5 }, (_, i) => ({ ...event.beats[0], rollPhase: 'none' as const, outcome: 'success' as const, briefId: `b${i}` })) }
+    let resolutions = 0
+    for (let seed = 1; seed <= 40; seed++) {
+      const b = buildBrief({ detail, scene: detail.scenes[0], pulse, seed, rulesSystem: 'none', now: NOW, event: long })
+      if (b.beatKind === 'resolution') resolutions++
+    }
+    expect(resolutions).toBeGreaterThan(25)
   })
 })

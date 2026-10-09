@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { BeatKind, BriefPatch, CampaignPulse, DirectorState, EventType, ObstacleKind, PacingPhase, PulseOverride, RollOutcome, Stakes } from '@solo-rpg/shared'
+import type { BeatKind, BriefPatch, CampaignPulse, DirectorEvent, DirectorState, EventType, ObstacleKind, PacingPhase, PulseOverride, RollOutcome, Stakes } from '@solo-rpg/shared'
 import { inputClass } from '../utils/forms'
 
 interface DirectorPanelProps {
@@ -21,6 +21,10 @@ interface DirectorPanelProps {
   onWrite: () => void
   onClose: () => void
   onPulseOverride: (override: PulseOverride) => void
+  /** Uzavřít probíhající událost: brief rozuzlení s celkovým výsledkem */
+  onResolveEvent: (outcome: RollOutcome | null) => void
+  /** Zahodit probíhající událost bez rozuzlení */
+  onAbandonEvent: () => void
   darken?: boolean
 }
 
@@ -34,6 +38,37 @@ const OBSTACLE_LABEL: Record<ObstacleKind, string> = {
   dilemma: 'dilema (volba bez hodu)',
 }
 const NO_ROLL_OBSTACLE: ReadonlySet<ObstacleKind> = new Set(['encounter', 'dilemma'])
+const BEAT_SHORT: Record<BeatKind, string> = { escalation: 'eskalace', consequence: 'následek', resolution: 'rozuzlení', reveal: 'zvrat' }
+
+function EventStrip({ event, locked, onResolve, onAbandon }: { event: DirectorEvent; locked: boolean; onResolve: (o: RollOutcome | null) => void; onAbandon: () => void }) {
+  const title = `${EVENT_LABEL[event.eventType]}${event.obstacleKind ? ` – ${OBSTACLE_LABEL[event.obstacleKind]}` : ''}`
+  const beats = event.beats.map(b => {
+    const parts = [BEAT_SHORT[b.beatKind]]
+    if (b.rollPhase === 'before') parts.push(b.difficulty !== null ? `před hodem ${b.difficulty}/5` : 'před střetem')
+    if (b.outcome) parts.push(OUTCOME_LABEL[b.outcome])
+    return parts.join(' · ')
+  })
+  return (
+    <div className="flex flex-col gap-1 text-xs text-amber-100/90">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-semibold text-amber-200">⚡ Probíhající událost</span>
+        <span>{title}</span>
+        <span className="text-amber-200/70">sázky {STAKES_LABEL[event.stakes]}</span>
+        <span className="ml-auto flex items-center gap-1">
+          <span className="text-amber-200/70" title="Nechat AI napsat rozuzlení s tímto celkovým výsledkem">uzavřít:</span>
+          {(Object.keys(OUTCOME_LABEL) as RollOutcome[]).map(o => (
+            <button key={o} type="button" onClick={() => onResolve(o)} disabled={locked} className={`${btn} px-2 py-0 border-amber-300/50 hover:border-amber-200`}>{OUTCOME_LABEL[o]}</button>
+          ))}
+          <button type="button" onClick={() => onResolve(null)} disabled={locked} className={`${btn} px-2 py-0 border-amber-300/50 hover:border-amber-200`} title="Rozuzlení bez výsledku hodu">bez hodu</button>
+          <button type="button" onClick={onAbandon} disabled={locked} className={`${btn} px-2 py-0 border-red-400/50 text-red-200 hover:border-red-300`} title="Zahodit událost bez rozuzlení (beaty zůstávají v historii)">🗑</button>
+        </span>
+      </div>
+      <div className="text-amber-200/70">
+        {beats.length === 0 ? 'zatím bez beatů' : beats.map((b, i) => <span key={i}>{i > 0 && ' → '}{i + 1}. {b}</span>)}
+      </div>
+    </div>
+  )
+}
 const BEAT_LABEL: Record<BeatKind, string> = { escalation: 'eskalace', consequence: 'následek', resolution: 'rozuzlení', reveal: 'odhalení / zvrat' }
 const STAKES_LABEL: Record<Stakes, string> = { low: 'nízké', medium: 'střední', high: 'vysoké' }
 const OUTCOME_LABEL: Record<RollOutcome, string> = { success: 'úspěch', partial: 'částečný úspěch', fail: 'neúspěch' }
@@ -87,9 +122,14 @@ function PulseStrip({ pulse, onOverride, disabled }: { pulse: CampaignPulse; onO
  * Režie Directoru nad vstupním polem: puls kampaně (s ruční korekcí) a brief – co se má v dalším beatu stát.
  * Hráč může přehodit (nový seed), upravit hodnoty, zadat výsledek hodu, přeskočit režii, a teprve pak nechá AI psát.
  */
-export default function DirectorPanel({ state, busy, aiBusy, suggestionPending, canWrite, threadOptions, questOptions, onCreate, onPatch, onSkip, onWrite, onClose, onPulseOverride, darken }: DirectorPanelProps) {
+export default function DirectorPanel({ state, busy, aiBusy, suggestionPending, canWrite, threadOptions, questOptions, onCreate, onPatch, onSkip, onWrite, onClose, onPulseOverride, onResolveEvent, onAbandonEvent, darken }: DirectorPanelProps) {
   const brief = state.brief
+  const event = state.event
   const locked = busy || aiBusy || suggestionPending
+  /** Brief je beatem probíhající události – typ, podoba a sázky se dědí */
+  const inEvent = !!brief && !!event && brief.eventId === event.id
+  /** Hráč hodil / dobojoval, ale výsledek ještě nezadal – AI nemá co psát */
+  const awaitingOutcome = !!brief && brief.rollPhase === 'after' && brief.outcome === null
   const [notes, setNotes] = useState(brief?.notes ?? '')
 
   const focusOptions = (options: string[], current: string | null) => (current && !options.includes(current) ? [current, ...options] : options)
@@ -109,11 +149,16 @@ export default function DirectorPanel({ state, busy, aiBusy, suggestionPending, 
       <div className="px-4 py-2 border-b border-amber-500/40">
         <PulseStrip pulse={state.pulse} onOverride={onPulseOverride} disabled={busy || aiBusy} />
       </div>
+      {event && (
+        <div className="px-4 py-2 border-b border-amber-500/40 bg-amber-900/30">
+          <EventStrip event={event} locked={locked} onResolve={onResolveEvent} onAbandon={onAbandonEvent} />
+        </div>
+      )}
 
       <div className="overflow-y-auto px-4 py-2 flex flex-col gap-2">
         {!brief ? (
           <div className="flex flex-wrap items-center gap-2 text-amber-100/80">
-            <span>Žádný brief – nech Director rozhodnout, co se má v dalším beatu stát.</span>
+            <span>{event ? 'Žádný brief – nech Director připravit další beat události.' : 'Žádný brief – nech Director rozhodnout, co se má v dalším beatu stát.'}</span>
             <button type="button" onClick={() => onCreate()} disabled={busy || aiBusy} className={`${btn} border-amber-300/70 bg-amber-800/50 hover:bg-amber-700/60`}>🎲 Vytvořit režii</button>
           </div>
         ) : (
@@ -121,6 +166,12 @@ export default function DirectorPanel({ state, busy, aiBusy, suggestionPending, 
             <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 items-center text-xs">
               <span className="text-amber-200/80">Režim</span>
               <div className="flex flex-wrap gap-2 items-center">
+                {inEvent ? (
+                  <span title="Beat uvnitř probíhající události – typ, podoba a sázky se dědí z události">
+                    ⚡ {event.beats.length + 1}. beat události · {EVENT_LABEL[event.eventType]}{event.obstacleKind ? ` – ${OBSTACLE_LABEL[event.obstacleKind]}` : ''}
+                  </span>
+                ) : (
+                  <>
                 <select value={brief.mode} onChange={e => onPatch({ mode: e.target.value as BriefPatch['mode'] })} disabled={locked} className={selectClass}>
                   <option value="continue">pokračování (bez nové události)</option>
                   <option value="event">nová událost</option>
@@ -134,6 +185,8 @@ export default function DirectorPanel({ state, busy, aiBusy, suggestionPending, 
                   <select value={brief.obstacleKind ?? 'check'} onChange={e => onPatch({ obstacleKind: e.target.value as ObstacleKind })} disabled={locked} className={selectClass} title="Podoba překážky; střet/boj a dilema se neřeší jedním hodem – AI se zastaví a řešení je na hráči">
                     {(Object.keys(OBSTACLE_LABEL) as ObstacleKind[]).map(k => <option key={k} value={k}>{OBSTACLE_LABEL[k]}</option>)}
                   </select>
+                )}
+                  </>
                 )}
               </div>
 
@@ -154,24 +207,39 @@ export default function DirectorPanel({ state, busy, aiBusy, suggestionPending, 
 
               <span className="text-amber-200/80">Hod</span>
               <div className="flex flex-wrap gap-2 items-center">
-                {brief.obstacleKind !== null && NO_ROLL_OBSTACLE.has(brief.obstacleKind) ? (
-                  <span className="text-amber-200/80" title="AI se zastaví před prvním střetem / před volbou – řešení je na hráči podle jeho pravidel">
-                    {brief.obstacleKind === 'encounter' ? 'bez jednoho hodu – střet odehraje hráč podle svých pravidel' : 'bez hodu – jde o volbu hráče'}
-                  </span>
-                ) : (
-                <select value={brief.difficulty ?? 'none'} onChange={e => onPatch({ difficulty: e.target.value === 'none' ? null : Number(e.target.value) })} disabled={locked} className={selectClass}>
-                  <option value="none">bez hodu</option>
-                  {[1, 2, 3, 4, 5].map(d => <option key={d} value={d}>obtížnost {d}/5</option>)}
-                </select>
-                )}
-                {brief.difficulty !== null && (
+                {brief.rollPhase === 'after' ? (
                   <>
-                    {brief.difficultyLabel && <span className="font-semibold text-amber-200">{brief.difficultyLabel}</span>}
-                    <span className="text-amber-200/80">výsledek</span>
-                    <select value={brief.outcome ?? 'pending'} onChange={e => onPatch({ outcome: e.target.value === 'pending' ? null : (e.target.value as RollOutcome) })} disabled={locked} className={selectClass} title="Hoď si podle svých pravidel a zadej výsledek; bez výsledku AI dovede scénu k hodu a zastaví se">
-                      <option value="pending">ještě jsem neházel</option>
+                    <span className={awaitingOutcome ? 'font-semibold text-amber-200' : 'text-amber-200/80'}>
+                      {brief.obstacleKind === 'encounter' ? 'střet je odehraný – jak dopadl?' : `hodil jsi na obtížnost ${brief.difficulty}/5${brief.difficultyLabel ? ` (${brief.difficultyLabel})` : ''} – jak to dopadlo?`}
+                    </span>
+                    <select value={brief.outcome ?? 'pending'} onChange={e => onPatch({ outcome: e.target.value === 'pending' ? null : (e.target.value as RollOutcome) })} disabled={locked} className={selectClass} title="Zadej výsledek podle svých pravidel; AI pak popíše dopad">
+                      <option value="pending">zadej výsledek…</option>
                       {(Object.keys(OUTCOME_LABEL) as RollOutcome[]).map(o => <option key={o} value={o}>{OUTCOME_LABEL[o]}</option>)}
                     </select>
+                  </>
+                ) : brief.obstacleKind !== null && NO_ROLL_OBSTACLE.has(brief.obstacleKind) ? (
+                  <span className="text-amber-200/80" title="AI se zastaví před prvním střetem / před volbou – řešení je na hráči podle jeho pravidel">
+                    {brief.obstacleKind === 'encounter' ? 'bez jednoho hodu – AI zastaví před střetem, výsledek boje zadáš v dalším beatu' : 'bez hodu – jde o volbu hráče'}
+                  </span>
+                ) : (
+                  <>
+                    <select value={brief.difficulty ?? 'none'} onChange={e => onPatch({ difficulty: e.target.value === 'none' ? null : Number(e.target.value) })} disabled={locked} className={selectClass}>
+                      <option value="none">bez hodu</option>
+                      {[1, 2, 3, 4, 5].map(d => <option key={d} value={d}>obtížnost {d}/5</option>)}
+                    </select>
+                    {brief.difficulty !== null && (
+                      <>
+                        {brief.difficultyLabel && <span className="font-semibold text-amber-200">{brief.difficultyLabel}</span>}
+                        <span className="text-amber-200/80">výsledek</span>
+                        <select value={brief.outcome ?? 'pending'} onChange={e => onPatch({ outcome: e.target.value === 'pending' ? null : (e.target.value as RollOutcome) })} disabled={locked} className={selectClass} title="Bez výsledku AI dovede scénu k hodu a zastaví se (hodíš pak a výsledek zadáš v dalším beatu); se zadaným výsledkem AI rovnou popíše dopad">
+                          <option value="pending">ještě jsem neházel – AI zastaví před hodem</option>
+                          {(Object.keys(OUTCOME_LABEL) as RollOutcome[]).map(o => <option key={o} value={o}>{OUTCOME_LABEL[o]}</option>)}
+                        </select>
+                      </>
+                    )}
+                    {brief.outcome && brief.difficulty === null && inEvent && brief.beatKind === 'resolution' && (
+                      <span className="text-amber-200/80">celkový výsledek události: <span className="font-semibold text-amber-200">{OUTCOME_LABEL[brief.outcome]}</span></span>
+                    )}
                   </>
                 )}
               </div>
@@ -208,7 +276,7 @@ export default function DirectorPanel({ state, busy, aiBusy, suggestionPending, 
 
       {brief && (
         <div className="px-4 py-2 border-t border-amber-500/40 flex flex-wrap items-center gap-2">
-          <button type="button" onClick={onWrite} disabled={locked || !canWrite} className={`${btn} border-emerald-400 bg-emerald-700/50 hover:bg-emerald-600/60`} title={canWrite ? 'Nechat AI napsat pokračování podle této režie' : 'Scéna nemá zapnutou AI nebo hra nemá vypravěče'}>
+          <button type="button" onClick={onWrite} disabled={locked || !canWrite || awaitingOutcome} className={`${btn} border-emerald-400 bg-emerald-700/50 hover:bg-emerald-600/60`} title={awaitingOutcome ? 'Nejdřív zadej výsledek hodu / střetu' : canWrite ? 'Nechat AI napsat pokračování podle této režie' : 'Scéna nemá zapnutou AI nebo hra nemá vypravěče'}>
             ✍️ Nechat AI psát
           </button>
           <button type="button" onClick={() => onCreate()} disabled={locked} className={`${btn} border-amber-300/60 hover:border-amber-200`} title="Nový brief s jiným seedem">

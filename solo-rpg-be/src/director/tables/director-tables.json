@@ -44,5 +44,18 @@
     "$comment": "Pravděpodobnost, že beat nevyžaduje hod (difficulty = null)",
     "continue": 0.5,
     "event": 0.15
+  },
+  "eventBeat": {
+    "$comment": "Beat uvnitř probíhající události podle toho, jak dopadl minulý beat (afterRoll = hráč právě hodil / dobojoval a zadává výsledek; none = minulý beat byl bez hodu). Po `resolveAfterBeats` beatech se váha rozuzlení násobí `resolvePush`.",
+    "kind": {
+      "afterRoll": { "escalation": 0, "consequence": 55, "resolution": 45, "reveal": 0 },
+      "fail": { "escalation": 25, "consequence": 55, "resolution": 20, "reveal": 0 },
+      "partial": { "escalation": 30, "consequence": 30, "resolution": 40, "reveal": 0 },
+      "success": { "escalation": 15, "consequence": 10, "resolution": 75, "reveal": 0 },
+      "none": { "escalation": 40, "consequence": 20, "resolution": 40, "reveal": 0 }
+    },
+    "resolveAfterBeats": 3,
+    "resolvePush": 3,
+    "rollChance": 0.6
   }
 }

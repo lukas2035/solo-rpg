@@ -162,7 +162,7 @@ describe('postavy a scény', () => {
     await storage.saveSceneEntries(G, scene.id, [{ ...entries[0], text: 'Zase jiný' }])
     expect(await find()).toMatchObject({ summaryStale: true })
     const [row] = await database.db.execute(sql`SELECT schema_version FROM entities WHERE id = ${scene.id}`).then(r => r.rows as { schema_version: number }[])
-    expect(row.schema_version).toBe(2)
+    expect(row.schema_version).toBe(3)
 
     // Kontextové scény: vazba scéna → scéna podle názvu, sama sebe a neznámé vypustí, rename se promítne
     const other = await storage.createScene(G, { title: 'Jiná scéna' })

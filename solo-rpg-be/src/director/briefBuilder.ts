@@ -6,11 +6,14 @@ import {
   type BriefMode,
   type BriefPatch,
   type CampaignPulse,
+  type DirectorEvent,
   type EventType,
   type GameDetail,
   type NarrativeBrief,
   type ObstacleKind,
   type Quest,
+  type RollOutcome,
+  type RollPhase,
   type RulesSystem,
   type SceneMeta,
   type StoryThread,
@@ -18,12 +21,12 @@ import {
 import { newId } from '../storage/ids.js'
 import { createRng, weightedPick, type Rng } from './rng.js'
 import { difficultyLabel } from './rulesAdapter.js'
-import { loadDirectorTables, tensionBand, type DirectorTables } from './tables.js'
+import { loadDirectorTables, tensionBand, type DirectorTables, type EventBeatContext } from './tables.js'
 
 /**
  * Director v1 – z pulsu a tabulek sestaví `NarrativeBrief` (docs/ARCHITECTURE_V2.md §4.1). Čistá funkce se seeded RNG:
  * stejný seed nad stejným stavem = stejný brief. Konkrétní entity (nit, quest, frakce) vybírá aplikace podle vazeb
- * na scénu, ne AI.
+ * na scénu, ne AI. Má‑li scéna aktivní událost, brief je jejím dalším beatem (§4.3 – stavový automat beatu).
  */
 
 export interface BuildBriefInput {
@@ -32,6 +35,10 @@ export interface BuildBriefInput {
   pulse: CampaignPulse
   seed: number
   rulesSystem: RulesSystem
+  /** Probíhající událost scény – brief pak pokračuje v ní místo nového losu */
+  event?: DirectorEvent | null
+  /** „Uzavřít událost“: vynutit beat rozuzlení s daným celkovým výsledkem (jen s `event`) */
+  resolve?: { outcome: RollOutcome | null }
   now?: number
   tables?: DirectorTables
 }
@@ -69,6 +76,8 @@ export function buildBrief(input: BuildBriefInput): NarrativeBrief {
   const rng = createRng(input.seed)
   const band = tensionBand(pulse.tension)
 
+  if (input.event && input.event.status === 'active') return buildEventBeat(input, input.event, rng, band, tables)
+
   // Dluh následků má přednost před tabulkami: příběh musí nejdřív zaplatit
   const forcedConsequence = pulse.consequenceDebt > 0
   let mode: BriefMode = forcedConsequence ? 'event' : weightedPick(rng, tables.mode[pulse.phase])
@@ -91,6 +100,8 @@ export function buildBrief(input: BuildBriefInput): NarrativeBrief {
 
   const noRoll = eventType === 'reward' || (obstacleKind !== null && NO_ROLL_OBSTACLES.includes(obstacleKind)) || rng.next() < tables.noRollChance[mode]
   const difficulty = noRoll ? null : Number(weightedPick(rng, tables.difficulty[band]))
+  // Boj/střet má také fázi „před“: AI uvede protivníka a zastaví se, výsledek hráč zadá v dalším beatu
+  const rollPhase: RollPhase = difficulty !== null || obstacleKind === 'encounter' ? 'before' : 'none'
   const stakes = weightedPick(rng, tables.stakes[band])
 
   const chars = new Set(scene.characters)
@@ -116,6 +127,7 @@ export function buildBrief(input: BuildBriefInput): NarrativeBrief {
     beatKind,
     difficulty,
     difficultyLabel: difficultyLabel(input.rulesSystem, difficulty),
+    rollPhase,
     stakes,
     twist,
     focus: {
@@ -127,14 +139,77 @@ export function buildBrief(input: BuildBriefInput): NarrativeBrief {
     },
     outcome: null,
     notes: '',
+    eventId: null,
     pulse,
     createdAt: input.now ?? Date.now(),
   }
 }
 
+/** Zda se podoba překážky řeší hodem na obtížnost (encounter se „hází“ celým bojem, dilema vůbec) */
+const rollsDifficulty = (kind: ObstacleKind | null) => kind !== null && !NO_ROLL_OBSTACLES.includes(kind)
+
 /**
- * Ruční úprava hráče; drží konzistenci (continue → bez eventType, překážka má podobu, boj/dilema bez hodu,
- * bez hodu → bez outcome) a přepočítá popisek obtížnosti
+ * Další beat probíhající události: typ, podobu, sázky i focus dědí; losuje se jen dramatická funkce podle toho,
+ * jak dopadl minulý beat. Po beatu „před hodem“ následuje beat „po hodu“ (hráč zadá výsledek). Rozuzlení událost uzavře.
+ */
+function buildEventBeat(input: BuildBriefInput, event: DirectorEvent, rng: Rng, band: ReturnType<typeof tensionBand>, tables: DirectorTables): NarrativeBrief {
+  const last = event.beats[event.beats.length - 1] ?? null
+  const awaitingRoll = last?.rollPhase === 'before'
+
+  let beatKind: BeatKind
+  let rollPhase: RollPhase = 'none'
+  let difficulty: number | null = null
+  let outcome: RollOutcome | null = null
+  let twist = false
+
+  if (input.resolve) {
+    // Hráč událost uzavírá: rozuzlení s celkovým výsledkem (bez dalšího hodu)
+    beatKind = 'resolution'
+    outcome = input.resolve.outcome
+  } else {
+    const context: EventBeatContext = awaitingRoll ? 'afterRoll' : (last?.outcome ?? 'none')
+    const weights = { ...tables.eventBeat.kind[context] }
+    if (event.beats.length >= tables.eventBeat.resolveAfterBeats) weights.resolution *= tables.eventBeat.resolvePush
+    beatKind = weightedPick(rng, weights)
+    if (awaitingRoll) {
+      // Hráč právě hodil / dobojoval – AI dostane výsledek a popíše dopad
+      rollPhase = 'after'
+      difficulty = last!.difficulty
+    } else if (beatKind === 'escalation' && (event.obstacleKind === 'encounter' || rollsDifficulty(event.obstacleKind)) && rng.next() < tables.eventBeat.rollChance) {
+      rollPhase = 'before'
+      difficulty = rollsDifficulty(event.obstacleKind) ? Number(weightedPick(rng, tables.difficulty[band])) : null
+    } else if (beatKind !== 'resolution') {
+      const twistChance = Math.min(tables.twist.max, tables.twist.base + tables.twist.perBeat * input.pulse.beatsSinceTwist)
+      twist = rng.next() < twistChance
+      if (twist) beatKind = 'reveal'
+    }
+  }
+
+  return {
+    id: newId('brief'),
+    sceneId: input.scene.id,
+    seed: input.seed,
+    mode: 'event',
+    eventType: event.eventType,
+    obstacleKind: event.obstacleKind,
+    beatKind,
+    difficulty,
+    difficultyLabel: difficultyLabel(input.rulesSystem, difficulty),
+    rollPhase,
+    stakes: event.stakes,
+    twist,
+    focus: { ...event.focus, characters: [...input.scene.characters], location: input.scene.location },
+    outcome,
+    notes: '',
+    eventId: event.id,
+    pulse: input.pulse,
+    createdAt: input.now ?? Date.now(),
+  }
+}
+
+/**
+ * Ruční úprava hráče; drží konzistenci (continue → bez eventType, překážka má podobu, boj/dilema bez obtížnosti,
+ * fáze hodu podle obtížnosti, bez hodu → bez outcome) a přepočítá popisek obtížnosti
  */
 export function applyBriefPatch(brief: NarrativeBrief, patch: BriefPatch, rulesSystem: RulesSystem): NarrativeBrief {
   const next: NarrativeBrief = { ...brief, ...stripUndefined(patch), focus: { ...brief.focus, ...stripUndefined(patch.focus ?? {}) } }
@@ -144,7 +219,18 @@ export function applyBriefPatch(brief: NarrativeBrief, patch: BriefPatch, rulesS
   else if (next.obstacleKind === null) next.obstacleKind = 'check'
   if (next.obstacleKind !== null && NO_ROLL_OBSTACLES.includes(next.obstacleKind)) next.difficulty = null
   if (next.twist) next.beatKind = 'reveal'
-  if (next.difficulty === null) next.outcome = null
+  const rolls = next.difficulty !== null || next.obstacleKind === 'encounter'
+  if (!rolls) {
+    // Bez hodu: výsledek smí zůstat jen u rozuzlení události (celkový výsledek události)
+    next.rollPhase = 'none'
+    if (!(next.eventId && next.beatKind === 'resolution')) next.outcome = null
+  } else if (next.outcome) {
+    // Zadaný výsledek = hodilo se
+    next.rollPhase = 'after'
+  } else if (next.rollPhase === 'none' || (patch.outcome === null && !next.eventId)) {
+    // Nový hod, nebo hráč výsledek smazal u samostatného beatu → zpět před hod (v události „po hodu“ zůstává)
+    next.rollPhase = 'before'
+  }
   next.difficultyLabel = difficultyLabel(rulesSystem, next.difficulty)
   return next
 }

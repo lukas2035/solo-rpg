@@ -192,6 +192,10 @@ Po každém Acceptu:
 3. Vše do `events` → stav entity lze rekonstruovat, uživatel vidí „proč si to AI myslí“, undo.
 AI **nikdy nezapisuje přímo**.
 
+*(Stav: smyčka Brief → Accept → Outcome → Consequence je realizována jako `DirectorEvent` persistovaný u scény – beat
+`rollPhase: before` zastaví před hodem, další beat `after` čeká na `outcome`, beat `resolution` událost uzavře. Extrakce stavu
+(body 1–3) zatím jen u questů – návrhy po shrnutí scény.)*
+
 ### 4.4 Kontext pro AI (největší technické riziko)
 - `ContextBuilder` nad **in‑memory indexem hry** (načíst jednou, invalidovat při zápisu), ne čtení z úložiště per request.
   *(Krok 2 zatím staví graf z `getGame()` per request – čistá funkce nad `GameDetail`; index až když bude výkon bolet.)*

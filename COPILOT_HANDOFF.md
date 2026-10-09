@@ -334,10 +334,11 @@ GET  /api/games/:name/scenes/:id/ai/suggestion  (→ { suggestion | null, reject
 POST /api/games/:name/scenes/:id/ai/suggestions/:sug/accept ({ entries, partial? } – upravené repliky; → { entries, suggestion: zbylý návrh | null }; partial nechá nepřijaté repliky jako návrh; 404 neaktuální návrh)
 POST /api/games/:name/scenes/:id/ai/suggestions/:sug/reject ({ reason } → AiSuggestionState; 404 neaktuální návrh)
 POST /api/games/:name/scenes/:id/context-scenes  (AI vybere předchozí scény relevantní pro scénu; → { scenes, raw }; neukládá; 400 bez předchozích scén se shrnutím)
-GET  /api/games/:name/scenes/:id/director        (→ DirectorState { pulse: CampaignPulse, brief: NarrativeBrief | null })
-POST /api/games/:name/scenes/:id/director/brief  ({ seed? } → NarrativeBrief; nahradí rozpracovaný brief scény, in-memory)
+GET  /api/games/:name/scenes/:id/director        (→ DirectorState { pulse, brief: NarrativeBrief | null, event: DirectorEvent | null })
+POST /api/games/:name/scenes/:id/director/brief  ({ seed?, resolve?: { outcome } } → NarrativeBrief; nahradí brief scény, persistováno)
 PATCH /api/games/:name/scenes/:id/director/brief (BriefPatch – ruční úpravy hráče; → NarrativeBrief; 404 bez briefu)
-DELETE /api/games/:name/scenes/:id/director/brief (přeskočit režii → 204)
+DELETE /api/games/:name/scenes/:id/director/brief (přeskočit režii → 204; událost zůstává)
+DELETE /api/games/:name/scenes/:id/director/event (zahodit probíhající událost i její brief → DirectorState)
 POST /api/games/:name/scenes/:id/import ({ text, resolutions? } – import odehraného přepisu, `vault/sceneImport.ts`; → { entries, addedCharacters, ambiguous }; 400 prázdný/nerozpoznaný text)
   Přepis `**Jméno**: text` / `**Jméno:** text` (tučné nepovinné) parsuje `ai/scenePrompt.ts#parseSpeakerLines` (společné jádro
   s `parseAiReply`) s volbou `unknownSpeaker: 'bold-character'` a vlastním `matchCharacter`: celé jméno → jednoznačné; jinak
@@ -407,7 +408,20 @@ GET  /vault/*  (statické soubory z aktuálně otevřené složky s hrami)
 - **Viditelný krok před psaním AI:** 🤖 bez briefu → `POST …/director/brief` a panel „🎬 Režie“ pod scénou (hráč může přehodit
   se seedem, upravit cokoli, přeskočit = `DELETE` + psát volně, nebo „Nechat AI psát“). S briefem 🤖 rovnou píše; brief se
   **spotřebuje až přijetím návrhu** (`director.consume` → event `director.beat.accepted` {suggestionId, brief, summary});
-  odmítnutí + znovu brief použije znovu. Brief je in‑memory per scéna (jako AiSuggestion), FE ho načte přes GET při přepnutí scény.
+  odmítnutí + znovu brief použije znovu. **Brief i probíhající událost se persistují** u scény (`SceneFields.director:
+  { brief, event } | null`, scene schema v3; `storage.getSceneDirector/saveSceneDirector`, zápis neposouvá `updatedAt`
+  scény); FE načte přes GET při přepnutí scény a panel otevře, má‑li scéna brief nebo aktivní událost.
+- **Událost přes více beatů** (`DirectorEvent {id, title, eventType, obstacleKind, stakes, focus, difficulty, status, beats[]}`):
+  přijetí beatu v režimu `event` bez aktivní události ji **založí** (event `director.event.started`), výjimka = jednorázová
+  událost (beatKind resolution a rollPhase ≠ before). Další briefy scény jsou **beaty události** (`brief.eventId`, `buildEventBeat`:
+  dědí typ/podobu/sázky/focus thread+quest+faction, postavy/lokace aktuální; beatKind z tabulky `eventBeat.kind[context]`,
+  kontext afterRoll/fail/partial/success/none, po 3 beatech tlak na rozuzlení `resolvePush`). Beat **resolution** událost
+  uzavře (`director.event.resolved` {outcome}; v DB se pak drží `event: null`, status jen v logu). Hráč může událost uzavřít
+  ručně („⚡ Uzavřít“ = `POST brief { resolve: { outcome } }` → brief rozuzlení s celkovým výsledkem) nebo zahodit
+  (`DELETE …/director/event` → `director.event.abandoned`, smaže i brief události).
+- **Fáze hodu** `brief.rollPhase` none/before/after: `before` = AI dovede k hodu/střetu a zastaví se; následující beat
+  je `after` se zděděnou obtížností – hráč **musí zadat `outcome`**, jinak FE 🤖 jen otevře panel a BE `generate` vrátí 400.
+  `applyBriefPatch`: zadaný outcome → after; bez hodu → none (kromě rozuzlení události s celkovým výsledkem).
 - **`CampaignPulse`** (`pulse.ts#computePulse`): napětí 0–10 = eskalované nitě ×2 (cap 4) + aktivní (cap 3) + hodiny ≥75 % (cap 2)
   + ≥2 aktivní questy (+1) + posledních 5 beatů (obstacle/fail +0.5, reward/resolution −1); fáze calm ≤3 / rising ≤6 / peak,
   aftermath po resolution/reward; `consequenceDebt` (fail +1, consequence beat −1, cap 3), `beatsSinceTwist`, `signals` („proč?“).

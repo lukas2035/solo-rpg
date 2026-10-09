@@ -1,4 +1,4 @@
-import type { BeatKind, EventType, GameDetail, NarrativeBrief, ObstacleKind, RollOutcome, Stakes } from '@solo-rpg/shared'
+import type { BeatKind, DirectorEvent, EventType, GameDetail, NarrativeBrief, ObstacleKind, RollOutcome, Stakes } from '@solo-rpg/shared'
 
 /**
  * Převod `NarrativeBrief` na sekci promptu „Režie“. AI dostane *co* se má stát (typ, obtížnost, stakes, koho se to
@@ -41,10 +41,16 @@ const OUTCOME: Record<RollOutcome, string> = {
 
 const withId = (name: string, id: string | undefined) => (id ? `${name} (id: ${id})` : name)
 
-export function buildBriefSection(brief: NarrativeBrief, detail: GameDetail): string {
+export function buildBriefSection(brief: NarrativeBrief, detail: GameDetail, event: DirectorEvent | null = null): string {
   const lines: string[] = ['## Režie (závazné zadání pro tento beat)']
+  const inEvent = event !== null && brief.eventId === event.id
   if (brief.mode === 'continue') {
     lines.push(`- Režim: POKRAČOVÁNÍ – nevnášej novou událost, rozvíjej rozehranou situaci a reakce postav; dramatická funkce: ${BEAT_KIND[brief.beatKind]}.`)
+  } else if (inEvent) {
+    lines.push(`- Režim: PROBÍHAJÍCÍ UDÁLOST (${event.beats.length + 1}. beat) – ${EVENT_TYPE[brief.eventType ?? 'neutral']}. Nezačínej novou událost, pokračuj v této.`)
+    if (brief.eventType === 'obstacle' && brief.obstacleKind) lines.push(`- Podoba překážky: ${OBSTACLE_KIND[brief.obstacleKind]}.`)
+    lines.push(`- Dosavadní průběh: ${describeEventBeats(event)}.`)
+    lines.push(`- Dramatická funkce tohoto beatu: ${BEAT_KIND[brief.beatKind]}${brief.beatKind === 'resolution' ? ' – událost tímto beatem KONČÍ, uzavři ji' : ''}.`)
   } else {
     lines.push(`- Režim: NOVÁ UDÁLOST – ${EVENT_TYPE[brief.eventType ?? 'neutral']}.`)
     if (brief.eventType === 'obstacle' && brief.obstacleKind) lines.push(`- Podoba překážky: ${OBSTACLE_KIND[brief.obstacleKind]}.`)
@@ -53,22 +59,7 @@ export function buildBriefSection(brief: NarrativeBrief, detail: GameDetail): st
   if (brief.twist) lines.push('- Tento beat obsahuje ZVRAT – odhalení musí být konkrétní a vycházet z toho, co už ve světě existuje (nitě, tajemství, vztahy).')
   lines.push(`- Sázky: ${STAKES[brief.stakes]}.`)
 
-  if (brief.difficulty !== null) {
-    const label = brief.difficultyLabel ? ` = ${brief.difficultyLabel}` : ''
-    if (brief.outcome) {
-      lines.push(`- Hod: hráč už hodil na obtížnost ${brief.difficulty}/5${label}. Výsledek: ${OUTCOME[brief.outcome]}. Výsledek NEMĚŇ a neházej znovu.`)
-    } else {
-      lines.push(
-        `- Hod: situace vyžaduje hod hráče na obtížnost ${brief.difficulty}/5${label}. Doveď scénu k okamžiku hodu a ZASTAV SE – výsledek neurčuj, nepopisuj, co se stalo po hodu. Obtížnost neměň.`,
-      )
-    }
-  } else if (brief.obstacleKind === 'encounter') {
-    lines.push('- Hod: žádný jednotlivý hod – střet rozehraje hráč podle svých pravidel po tvém textu.')
-  } else if (brief.obstacleKind === 'dilemma') {
-    lines.push('- Hod: žádný – jde o volbu hráče, ne o zkoušku.')
-  } else {
-    lines.push('- Hod: tento beat nevyžaduje hod – žádné zkoušky dovedností nevyvolávej.')
-  }
+  lines.push(`- ${describeRoll(brief)}`)
 
   const focus: string[] = []
   const chars = brief.focus.characters.map(n => withId(n, detail.setup.characters.find(c => c.name === n)?.id))
@@ -85,11 +76,46 @@ export function buildBriefSection(brief: NarrativeBrief, detail: GameDetail): st
   return lines.join('\n')
 }
 
+/** Řádek „Hod“ podle fáze: před hodem/střetem zastavit, po hodu popsat dopad zadaného výsledku, jinak bez hodu */
+function describeRoll(brief: NarrativeBrief): string {
+  const label = brief.difficultyLabel ? ` = ${brief.difficultyLabel}` : ''
+  const fight = brief.obstacleKind === 'encounter'
+  if (brief.rollPhase === 'after') {
+    if (!brief.outcome) return 'Hod: hráč hodil, ale výsledek ještě nezadal – NEPIŠ, dokud ho nezadá.'
+    const what = fight ? 'Střet už hráč odehrál podle svých pravidel' : `Hráč už hodil na obtížnost ${brief.difficulty ?? '?'}/5${label}`
+    return `Hod: ${what}. Výsledek: ${OUTCOME[brief.outcome]}. Popiš dopad a reakce – výsledek NEMĚŇ, neházej znovu, nezačínej další střet.`
+  }
+  if (brief.rollPhase === 'before') {
+    if (fight) return 'Hod: žádný jednotlivý hod – doveď scénu k prvnímu střetu a ZASTAV SE; boj rozehraje hráč podle svých pravidel a jeho výsledek přijde v dalším beatu.'
+    return `Hod: situace vyžaduje hod hráče na obtížnost ${brief.difficulty}/5${label}. Doveď scénu k okamžiku hodu a ZASTAV SE – výsledek neurčuj, nepopisuj, co se stalo po hodu. Obtížnost neměň.`
+  }
+  if (brief.outcome) return `Hod: žádný další; celkový výsledek události: ${OUTCOME[brief.outcome]}. Z něj vycházej, neměň ho.`
+  if (brief.obstacleKind === 'dilemma') return 'Hod: žádný – jde o volbu hráče, ne o zkoušku.'
+  return 'Hod: tento beat nevyžaduje hod – žádné zkoušky dovedností nevyvolávej.'
+}
+
+/** Krátký souhrn dosavadních beatů události pro prompt */
+function describeEventBeats(event: DirectorEvent): string {
+  if (event.beats.length === 0) return 'událost teprve začíná'
+  return event.beats
+    .map((b, i) => {
+      const parts = [BEAT_KIND[b.beatKind].split(' – ')[0]!.toLowerCase()]
+      if (b.rollPhase === 'before') parts.push('zastaveno před hodem/střetem')
+      if (b.outcome) parts.push(`výsledek ${OUTCOME[b.outcome].split(' – ')[0]!.toLowerCase()}`)
+      if (b.twist) parts.push('zvrat')
+      return `${i + 1}. ${parts.join(', ')}`
+    })
+    .join('; ')
+}
+
 /** Krátký popisek briefu do logu / payloadu události */
 export function describeBrief(brief: NarrativeBrief): string {
   const parts = [brief.mode === 'continue' ? 'pokračování' : `událost:${brief.eventType}${brief.obstacleKind ? `/${brief.obstacleKind}` : ''}`, brief.beatKind]
+  if (brief.eventId) parts.push('v události')
   if (brief.twist) parts.push('zvrat')
-  if (brief.difficulty !== null) parts.push(`obtížnost ${brief.difficulty}${brief.outcome ? `→${brief.outcome}` : ''}`)
+  if (brief.difficulty !== null) parts.push(`obtížnost ${brief.difficulty}`)
+  if (brief.rollPhase !== 'none') parts.push(brief.rollPhase === 'before' ? 'před hodem' : 'po hodu')
+  if (brief.outcome) parts.push(`→${brief.outcome}`)
   parts.push(`sázky ${brief.stakes}`)
   return parts.join(', ')
 }

@@ -40,6 +40,7 @@ import type {
   BackupGameResponse,
   BriefPatch,
   BriefRequest,
+  RollOutcome,
   DirectorState,
   NarrativeBrief,
 } from '@solo-rpg/shared'
@@ -263,18 +264,21 @@ export const rejectAiSuggestion = (game: string, sceneId: string, suggestionId: 
 
 const directorPath = (game: string, sceneId: string) => `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/director`
 
-/** Aktuální puls kampaně a rozpracovaný brief scény (pokud je) */
+/** Aktuální puls kampaně, rozpracovaný brief a probíhající událost scény */
 export const getDirector = (game: string, sceneId: string) => request<DirectorState>('GET', directorPath(game, sceneId))
 
-/** Nový brief (nahradí rozpracovaný); bez seedu náhodný = „přehodit“ */
-export const createBrief = (game: string, sceneId: string, seed?: number) =>
-  request<NarrativeBrief>('POST', `${directorPath(game, sceneId)}/brief`, (seed === undefined ? {} : { seed }) satisfies BriefRequest)
+/** Nový brief (nahradí rozpracovaný); bez seedu náhodný = „přehodit“; `resolve` uzavře probíhající událost rozuzlením */
+export const createBrief = (game: string, sceneId: string, seed?: number, resolve?: { outcome: RollOutcome | null }) =>
+  request<NarrativeBrief>('POST', `${directorPath(game, sceneId)}/brief`, { ...(seed === undefined ? {} : { seed }), ...(resolve ? { resolve } : {}) } satisfies BriefRequest)
 
 /** Ruční úprava briefu (typ, obtížnost, výsledek hodu, poznámka…) */
 export const patchBrief = (game: string, sceneId: string, patch: BriefPatch) => request<NarrativeBrief>('PATCH', `${directorPath(game, sceneId)}/brief`, patch)
 
 /** Přeskočit režii – další návrh AI vznikne bez briefu */
 export const clearBrief = (game: string, sceneId: string) => request<void>('DELETE', `${directorPath(game, sceneId)}/brief`)
+
+/** Zahodit probíhající událost bez rozuzlení */
+export const abandonEvent = (game: string, sceneId: string) => request<DirectorState>('DELETE', `${directorPath(game, sceneId)}/event`)
 
 /** Nechá AI shrnout děj scény (nic neukládá – výsledek se vloží do pole „Shrnutí“ v dialogu scény) */
 export const summarizeScene = (game: string, sceneId: string) =>

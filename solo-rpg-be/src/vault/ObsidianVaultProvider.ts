@@ -24,6 +24,7 @@ import {
   type Quest,
   type QuestInput,
   type QuestObjective,
+  type SceneDirector,
   type SceneInput,
   type SceneMeta,
   type StoryEntry,
@@ -2446,9 +2447,17 @@ export class ObsidianVaultProvider implements StorageProvider {
     await this.touchGame(dir)
   }
 
-  /** Vault je jen cíl exportu / zdroj importu – log událostí nevede */
+  /** Vault je jen cíl exportu / zdroj importu – log událostí nevede a stav Directoru drží jen v paměti */
   async appendEvent(): Promise<void> {}
   async listEvents(): Promise<GameEvent[]> {
     return []
+  }
+
+  private readonly directors = new Map<string, SceneDirector>()
+  async getSceneDirector(gameName: string, sceneId: string): Promise<SceneDirector | null> {
+    return this.directors.get(`${gameName}::${sceneId}`) ?? { brief: null, event: null }
+  }
+  async saveSceneDirector(gameName: string, sceneId: string, director: SceneDirector): Promise<void> {
+    this.directors.set(`${gameName}::${sceneId}`, director)
   }
 }

@@ -4,7 +4,7 @@ import { draftSceneReply } from '../ai/sceneAi.js'
 import type { Config } from '../config.js'
 import type { DirectorService } from '../director/directorService.js'
 import { newId } from '../storage/ids.js'
-import { NotFoundError, type StorageProvider } from '../vault/StorageProvider.js'
+import { NotFoundError, ValidationError, type StorageProvider } from '../vault/StorageProvider.js'
 
 /**
  * Smyčka Suggestion → Accept / Reject (docs/ARCHITECTURE_V2.md §4.2).
@@ -55,7 +55,8 @@ export class SuggestionService {
   /** Vygeneruje nový návrh; případný dřívější nepřijatý návrh scény nahradí (bez záznamu důvodu) */
   async generate(game: string, sceneId: string, log?: Logger): Promise<AiSuggestion> {
     const s = this.state(game, sceneId)
-    const brief = this.director?.pending(game, sceneId) ?? null
+    const brief = (await this.director?.pending(game, sceneId)) ?? null
+    if (brief && brief.rollPhase === 'after' && !brief.outcome) throw new ValidationError('Nejdřív v režii zadej výsledek hodu / střetu – AI pak popíše dopad.')
     const draft = await draftSceneReply(this.storage, this.config, game, sceneId, s.rejectedReasons, log, brief)
     const suggestion: AiSuggestion = {
       id: newId('suggestion'),
@@ -131,6 +132,6 @@ export class SuggestionService {
   /** Zahodí stav scény (např. při smazání scény) */
   forget(game: string, sceneId: string): void {
     this.scenes.delete(this.key(game, sceneId))
-    this.director?.clear(game, sceneId)
+    void this.director?.clear(game, sceneId).catch(() => { /* scéna už neexistuje */ })
   }
 }
