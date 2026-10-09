@@ -1,4 +1,5 @@
 import {
+  NO_ROLL_OBSTACLES,
   OPEN_QUEST_STATUSES,
   OPEN_THREAD_STATUSES,
   type BeatKind,
@@ -8,6 +9,7 @@ import {
   type EventType,
   type GameDetail,
   type NarrativeBrief,
+  type ObstacleKind,
   type Quest,
   type RulesSystem,
   type SceneMeta,
@@ -84,8 +86,10 @@ export function buildBrief(input: BuildBriefInput): NarrativeBrief {
     eventType = weightedPick(rng, tables.eventType[pulse.phase])
     if (forcedConsequence && eventType === 'reward') eventType = 'obstacle'
   }
+  // Překážka má podobu – boj/střet nebo dilema se neřeší jedním hodem na obtížnost
+  const obstacleKind: ObstacleKind | null = eventType === 'obstacle' ? weightedPick(rng, tables.obstacleKind[band]) : null
 
-  const noRoll = eventType === 'reward' || rng.next() < tables.noRollChance[mode]
+  const noRoll = eventType === 'reward' || (obstacleKind !== null && NO_ROLL_OBSTACLES.includes(obstacleKind)) || rng.next() < tables.noRollChance[mode]
   const difficulty = noRoll ? null : Number(weightedPick(rng, tables.difficulty[band]))
   const stakes = weightedPick(rng, tables.stakes[band])
 
@@ -108,6 +112,7 @@ export function buildBrief(input: BuildBriefInput): NarrativeBrief {
     seed: input.seed,
     mode,
     eventType,
+    obstacleKind,
     beatKind,
     difficulty,
     difficultyLabel: difficultyLabel(input.rulesSystem, difficulty),
@@ -127,11 +132,17 @@ export function buildBrief(input: BuildBriefInput): NarrativeBrief {
   }
 }
 
-/** Ruční úprava hráče; drží konzistenci (continue → bez eventType, bez hodu → bez outcome) a přepočítá popisek obtížnosti */
+/**
+ * Ruční úprava hráče; drží konzistenci (continue → bez eventType, překážka má podobu, boj/dilema bez hodu,
+ * bez hodu → bez outcome) a přepočítá popisek obtížnosti
+ */
 export function applyBriefPatch(brief: NarrativeBrief, patch: BriefPatch, rulesSystem: RulesSystem): NarrativeBrief {
   const next: NarrativeBrief = { ...brief, ...stripUndefined(patch), focus: { ...brief.focus, ...stripUndefined(patch.focus ?? {}) } }
   if (next.mode === 'continue') next.eventType = null
   else if (next.eventType === null) next.eventType = 'neutral'
+  if (next.eventType !== 'obstacle') next.obstacleKind = null
+  else if (next.obstacleKind === null) next.obstacleKind = 'check'
+  if (next.obstacleKind !== null && NO_ROLL_OBSTACLES.includes(next.obstacleKind)) next.difficulty = null
   if (next.twist) next.beatKind = 'reveal'
   if (next.difficulty === null) next.outcome = null
   next.difficultyLabel = difficultyLabel(rulesSystem, next.difficulty)

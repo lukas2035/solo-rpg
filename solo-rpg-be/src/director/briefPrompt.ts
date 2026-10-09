@@ -1,4 +1,4 @@
-import type { BeatKind, EventType, GameDetail, NarrativeBrief, RollOutcome, Stakes } from '@solo-rpg/shared'
+import type { BeatKind, EventType, GameDetail, NarrativeBrief, ObstacleKind, RollOutcome, Stakes } from '@solo-rpg/shared'
 
 /**
  * Převod `NarrativeBrief` na sekci promptu „Režie“. AI dostane *co* se má stát (typ, obtížnost, stakes, koho se to
@@ -10,6 +10,14 @@ const EVENT_TYPE: Record<EventType, string> = {
   neutral: 'NEUTRÁLNÍ UDÁLOST – něco nového se stane nebo objeví, bez okamžité hrozby ani zisku; mění situaci nebo informace',
   opportunity: 'PŘÍLEŽITOST – otevře se šance něco získat, někoho přesvědčit, někam se dostat; využití stojí riziko nebo cenu',
   reward: 'ODMĚNA – postavy něco získají (informace, spojence, věc, úlevu) jako plod dřívějšího úsilí',
+}
+
+const OBSTACLE_KIND: Record<ObstacleKind, string> = {
+  check: 'ZKOUŠKA DOVEDNOSTI – překážku lze překonat jedním umem postavy (šplh, zámek, stopování, pátrání…)',
+  social: 'SOCIÁLNÍ STŘET – někdo konkrétní stojí proti postavám vůlí, ne zbraní (přesvědčování, vyjednávání, zastrašení, výslech, lež)',
+  encounter: 'STŘET / BOJ – objeví se konkrétní protivník nebo hrozba, se kterou se postavy musí utkat nebo jí uniknout. Uveď, kdo/co to je, kolik jich je, co chtějí a jak střet začíná. Boj se řeší podle pravidel hráče, ne jedním hodem: ZASTAV SE před první výměnou úderů; nepopisuj průběh ani výsledek boje',
+  hazard: 'NEBEZPEČÍ PROSTŘEDÍ – past, požár, zřícení, pronásledování, bouře, jed; hrozba bez vůle, které je třeba uniknout nebo ji zvládnout',
+  dilemma: 'DILEMA – postavy musí volit mezi dvěma cestami a každá něco stojí (koho zachránit, komu věřit, co obětovat). Nabídni volbu jasně a ZASTAV SE – rozhodnutí je na hráči, žádný hod',
 }
 
 const BEAT_KIND: Record<BeatKind, string> = {
@@ -39,6 +47,7 @@ export function buildBriefSection(brief: NarrativeBrief, detail: GameDetail): st
     lines.push(`- Režim: POKRAČOVÁNÍ – nevnášej novou událost, rozvíjej rozehranou situaci a reakce postav; dramatická funkce: ${BEAT_KIND[brief.beatKind]}.`)
   } else {
     lines.push(`- Režim: NOVÁ UDÁLOST – ${EVENT_TYPE[brief.eventType ?? 'neutral']}.`)
+    if (brief.eventType === 'obstacle' && brief.obstacleKind) lines.push(`- Podoba překážky: ${OBSTACLE_KIND[brief.obstacleKind]}.`)
     lines.push(`- Dramatická funkce: ${BEAT_KIND[brief.beatKind]}.`)
   }
   if (brief.twist) lines.push('- Tento beat obsahuje ZVRAT – odhalení musí být konkrétní a vycházet z toho, co už ve světě existuje (nitě, tajemství, vztahy).')
@@ -53,6 +62,10 @@ export function buildBriefSection(brief: NarrativeBrief, detail: GameDetail): st
         `- Hod: situace vyžaduje hod hráče na obtížnost ${brief.difficulty}/5${label}. Doveď scénu k okamžiku hodu a ZASTAV SE – výsledek neurčuj, nepopisuj, co se stalo po hodu. Obtížnost neměň.`,
       )
     }
+  } else if (brief.obstacleKind === 'encounter') {
+    lines.push('- Hod: žádný jednotlivý hod – střet rozehraje hráč podle svých pravidel po tvém textu.')
+  } else if (brief.obstacleKind === 'dilemma') {
+    lines.push('- Hod: žádný – jde o volbu hráče, ne o zkoušku.')
   } else {
     lines.push('- Hod: tento beat nevyžaduje hod – žádné zkoušky dovedností nevyvolávej.')
   }
@@ -74,7 +87,7 @@ export function buildBriefSection(brief: NarrativeBrief, detail: GameDetail): st
 
 /** Krátký popisek briefu do logu / payloadu události */
 export function describeBrief(brief: NarrativeBrief): string {
-  const parts = [brief.mode === 'continue' ? 'pokračování' : `událost:${brief.eventType}`, brief.beatKind]
+  const parts = [brief.mode === 'continue' ? 'pokračování' : `událost:${brief.eventType}${brief.obstacleKind ? `/${brief.obstacleKind}` : ''}`, brief.beatKind]
   if (brief.twist) parts.push('zvrat')
   if (brief.difficulty !== null) parts.push(`obtížnost ${brief.difficulty}${brief.outcome ? `→${brief.outcome}` : ''}`)
   parts.push(`sázky ${brief.stakes}`)

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { BeatKind, BriefPatch, CampaignPulse, DirectorState, EventType, PacingPhase, PulseOverride, RollOutcome, Stakes } from '@solo-rpg/shared'
+import type { BeatKind, BriefPatch, CampaignPulse, DirectorState, EventType, ObstacleKind, PacingPhase, PulseOverride, RollOutcome, Stakes } from '@solo-rpg/shared'
 import { inputClass } from '../utils/forms'
 
 interface DirectorPanelProps {
@@ -26,6 +26,14 @@ interface DirectorPanelProps {
 
 const PHASE_LABEL: Record<PacingPhase, string> = { calm: 'klid', rising: 'stoupá', peak: 'vrchol', aftermath: 'dozvuky' }
 const EVENT_LABEL: Record<EventType, string> = { obstacle: 'překážka', neutral: 'neutrální událost', opportunity: 'příležitost', reward: 'odměna' }
+const OBSTACLE_LABEL: Record<ObstacleKind, string> = {
+  check: 'zkouška dovednosti',
+  social: 'sociální střet',
+  encounter: 'střet / boj',
+  hazard: 'nebezpečí prostředí',
+  dilemma: 'dilema (volba bez hodu)',
+}
+const NO_ROLL_OBSTACLE: ReadonlySet<ObstacleKind> = new Set(['encounter', 'dilemma'])
 const BEAT_LABEL: Record<BeatKind, string> = { escalation: 'eskalace', consequence: 'následek', resolution: 'rozuzlení', reveal: 'odhalení / zvrat' }
 const STAKES_LABEL: Record<Stakes, string> = { low: 'nízké', medium: 'střední', high: 'vysoké' }
 const OUTCOME_LABEL: Record<RollOutcome, string> = { success: 'úspěch', partial: 'částečný úspěch', fail: 'neúspěch' }
@@ -122,6 +130,11 @@ export default function DirectorPanel({ state, busy, aiBusy, suggestionPending, 
                     {(Object.keys(EVENT_LABEL) as EventType[]).map(t => <option key={t} value={t}>{EVENT_LABEL[t]}</option>)}
                   </select>
                 )}
+                {brief.mode === 'event' && brief.eventType === 'obstacle' && (
+                  <select value={brief.obstacleKind ?? 'check'} onChange={e => onPatch({ obstacleKind: e.target.value as ObstacleKind })} disabled={locked} className={selectClass} title="Podoba překážky; střet/boj a dilema se neřeší jedním hodem – AI se zastaví a řešení je na hráči">
+                    {(Object.keys(OBSTACLE_LABEL) as ObstacleKind[]).map(k => <option key={k} value={k}>{OBSTACLE_LABEL[k]}</option>)}
+                  </select>
+                )}
               </div>
 
               <span className="text-amber-200/80">Funkce</span>
@@ -141,10 +154,16 @@ export default function DirectorPanel({ state, busy, aiBusy, suggestionPending, 
 
               <span className="text-amber-200/80">Hod</span>
               <div className="flex flex-wrap gap-2 items-center">
+                {brief.obstacleKind !== null && NO_ROLL_OBSTACLE.has(brief.obstacleKind) ? (
+                  <span className="text-amber-200/80" title="AI se zastaví před prvním střetem / před volbou – řešení je na hráči podle jeho pravidel">
+                    {brief.obstacleKind === 'encounter' ? 'bez jednoho hodu – střet odehraje hráč podle svých pravidel' : 'bez hodu – jde o volbu hráče'}
+                  </span>
+                ) : (
                 <select value={brief.difficulty ?? 'none'} onChange={e => onPatch({ difficulty: e.target.value === 'none' ? null : Number(e.target.value) })} disabled={locked} className={selectClass}>
                   <option value="none">bez hodu</option>
                   {[1, 2, 3, 4, 5].map(d => <option key={d} value={d}>obtížnost {d}/5</option>)}
                 </select>
+                )}
                 {brief.difficulty !== null && (
                   <>
                     {brief.difficultyLabel && <span className="font-semibold text-amber-200">{brief.difficultyLabel}</span>}

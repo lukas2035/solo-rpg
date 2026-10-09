@@ -697,6 +697,16 @@ export type BriefMode = z.infer<typeof BriefModeSchema>
 export const EventTypeSchema = z.enum(['obstacle', 'neutral', 'opportunity', 'reward'])
 export type EventType = z.infer<typeof EventTypeSchema>
 
+/**
+ * Podoba překážky (jen při `eventType = obstacle`): `check` zkouška dovednosti / jeden hod, `social` střet vůlí
+ * (přesvědčování, výslech, vyjednávání), `encounter` fyzický střet / boj s protivníkem – řeší se podle pravidel hráče,
+ * ne jedním hodem, `hazard` nebezpečí prostředí (past, požár, pronásledování), `dilemma` volba bez hodu – obě cesty něco stojí.
+ */
+export const ObstacleKindSchema = z.enum(['check', 'social', 'encounter', 'hazard', 'dilemma'])
+export type ObstacleKind = z.infer<typeof ObstacleKindSchema>
+/** Překážky, které se neřeší jedním hodem na obtížnost (brief má `difficulty = null`) */
+export const NO_ROLL_OBSTACLES: readonly ObstacleKind[] = ['encounter', 'dilemma']
+
 /** Dramatická funkce beatu */
 export const BeatKindSchema = z.enum(['escalation', 'consequence', 'resolution', 'reveal'])
 export type BeatKind = z.infer<typeof BeatKindSchema>
@@ -730,6 +740,8 @@ export const NarrativeBriefSchema = z.object({
   mode: BriefModeSchema,
   /** null při `mode = continue` */
   eventType: EventTypeSchema.nullable(),
+  /** Podoba překážky; null mimo `eventType = obstacle` */
+  obstacleKind: ObstacleKindSchema.nullable(),
   beatKind: BeatKindSchema,
   /** Abstraktní obtížnost 1–5; null = beat nevyžaduje hod */
   difficulty: z.number().int().min(1).max(5).nullable(),
@@ -766,6 +778,7 @@ export type BriefRequest = z.infer<typeof BriefRequestSchema>
 export const BriefPatchSchema = z.object({
   mode: BriefModeSchema.optional(),
   eventType: EventTypeSchema.nullable().optional(),
+  obstacleKind: ObstacleKindSchema.nullable().optional(),
   beatKind: BeatKindSchema.optional(),
   difficulty: z.number().int().min(1).max(5).nullable().optional(),
   stakes: StakesSchema.optional(),

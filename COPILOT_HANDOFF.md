@@ -416,6 +416,10 @@ GET  /vault/*  (statické soubory z aktuálně otevřené složky s hrami)
 - **Tabulky** `tables/director-tables.json` (Zod validace, seedovaný `rng.ts` mulberry32, `weightedPick` podle pásma napětí):
   mode continue/event, eventType obstacle/neutral/opportunity/reward, beatKind escalation/consequence/resolution/reveal, stakes,
   twist šance roste s `beatsSinceTwist` (→ beatKind reveal), dluh následků vynutí consequence bez reward/zvratu, reward bez hodu.
+  **Podoba překážky** `obstacleKind` (jen při eventType obstacle, tabulka per pásmo napětí): check (zkouška dovednosti) /
+  social / encounter (boj či střet – v high pásmu nejčastější) / hazard / dilemma. `encounter` a `dilemma` jsou bez hodu
+  (`NO_ROLL_OBSTACLES`, `difficulty = null`): prompt uvede protivníka a „ZASTAV SE před první výměnou“ – boj hráč odehraje
+  podle svých pravidel; dilema = volba hráče. `applyBriefPatch`: ne‑obstacle → kind null, obstacle bez kind → check.
   Focus thread/quest = vážený los z top 3 (stav + sdílené postavy ×2 + lokace + hodiny ≥50 %), faction z nitě/questu.
 - **Rules adapter v1** (`rulesAdapter.ts`): `GameSettings.rulesSystem` none/dnd5e/vtm5e/fate (select v `RulesModal`) přeloží
   obtížnost 1–5 → `difficultyLabel` (DC 10/13/15/18/20, Difficulty 2–6, Fate +1..+5). Hráč hází sám a výsledek

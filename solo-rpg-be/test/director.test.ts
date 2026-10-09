@@ -189,6 +189,35 @@ describe('buildBrief', () => {
     expect(p3.focus.thread).toBe('Nesouvisející')
     expect(p3.focus.characters).toEqual(['Klára Nováková'])
   })
+
+  it('podoba překážky: losuje se jen u překážky, boj a dilema jsou bez hodu, patch drží konzistenci', () => {
+    const kinds = new Set<string>()
+    for (let seed = 1; seed <= 80; seed++) {
+      const b = buildBrief({ detail, scene: current, pulse: { ...pulse, tension: 9, phase: 'peak' }, seed, rulesSystem: 'dnd5e', now: NOW })
+      if (b.eventType === 'obstacle') {
+        expect(b.obstacleKind).not.toBeNull()
+        kinds.add(b.obstacleKind!)
+        if (b.obstacleKind === 'encounter' || b.obstacleKind === 'dilemma') {
+          expect(b.difficulty).toBeNull()
+          expect(b.outcome).toBeNull()
+        }
+      } else {
+        expect(b.obstacleKind).toBeNull()
+      }
+    }
+    expect(kinds.size).toBeGreaterThan(2)
+
+    const b = buildBrief({ detail, scene: current, pulse, seed: 123, rulesSystem: 'dnd5e', now: NOW })
+    const p1 = applyBriefPatch(b, { mode: 'event', eventType: 'obstacle', obstacleKind: null, difficulty: 3 }, 'dnd5e')
+    expect(p1.obstacleKind).toBe('check')
+    expect(p1.difficulty).toBe(3)
+    const p2 = applyBriefPatch(p1, { obstacleKind: 'encounter', outcome: 'success' }, 'dnd5e')
+    expect(p2.difficulty).toBeNull()
+    expect(p2.outcome).toBeNull()
+    expect(p2.difficultyLabel).toBeNull()
+    const p3 = applyBriefPatch(p2, { eventType: 'opportunity' }, 'dnd5e')
+    expect(p3.obstacleKind).toBeNull()
+  })
 })
 
 describe('buildBriefSection', () => {
@@ -218,5 +247,20 @@ describe('buildBriefSection', () => {
     const t2 = buildBriefSection(c, detail)
     expect(t2).toContain('POKRAČOVÁNÍ')
     expect(t2).toContain('nevyžaduje hod')
+  })
+
+  it('překážka: zkouška hlásí hod, střet/boj a dilema zastaví bez hodu', () => {
+    const check = applyBriefPatch(base, { mode: 'event', eventType: 'obstacle', obstacleKind: 'social', difficulty: 2, outcome: null }, 'dnd5e')
+    const t1 = buildBriefSection(check, detail)
+    expect(t1).toContain('Podoba překážky: SOCIÁLNÍ STŘET')
+    expect(t1).toContain('obtížnost 2/5')
+    const fight = applyBriefPatch(base, { mode: 'event', eventType: 'obstacle', obstacleKind: 'encounter', difficulty: 4 }, 'dnd5e')
+    const t2 = buildBriefSection(fight, detail)
+    expect(t2).toContain('Podoba překážky: STŘET / BOJ')
+    expect(t2).toContain('ZASTAV SE před první výměnou')
+    expect(t2).toContain('střet rozehraje hráč podle svých pravidel')
+    expect(t2).not.toContain('obtížnost 4/5')
+    const choice = applyBriefPatch(base, { mode: 'event', eventType: 'obstacle', obstacleKind: 'dilemma' }, 'dnd5e')
+    expect(buildBriefSection(choice, detail)).toContain('jde o volbu hráče')
   })
 })

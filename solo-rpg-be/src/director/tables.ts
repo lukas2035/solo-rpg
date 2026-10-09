@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
-import { BeatKindSchema, BriefModeSchema, EventTypeSchema, PacingPhaseSchema, StakesSchema, type PacingPhase } from '@solo-rpg/shared'
+import { BeatKindSchema, BriefModeSchema, EventTypeSchema, ObstacleKindSchema, PacingPhaseSchema, StakesSchema, type PacingPhase } from '@solo-rpg/shared'
 
 /**
  * Náhodné tabulky Directoru jako data (`tables/director-tables.json`), validované při načtení.
@@ -24,6 +24,7 @@ export const DIFFICULTIES = ['1', '2', '3', '4', '5'] as const
 const DirectorTablesSchema = z.object({
   mode: perPhase(weights(BriefModeSchema.options)),
   eventType: perPhase(weights(EventTypeSchema.options)),
+  obstacleKind: perBand(weights(ObstacleKindSchema.options)),
   beatKind: perPhase(weights(BeatKindSchema.options)),
   difficulty: perBand(weights(DIFFICULTIES)),
   stakes: perBand(weights(StakesSchema.options)),

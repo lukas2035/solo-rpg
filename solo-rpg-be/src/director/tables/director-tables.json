@@ -12,6 +12,12 @@
     "peak": { "obstacle": 55, "neutral": 15, "opportunity": 20, "reward": 10 },
     "aftermath": { "obstacle": 15, "neutral": 35, "opportunity": 25, "reward": 25 }
   },
+  "obstacleKind": {
+    "$comment": "Podoba překážky podle pásma napětí: check = zkouška dovednosti (jeden hod), social = střet vůlí, encounter = boj/fyzický střet (bez jednoho hodu, řeší pravidla hráče), hazard = nebezpečí prostředí, dilemma = volba bez hodu",
+    "low": { "check": 35, "social": 30, "encounter": 10, "hazard": 10, "dilemma": 15 },
+    "mid": { "check": 30, "social": 25, "encounter": 20, "hazard": 15, "dilemma": 10 },
+    "high": { "check": 20, "social": 15, "encounter": 35, "hazard": 20, "dilemma": 10 }
+  },
   "beatKind": {
     "calm": { "escalation": 45, "consequence": 15, "resolution": 25, "reveal": 15 },
     "rising": { "escalation": 55, "consequence": 20, "resolution": 10, "reveal": 15 },
