@@ -15,6 +15,13 @@
       "when": 1791499298695,
       "tag": "0001_director_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791824334944,
+      "tag": "0002_scene_ai_mode",
+      "breakpoints": true
     }
   ]
 }

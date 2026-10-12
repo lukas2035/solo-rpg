@@ -12,7 +12,7 @@ const NO_OVERRIDE = { tension: null, phase: null }
 
 const character = (id: string, name: string) => ({ id, name, firstName: name.split(' ')[0], lastName: name.split(' ')[1] ?? '', nickname: name.split(' ')[0], image: null, notes: '' })
 const scene = (p: Partial<SceneMeta> & { id: string; title: string; order: number }): SceneMeta => ({
-  description: '', image: null, characters: [], location: null, ai: true, aiCharacters: [], aiPrompt: '', summary: '', summaryStale: false, entryCount: 0, contextScenes: [], createdAt: NOW, updatedAt: NOW, ...p,
+  description: '', image: null, characters: [], location: null, ai: true, aiCharacters: [], aiPrompt: '', aiMode: 'advanced', rulesInAi: false, summary: '', summaryStale: false, entryCount: 0, contextScenes: [], createdAt: NOW, updatedAt: NOW, ...p,
 })
 const thread = (p: Partial<StoryThread> & { id: string; title: string }): StoryThread => ({
   type: 'threat', status: 'active', horizon: 'short-term', certainty: 'confirmed', revealCondition: '', clock: null,
@@ -29,7 +29,7 @@ function campaign(p: Partial<GameDetail> = {}): GameDetail {
     meta: { name: 'Test', createdAt: NOW, updatedAt: NOW },
     setup: {
       characters: [character('chr_klara', 'Klára Nováková'), character('chr_julia', 'Julia Kreuzová')],
-      narrators: [], backgroundImage: null, brightBackground: true, narrator: null, rules: '', rulesInAi: false, rulesSystem: 'dnd5e', pulseOverride: NO_OVERRIDE,
+      narrators: [], backgroundImage: null, brightBackground: true, narrator: null, rules: '', rulesSystem: 'dnd5e', pulseOverride: NO_OVERRIDE,
     },
     scenes: [scene({ id: 'scn_1', title: 'Noc', order: 1, characters: ['Klára Nováková'], location: 'Praha' })],
     threads: [

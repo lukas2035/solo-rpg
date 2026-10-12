@@ -385,7 +385,7 @@ export async function registerGameRoutes(app: FastifyInstance, vault: VaultManag
     return suggestContextScenes(vault.storage, config, game, scene, request.log)
   })
 
-  /** Sekce o kostkách a pravidlech přesně tak, jak ji dostává AI (pro textový export hry; přepínač rulesInAi se ignoruje) */
+  /** Sekce o kostkách a pravidlech přesně tak, jak ji dostává AI (pro textový export hry; přepínač `SceneMeta.rulesInAi` se ignoruje) */
   app.get('/api/games/:game/rules-prompt', async (request): Promise<RulesPromptResponse> => {
     const { game } = GameParams.parse(request.params)
     const detail = await vault.storage.getGame(game)

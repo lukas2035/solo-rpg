@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { BeatKind, BriefPatch, CampaignPulse, DirectorEvent, DirectorState, EventType, ObstacleKind, PacingPhase, PulseOverride, RollOutcome, Stakes } from '@solo-rpg/shared'
 import { inputClass } from '../utils/forms'
+import { BEAT_LABEL, BEAT_SHORT, EVENT_LABEL, OBSTACLE_LABEL, OUTCOME_LABEL, PHASE_LABEL, STAKES_LABEL, eventTitle } from '../utils/director'
 
 interface DirectorPanelProps {
   state: DirectorState
@@ -28,20 +29,10 @@ interface DirectorPanelProps {
   darken?: boolean
 }
 
-const PHASE_LABEL: Record<PacingPhase, string> = { calm: 'klid', rising: 'stoupá', peak: 'vrchol', aftermath: 'dozvuky' }
-const EVENT_LABEL: Record<EventType, string> = { obstacle: 'překážka', neutral: 'neutrální událost', opportunity: 'příležitost', reward: 'odměna' }
-const OBSTACLE_LABEL: Record<ObstacleKind, string> = {
-  check: 'zkouška dovednosti',
-  social: 'sociální střet',
-  encounter: 'střet / boj',
-  hazard: 'nebezpečí prostředí',
-  dilemma: 'dilema (volba bez hodu)',
-}
 const NO_ROLL_OBSTACLE: ReadonlySet<ObstacleKind> = new Set(['encounter', 'dilemma'])
-const BEAT_SHORT: Record<BeatKind, string> = { escalation: 'eskalace', consequence: 'následek', resolution: 'rozuzlení', reveal: 'zvrat' }
 
 function EventStrip({ event, locked, onResolve, onAbandon }: { event: DirectorEvent; locked: boolean; onResolve: (o: RollOutcome | null) => void; onAbandon: () => void }) {
-  const title = `${EVENT_LABEL[event.eventType]}${event.obstacleKind ? ` – ${OBSTACLE_LABEL[event.obstacleKind]}` : ''}`
+  const title = eventTitle(event)
   const beats = event.beats.map(b => {
     const parts = [BEAT_SHORT[b.beatKind]]
     if (b.rollPhase === 'before') parts.push(b.difficulty !== null ? `před hodem ${b.difficulty}/5` : 'před střetem')
@@ -69,10 +60,6 @@ function EventStrip({ event, locked, onResolve, onAbandon }: { event: DirectorEv
     </div>
   )
 }
-const BEAT_LABEL: Record<BeatKind, string> = { escalation: 'eskalace', consequence: 'následek', resolution: 'rozuzlení', reveal: 'odhalení / zvrat' }
-const STAKES_LABEL: Record<Stakes, string> = { low: 'nízké', medium: 'střední', high: 'vysoké' }
-const OUTCOME_LABEL: Record<RollOutcome, string> = { success: 'úspěch', partial: 'částečný úspěch', fail: 'neúspěch' }
-
 const selectClass = `${inputClass} py-0.5 text-xs`
 const btn = 'px-3 py-1 rounded-md border transition-colors disabled:opacity-50'
 

@@ -386,7 +386,6 @@ export class ObsidianVaultProvider implements StorageProvider {
       // Aktuální vypravěč musí existovat jako soubor; jinak žádný
       narrator: narrators.find(n => nameKey(n.name) === nameKey(narratorName ?? ''))?.name ?? null,
       rules: splitGameBody(file.body).rules,
-      rulesInAi: file.data.rulesInAi === true,
       rulesSystem: RulesSystemSchema.catch('none').parse(file.data.rulesSystem ?? 'none'),
       pulseOverride: PulseOverrideSchema.catch({ tension: null, phase: null }).parse({
         tension: typeof file.data.pulseTension === 'number' ? file.data.pulseTension : null,
@@ -435,7 +434,6 @@ export class ObsidianVaultProvider implements StorageProvider {
         background: null,
         brightBackground: true,
         narrator: null,
-        rulesInAi: false,
       },
       body: `# ${trimmed}\n\nPoznámky ke hře (volný text, aplikace jej nemění).\n`,
     })
@@ -895,7 +893,8 @@ export class ObsidianVaultProvider implements StorageProvider {
       file.data.background = settings.backgroundImage
       file.data.brightBackground = settings.brightBackground
       file.data.narrator = narrator ? `[[${narrator.narrator.name}]]` : null
-      file.data.rulesInAi = settings.rulesInAi
+      // Přepínač pravidel pro AI je dnes per scéna – starý klíč hry smazat
+      delete file.data.rulesInAi
       // YAML nezapisuje undefined – nepoužité klíče Directoru smazat
       if (settings.rulesSystem === 'none') delete file.data.rulesSystem
       else file.data.rulesSystem = settings.rulesSystem
@@ -995,6 +994,8 @@ export class ObsidianVaultProvider implements StorageProvider {
     const scenes: SceneFile[] = []
     // Starší soubory scén bez klíče `characters` → všechny postavy hry
     let allCharacterNames: string[] | null = null
+    // Starší vault měl přepínač pravidel pro AI u hry (`rulesInAi` v game.md) – scény bez vlastního klíče ho převezmou
+    let gameRulesInAi: boolean | null = null
     for (const [index, fileName] of files.entries()) {
       const raw = await readTextIfExists(path.join(sceneDir, fileName))
       if (raw === null) continue
@@ -1002,6 +1003,9 @@ export class ObsidianVaultProvider implements StorageProvider {
       const data = parsed.data as Frontmatter
       if (data.characters === undefined && allCharacterNames === null) {
         allCharacterNames = (await this.readCharacters(dir)).map(c => c.character.name)
+      }
+      if (typeof data.rulesInAi !== 'boolean' && gameRulesInAi === null) {
+        gameRulesInAi = (await this.readGameFile(dir))?.data.rulesInAi === true
       }
       const stat = await fs.stat(path.join(sceneDir, fileName))
       const baseName = fileName.replace(/\.md$/i, '')
@@ -1027,6 +1031,9 @@ export class ObsidianVaultProvider implements StorageProvider {
           ai: data.ai === true,
           aiCharacters: parseCharacterLinks(data.aiCharacters),
           aiPrompt: stringOrNull(data.aiPrompt) ?? '',
+          // Soubor bez `aiMode` = scéna z doby před režimy → pokročilá (zachová dosavadní chování)
+          aiMode: data.aiMode === 'basic' ? 'basic' : 'advanced',
+          rulesInAi: typeof data.rulesInAi === 'boolean' ? data.rulesInAi : (gameRulesInAi ?? false),
           contextScenes: parseCharacterLinks(data.contextScenes),
           createdAt: toTimestamp(data.createdAt, stat.birthtimeMs),
           updatedAt: toTimestamp(data.updatedAt, stat.mtimeMs),
@@ -1071,6 +1078,8 @@ export class ObsidianVaultProvider implements StorageProvider {
       ai: meta.ai,
       aiCharacters: toCharacterLinks(meta.aiCharacters),
       aiPrompt: meta.aiPrompt.trim() ? meta.aiPrompt.trim() : null,
+      aiMode: meta.aiMode,
+      rulesInAi: meta.rulesInAi,
       summaryStale: meta.summaryStale ? true : null,
       contextScenes: meta.contextScenes.length ? toCharacterLinks(meta.contextScenes) : null,
       createdAt: toIso(meta.createdAt),
@@ -1132,6 +1141,8 @@ export class ObsidianVaultProvider implements StorageProvider {
     const characters = await this.normalizeSceneCharacters(dir, input.characters ?? neighbor?.meta.characters ?? [])
     // AI nastavení se do nové scény přenáší ze sousední (stejně jako postavy), jen pro postavy, které v nové scéně jsou
     const ai = input.ai ?? neighbor?.meta.ai ?? false
+    const aiMode = input.aiMode ?? neighbor?.meta.aiMode ?? 'basic'
+    const rulesInAi = input.rulesInAi ?? neighbor?.meta.rulesInAi ?? false
     const aiCharacters = (input.aiCharacters ?? neighbor?.meta.aiCharacters ?? []).filter(n => characters.includes(n))
     const now = Date.now()
     const meta: SceneMeta = {
@@ -1147,6 +1158,8 @@ export class ObsidianVaultProvider implements StorageProvider {
       characters,
       location: await this.normalizeLocationRef(dir, input.location ?? null),
       ai,
+      aiMode,
+      rulesInAi,
       aiCharacters: await this.normalizeSceneCharacters(dir, aiCharacters),
       // Doplňující popis situace je specifický pro scénu – nedědí se
       aiPrompt: input.aiPrompt ?? '',
@@ -1203,6 +1216,8 @@ export class ObsidianVaultProvider implements StorageProvider {
       characters,
       location: input.location === undefined ? previous.location : await this.normalizeLocationRef(dir, input.location),
       ai: input.ai ?? previous.ai,
+      aiMode: input.aiMode ?? previous.aiMode,
+      rulesInAi: input.rulesInAi ?? previous.rulesInAi,
       // AI může hrát jen postavy, které ve scéně jsou
       aiCharacters: aiCharacters.filter(n => characters.includes(n)),
       aiPrompt: input.aiPrompt ?? previous.aiPrompt,

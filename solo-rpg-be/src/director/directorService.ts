@@ -1,6 +1,6 @@
 import type { BriefPatch, CampaignPulse, DirectorEvent, DirectorState, NarrativeBrief, RollOutcome, SceneDirector } from '@solo-rpg/shared'
 import { newId } from '../storage/ids.js'
-import { NotFoundError, type StorageProvider } from '../vault/StorageProvider.js'
+import { NotFoundError, ValidationError, type StorageProvider } from '../vault/StorageProvider.js'
 import { applyBriefPatch, buildBrief } from './briefBuilder.js'
 import { describeBrief } from './briefPrompt.js'
 import { beatFromPayload, computePulse, type BeatRecord } from './pulse.js'
@@ -37,15 +37,23 @@ export class DirectorService {
     return stored
   }
 
+  /** Režie je dostupná jen scénám v pokročilém režimu AI */
+  private async isAdvanced(game: string, sceneId: string): Promise<boolean> {
+    const scenes = await this.storage.listScenes(game)
+    return scenes.find(s => s.id === sceneId)?.aiMode === 'advanced'
+  }
+
   async pulse(game: string): Promise<CampaignPulse> {
     const detail = await this.storage.getGame(game)
     if (!detail) throw new NotFoundError(`Hra „${game}“ neexistuje.`)
     return computePulse(detail, await this.beats(game), detail.setup.pulseOverride)
   }
 
-  /** Rozpracovaný brief scény; null i pro neexistující scénu */
+  /** Rozpracovaný brief scény; null i pro neexistující scénu nebo scénu v základním režimu AI (brief se tam ignoruje) */
   async pending(game: string, sceneId: string): Promise<NarrativeBrief | null> {
-    return (await this.storage.getSceneDirector(game, sceneId))?.brief ?? null
+    const brief = (await this.storage.getSceneDirector(game, sceneId))?.brief ?? null
+    if (!brief) return null
+    return (await this.isAdvanced(game, sceneId)) ? brief : null
   }
 
   async get(game: string, sceneId: string): Promise<DirectorState> {
@@ -62,6 +70,7 @@ export class DirectorService {
     if (!detail) throw new NotFoundError(`Hra „${game}“ neexistuje.`)
     const scene = detail.scenes.find(s => s.id === sceneId)
     if (!scene) throw new NotFoundError(`Scéna „${sceneId}“ neexistuje.`)
+    if (scene.aiMode !== 'advanced') throw new ValidationError('Scéna používá základní AI – režie je dostupná jen v pokročilém režimu (🤖 → nastavení AI).')
     const stored = await this.load(game, sceneId)
     if (resolve && !stored.event) throw new NotFoundError('Scéna nemá probíhající událost, kterou by šlo uzavřít.')
     const pulse = computePulse(detail, await this.beats(game), detail.setup.pulseOverride)

@@ -389,6 +389,8 @@ export class PostgresProvider implements StorageProvider {
       ai: e.fields.ai,
       aiCharacters: snap.manyNames(e, 'aiCharacters'),
       aiPrompt: e.fields.aiPrompt,
+      aiMode: e.fields.aiMode,
+      rulesInAi: e.fields.rulesInAi,
       summary: e.fields.summary,
       summaryStale: e.fields.summaryStale,
       entryCount: snap.entryCounts.get(e.row.id) ?? 0,
@@ -525,7 +527,6 @@ export class PostgresProvider implements StorageProvider {
       brightBackground: g.brightBackground,
       narrator: narrator?.row.name ?? null,
       rules: g.rules,
-      rulesInAi: g.rulesInAi,
       rulesSystem: RulesSystemSchema.catch('none').parse(g.rulesSystem),
       pulseOverride: PulseOverrideSchema.catch({ tension: null, phase: null }).parse(g.pulseOverride),
     }
@@ -661,7 +662,6 @@ export class PostgresProvider implements StorageProvider {
           brightBackground: settings.brightBackground,
           currentNarratorId: narrator?.row.id ?? null,
           rules: settings.rules,
-          rulesInAi: settings.rulesInAi,
           rulesSystem: settings.rulesSystem,
           pulseOverride: settings.pulseOverride,
         })
@@ -783,13 +783,16 @@ export class PostgresProvider implements StorageProvider {
       const neighbor = position > 1 ? scenes[position - 2] : scenes[0]
       const characterIds = input.characters ? snap.resolveMany('character', input.characters) : neighbor ? snap.many(neighbor, 'characters').map(c => c.row.id) : []
       const ai = input.ai ?? neighbor?.fields.ai ?? false
+      // Režim AI a přepínač pravidel se dědí ze sousední scény; první scéna hry začíná v základním režimu bez pravidel
+      const aiMode = input.aiMode ?? neighbor?.fields.aiMode ?? 'basic'
+      const rulesInAi = input.rulesInAi ?? neighbor?.fields.rulesInAi ?? false
       const aiCandidates = input.aiCharacters ? snap.resolveMany('character', input.aiCharacters) : neighbor ? snap.many(neighbor, 'aiCharacters').map(c => c.row.id) : []
       const aiCharacterIds = aiCandidates.filter(id => characterIds.includes(id))
 
       const id = await this.insertEntity(tx, snap.game.id, 'scene', {
         name: title,
         // Doplňující popis situace (aiPrompt) je specifický pro scénu – nedědí se
-        fields: { description: input.description ?? '', ai, aiPrompt: input.aiPrompt ?? '', summary: input.summary ?? '', summaryStale: false, director: null },
+        fields: { description: input.description ?? '', ai, aiPrompt: input.aiPrompt ?? '', aiMode, rulesInAi, summary: input.summary ?? '', summaryStale: false, director: null },
         sortOrder: position,
         image: this.imageColumns(input.image ?? null, paths),
       })
@@ -833,6 +836,8 @@ export class PostgresProvider implements StorageProvider {
           summaryStale,
           ai: input.ai ?? current.fields.ai,
           aiPrompt: input.aiPrompt ?? current.fields.aiPrompt,
+          aiMode: input.aiMode ?? current.fields.aiMode,
+          rulesInAi: input.rulesInAi ?? current.fields.rulesInAi,
         },
         image: this.imageColumns(input.image, paths, current.row),
       })
@@ -1400,7 +1405,6 @@ export class PostgresProvider implements StorageProvider {
     name: string
     notes: string
     rules: string
-    rulesInAi: boolean
     brightBackground: boolean
     background: ImageColumns
     createdAt: number
@@ -1414,7 +1418,6 @@ export class PostgresProvider implements StorageProvider {
       name: data.name,
       notes: data.notes,
       rules: data.rules,
-      rulesInAi: data.rulesInAi,
       brightBackground: data.brightBackground,
       backgroundAssetId: data.background.imageAssetId,
       backgroundUrl: data.background.imageUrl,

@@ -85,14 +85,20 @@ AI_PROMPT_PATH=prompts/scene-prompt.md   # výchozí prompt pro vedení scény (
   i AI. Tlačítko „🤖 Shrnout pomocí AI“ pošle přepis scény stejnému modelu s promptem `prompts/scene-summary-prompt.md`
   (`AI_SUMMARY_PROMPT_PATH`) a výsledek vloží do pole; uloží se až tlačítkem „Uložit“ (do souboru scény za značku `<!-- summary -->`).
 - **Kostky a pravidla pod příběhem**: tlačítko 🎲 v horní liště otevře dialog s markdown popisem pravidlového systému,
-  který pod příběhem používáš (VtM 5e, D&D 5e, Fate…, případně vlastní tabulka pro výklad orákula), a zaškrtávátkem
-  „Posílat informace o kostkách a pravidlech AI vypravěči“. Ten se týká jen generování nových textů vypravěče ve scéně
+  který pod příběhem používáš (VtM 5e, D&D 5e, Fate…, případně vlastní tabulka pro výklad orákula). Zda se popis posílá
+  AI vypravěči, nastavíš **pro každou scénu zvlášť** v dialogu 🤖 AI (zaškrtávátko „Posílat informace o kostkách
+  a pravidlech AI vypravěči“, nová scéna ho dědí z předchozí). Týká se jen generování nových textů vypravěče ve scéně
   řízené AI: se zapnutým přepínačem se k požadavku připojí prompt `prompts/rules-prompt.md` (`AI_RULES_PROMPT_PATH`)
   vysvětlující, že si házíš kostkami jako orákulem a výsledky zapisuješ do textu, plus tvůj popis pravidel. S vypnutým
   přepínačem se vypravěči o kostkách neposílá vůbec nic (čistě příběhové scény). Ke shrnutí scény i do textového exportu
   hry (📄) jdou pravidla vždy – export používá stejný text (`rules-prompt.md` + tvůj popis) jako AI, takže úprava souboru
   se projeví i v něm.
-  Popis se ukládá do `game.md` za značku `<!-- rules -->` (tvé poznámky nad ní zůstávají), přepínač jako `rulesInAi`.
+  Popis se ukládá do `game.md` za značku `<!-- rules -->` (tvé poznámky nad ní zůstávají), přepínač do scény jako `rulesInAi`.
+- **Režim AI scény**: v dialogu 🤖 AI zvolíš pro každou scénu **📜 Základní** (vypravěč dostane jen svůj prompt, postavy,
+  popis scény a její průběh – bez kontextu kampaně a bez režie) nebo **🎬 Pokročilá** (kontext z ostatních scén, panel
+  Režie, události přes více beatů, puls kampaně). V pokročilém režimu dialog ukazuje i probíhající událost, přijaté
+  beaty a připravený brief. Nová scéna dědí režim z předchozí, první scéna nové hry je základní; události se vážou
+  ke konkrétní scéně a do další se nepřenášejí.
 
 ### Herní sezení (stopky)
 

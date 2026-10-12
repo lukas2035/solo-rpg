@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import {
+  AiModeSchema,
   FactionStanceSchema,
   FactionStatusSchema,
   FactionTypeSchema,
@@ -40,6 +41,10 @@ export const SceneFields = z.object({
   description: z.string(),
   ai: z.boolean(),
   aiPrompt: z.string(),
+  /** Režim AI vypravěče (basic = bez kontextu kampaně a Režie) */
+  aiMode: AiModeSchema,
+  /** Posílat AI sekci o kostkách a pravidlech při generování textů této scény */
+  rulesInAi: z.boolean(),
   summary: z.string(),
   summaryStale: z.boolean(),
   /** Stav Directoru (rozpracovaný brief + probíhající událost); null = nic rozehraného */
@@ -114,11 +119,14 @@ export const KIND_VERSIONS: Record<EntityKind, { current: number; migrations: Re
   narrator: { current: 1, migrations: {} },
   // v2: příznak zastaralého shrnutí; starší scény bez shrnutí FE pozná podle entryCount, takže výchozí false
   // v3: stav Directoru (brief + událost) u scény
+  // v4: režim AI (stávající scény zůstávají v pokročilém režimu) + přepínač pravidel per scéna (dřív `games.rules_in_ai`;
+  //     SQL migrace 0002 ho do scén překopírovala, proto mají přednost už přítomné klíče)
   scene: {
-    current: 3,
+    current: 4,
     migrations: {
       1: old => ({ ...(old as object), summaryStale: false }),
       2: old => ({ ...(old as object), director: null }),
+      3: old => ({ aiMode: 'advanced', rulesInAi: false, ...(old as object) }),
     },
   },
   thread: { current: 1, migrations: {} },

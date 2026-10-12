@@ -27,7 +27,6 @@ export const games = pgTable(
     notes: text('notes').notNull().default(''),
     /** Popis pravidel hry pod příběhem (GameSettings.rules) */
     rules: text('rules').notNull().default(''),
-    rulesInAi: boolean('rules_in_ai').notNull().default(false),
     /** Systém pravidel pro rules adapter Directoru (GameSettings.rulesSystem) */
     rulesSystem: text('rules_system').notNull().default('none'),
     /** Ruční korekce pulsu kampaně (GameSettings.pulseOverride) */

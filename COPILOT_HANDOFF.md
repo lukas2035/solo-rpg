@@ -86,10 +86,11 @@ solo-rpg/
 ### Layout vaultu (na hru)
 ```
 vault/<Název hry>/
-  game.md                 frontmatter: name, createdAt, updatedAt, background, brightBackground, narrator (wikilink `[[Jméno]]` aktuálního vypravěče | null),
-                          rulesInAi (bool); tělo = volné poznámky hráče + volitelně `<!-- rules -->` + popis pravidel pod příběhem
+  game.md                 frontmatter: name, createdAt, updatedAt, background, brightBackground, narrator (wikilink `[[Jméno]]` aktuálního vypravěče | null);
+                          tělo = volné poznámky hráče + volitelně `<!-- rules -->` + popis pravidel pod příběhem
                           (`GameSettings.rules`; `splitGameBody`/`joinGameBody`, saveSetup poznámky zachová). UI: `RulesModal` přes 🎲 v CharacterBar,
                           StoryEditor.handleRulesSave ukládá hned (ne debounce) a synchronizuje `lastSavedSetupRef`.
+                          (starý klíč `rulesInAi` v game.md je legacy – slouží jen jako fallback pro scény bez vlastního `rulesInAi`, saveSetup ho maže)
   characters/<Celé jméno>.md  frontmatter: id, name (celé), firstName, lastName, nickname, portrait, order;
                           tělo = markdown poznámky (editovatelné v modalu i v Obsidianu). PC i NPC bez rozlišení.
                           (stará složka npcs/ se při prvním čtení automaticky přejmenuje, `name` se rozdělí na jméno/příjmení)
@@ -111,7 +112,8 @@ vault/<Název hry>/
   backgrounds/<soubor>    obrázky scén jako backgrounds/<Název scény>.ext (+ případné staré pozadí hry `background` v game.md;
                           v UI se už nenastavuje ani nemaže, slouží jen jako fallback pro scény bez obrázku)
   scenes/001 - Název.md   frontmatter: id, title, order, image, characters (wikilinky `[[Celé jméno]]` postav ve scéně), location,
-                          ai (bool – AI vypravěč zapnutý), aiCharacters (wikilinky postav hraných AI), aiPrompt (volitelný doplňující popis
+                          ai (bool – AI vypravěč zapnutý), aiMode (`basic` | `advanced`; chybí → `advanced`), rulesInAi (bool – posílat AI
+                          kostky/pravidla; chybí → legacy `game.md rulesInAi`), aiCharacters (wikilinky postav hraných AI), aiPrompt (volitelný doplňující popis
                           situace jen pro AI; null když prázdný, nedědí se do nové scény), createdAt, updatedAt
                           tělo: markdown popis scény, pak značka `<!-- entries -->`, pak záznamy
                           záznamy: <!-- entry id="..." ts="..." --> + **[[Celé jméno|nickname]]**: text  |  **[[Jméno vypravěče]]**:\n víceřádkový text
@@ -256,6 +258,17 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
   (Lukáš tam vloží svůj text z ChatGPT; je verzovaný v gitu).
 - **Datový model:** `Narrator.aiPrompt` (tělo souboru za `<!-- ai-prompt -->`, `NarratorInput.aiPrompt?`), `SceneMeta.ai` +
   `SceneMeta.aiCharacters` (frontmatter `ai`, `aiCharacters` wikilinky; `SceneInput.ai?/aiCharacters?`, undefined = beze změny).
+- **Režim AI per scéna** (`SceneMeta.aiMode: AiMode = 'basic' | 'advanced'`, `SceneMeta.rulesInAi: boolean`; scene schema v4,
+  Postgres migrace `0002_scene_ai_mode.sql` nastaví existujícím scénám `advanced` + `rulesInAi` ze hry a smaže `games.rules_in_ai`):
+  **basic** = `sceneAi.ts` posílá jen system prompt + postavy s poznámkami + popis scény (název, lokace, popis, aiPrompt) + průběh +
+  pokyny vypravěče + důvody odmítnutí; bez kontextu kampaně (`contextBuilder`) a bez Režie (`directorService.pending()` vrací null,
+  `create()` hází ValidationError). **advanced** = vše (kontext kampaně, brief, eventy, puls). `rulesInAi` platí v obou režimech
+  (`buildRulesSection` už nemá přepínač; volá se jen když `scene.rulesInAi`). Nová scéna dědí `aiMode` i `rulesInAi` ze sousední
+  (`createScene`: `input.aiMode ?? neighbor?.aiMode ?? 'basic'`, `rulesInAi` default false). FE: `AiSceneModal` má přepínač
+  📜 Základní / 🎬 Pokročilá, checkbox pravidel (přesunut z `RulesModal`, tlačítko 🎲 už nemá zvýraznění) a v advanced
+  `DirectorSummary` (událost, beaty, další beat, brief, puls); `StoryEditor` načítá Director a ukazuje panel/tlačítko 🎬 jen
+  pro `aiMode === 'advanced'`, v basic 🤖 volá rovnou `runAi`. Při přepnutí advanced → basic uložený brief/event zůstává a ignoruje se.
+  Sdílené popisky Directoru pro FE: `utils/director.ts`.
   BE: `aiCharacters` jen z postav scény (filtr i při změně `characters`), nová scéna dědí `ai`+`aiCharacters` z poslední,
   rename/delete postavy propisuje i `aiCharacters` (`renameSpeakerInScenes`, `removeCharacterFromScenes`). Helper `splitByMarker`.
 - **BE modul `src/ai/`:** `types.ts` (`ChatMessage`, `ChatOptions`, `AiError{status}` – sendError ji mapuje na HTTP stav),
@@ -319,7 +332,7 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
 ```
 GET  /api/health
 GET/POST /api/games            GET/PATCH(rename)/DELETE /api/games/:name
-PUT  /api/games/:name/setup    (GameSettings: backgroundImage, brightBackground, narrator = jméno | null, rules, rulesInAi, rulesSystem, pulseOverride; 404 pro neznámého vypravěče)
+PUT  /api/games/:name/setup    (GameSettings: backgroundImage, brightBackground, narrator = jméno | null, rules, rulesSystem, pulseOverride; 404 pro neznámého vypravěče)
 POST /api/games/:name/characters             PUT/DELETE /api/games/:name/characters/:id
 POST /api/games/:name/narrators              PUT/DELETE /api/games/:name/narrators/:id   ({ name, description?, aiPrompt?, image? })
 GET/POST /api/games/:name/threads            PUT/DELETE /api/games/:name/threads/:id     (ThreadInput; title+type povinné)
@@ -327,7 +340,7 @@ GET/POST /api/games/:name/factions           PUT/DELETE /api/games/:name/faction
 GET/POST /api/games/:name/quests             PUT/DELETE /api/games/:name/quests/:id      (QuestInput; jen title povinný, type default side)
 POST /api/games/:name/assets (multipart: kind portrait|narrator|faction|background|scene, ownerName?, file)
 POST /api/games/:name/assets/from-url ({ kind, url, ownerName? })
-GET/POST /api/games/:name/scenes ({title, description?, image?, characters?, location?, ai?, aiCharacters?})
+GET/POST /api/games/:name/scenes ({title, description?, image?, characters?, location?, ai?, aiMode?, rulesInAi?, aiCharacters?})
 GET(záznamy)/PUT(záznamy)/PATCH(meta)/DELETE /api/games/:name/scenes/:id
 POST /api/games/:name/scenes/:id/ai  (AI vypravěč navrhne pokračování, NEUKLÁDÁ; → AiSuggestion; 503 bez klíče, 400 bez vypravěče, 502 chyba providera)
 GET  /api/games/:name/scenes/:id/ai/suggestion  (→ { suggestion | null, rejectedReasons })
@@ -352,10 +365,10 @@ POST /api/games/:name/scenes/:id/summary (AI shrnutí děje scény – `ai/scene
   Oba AI endpointy (ai i summary) připojují k system promptu `ai/rulesPrompt.ts#buildRulesSection`: obsah
   `prompts/rules-prompt.md` (`AI_RULES_PROMPT_PATH` – orákulum, hody zapsané v textu jsou fakta, AI nehází) +
   `## Herní pravidla pod příběhem` = `setup.rules` (nebo věta „žádný konkrétní systém“, když je prázdné).
-  Přepínač `rulesInAi` respektuje jen endpoint `ai` (generování textů vypravěče; `buildRulesSection(..., true)` – při
-  vypnutém vrací '' a neposílá se nic, příběhové scény bez kostek AI nemate). Shrnutí (`summary`) dostává pravidla vždy.
+  Přepínač `SceneMeta.rulesInAi` (per scéna, dialog 🤖 AI) respektuje jen endpoint `ai` (generování textů vypravěče; při
+  vypnutém se `buildRulesSection` nevolá a neposílá se nic, příběhové scény bez kostek AI nemate). Shrnutí (`summary`) dostává pravidla vždy.
   FE export (`utils/exportGame.ts`) má sekci o kostkách a pravidlech vždy: bere ji z `GET /api/games/:name/rules-prompt`
-  (→ { text } = `buildRulesSection` bez ohledu na `rulesInAi`, tj. stejný text jako dostává AI); při chybě záložní zkrácený text v kódu FE.
+  (→ { text } = `buildRulesSection`, tj. stejný text jako dostává AI); při chybě záložní zkrácený text v kódu FE.
 GET  /api/games/:name/events  (SSE: event `change`, data `{paths: string[]}` – změny souborů hry mimo BE)
 POST /api/games/:name/backup  ({ targetPath: absolutní .zip } → 201 { path, bytes }; 400 pro cíl uvnitř hry / špatnou příponu / chybějící složku)
 GET/PUT /api/vault            (→ { path, defaultPath, nativeDialogs }; PUT { path, create? } přepne složku s hrami, 400 když neexistuje)
@@ -404,7 +417,7 @@ GET  /vault/*  (statické soubory z aktuálně otevřené složky s hrami)
   fallback na názvy). Route `POST …/scenes/:id/context-scenes` → `{ scenes: názvy, raw }`, nic neukládá. FE `SceneModal`: sekce
   „Kontext pro AI vypravěče“ – chipy s ✕,   select „＋ přidat scénu…“, tlačítko „🤖 Vybrat (znovu) pomocí AI“ nahradí seznam; uloží se s „Uložit“.
 
-### Director v1 – režie beatu (`solo-rpg-be/src/director/`, FE `DirectorPanel`)
+### Director v1 – režie beatu (`solo-rpg-be/src/director/`, FE `DirectorPanel`) – jen scény s `aiMode === 'advanced'`
 - **Viditelný krok před psaním AI:** 🤖 bez briefu → `POST …/director/brief` a panel „🎬 Režie“ pod scénou (hráč může přehodit
   se seedem, upravit cokoli, přeskočit = `DELETE` + psát volně, nebo „Nechat AI psát“). S briefem 🤖 rovnou píše; brief se
   **spotřebuje až přijetím návrhu** (`director.consume` → event `director.beat.accepted` {suggestionId, brief, summary});

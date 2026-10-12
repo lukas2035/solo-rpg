@@ -8,12 +8,11 @@ import { AiError } from './types.js'
  * zapsané v textu) jde ze souboru `prompts/rules-prompt.md` a za ní popis konkrétních pravidel hry (`settings.rules`),
  * pokud je vyplněný.
  *
- * Přepínač `rulesInAi` respektuje jen generování nových textů vypravěče ve scéně (`sceneAi.ts`, volá s
- * `respectToggle = true`) – s vypnutým přepínačem se tam neposílá nic, aby se AI ve scénách bez kostek zbytečně
- * nemátla. Ostatní AI požadavky (shrnutí scény…) dostanou pravidla vždy, protože jim vysvětlení hodů jen pomáhá.
+ * Zda se sekce posílá při generování textů vypravěče ve scéně, řídí přepínač scény `SceneMeta.rulesInAi` (`sceneAi.ts`) –
+ * ve scénách bez kostek se tak AI zbytečně nemate. Ostatní AI požadavky (shrnutí scény, textový export…) dostanou
+ * pravidla vždy, protože jim vysvětlení hodů jen pomáhá.
  */
-export async function buildRulesSection(config: Config, settings: Pick<GameSettings, 'rules' | 'rulesInAi'>, respectToggle = false): Promise<string> {
-  if (respectToggle && !settings.rulesInAi) return ''
+export async function buildRulesSection(config: Config, settings: Pick<GameSettings, 'rules'>): Promise<string> {
   let base: string
   try {
     base = await fs.readFile(config.ai.rulesPromptPath, 'utf8')

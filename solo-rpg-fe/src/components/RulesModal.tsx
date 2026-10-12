@@ -4,13 +4,11 @@ import { inputClass } from '../utils/forms'
 
 export interface RulesFormValues {
   rules: string
-  rulesInAi: boolean
   rulesSystem: RulesSystem
 }
 
 interface RulesModalProps {
   rules: string
-  rulesInAi: boolean
   rulesSystem: RulesSystem
   onSubmit: (values: RulesFormValues) => Promise<void>
   onClose: () => void
@@ -25,12 +23,11 @@ const RULES_SYSTEM_OPTIONS: { value: RulesSystem; label: string }[] = [
 
 /**
  * Dialog „Pravidla pod příběhem“: markdown popis pravidlového systému, který hráč používá (VtM 5e, D&D 5e, Fate…,
- * případně tabulka pro výklad orákula), přepínač, zda popis posílat AI, a systém pro překlad obtížnosti v režii.
- * Do textového exportu hry se popis dává vždy.
+ * případně tabulka pro výklad orákula) a systém pro překlad obtížnosti v režii. Zda se popis posílá AI vypravěči,
+ * se nastavuje per scéna v dialogu 🤖 AI. Do textového exportu hry se popis dává vždy.
  */
-export default function RulesModal({ rules: initialRules, rulesInAi: initialInAi, rulesSystem: initialSystem, onSubmit, onClose }: RulesModalProps) {
+export default function RulesModal({ rules: initialRules, rulesSystem: initialSystem, onSubmit, onClose }: RulesModalProps) {
   const [rules, setRules] = useState(initialRules)
-  const [rulesInAi, setRulesInAi] = useState(initialInAi)
   const [rulesSystem, setRulesSystem] = useState<RulesSystem>(initialSystem)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -47,7 +44,7 @@ export default function RulesModal({ rules: initialRules, rulesInAi: initialInAi
     setSaving(true)
     setError(null)
     try {
-      await onSubmit({ rules: rules.trim(), rulesInAi, rulesSystem })
+      await onSubmit({ rules: rules.trim(), rulesSystem })
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Uložení pravidel selhalo.')
@@ -67,7 +64,7 @@ export default function RulesModal({ rules: initialRules, rulesInAi: initialInAi
         <p className="text-sm text-[var(--text)] opacity-80">
           Jaký pravidlový systém běží pod tímto příběhem (VtM 5e, D&amp;D 5e, AD&amp;D 2e, Fate Condensed…) a co znamenají hody,
           které si do textu zapisuješ. Můžeš sem dát i vlastní tabulku pro výklad orákula. Nechej prázdné, když žádná pravidla
-          nepoužíváš – AI se pak (při zapnutém přepínači níže) dozví jen to, že házíš kostkami jako orákulem.
+          nepoužíváš. Zda se popis posílá AI vypravěči, nastavíš pro každou scénu zvlášť v dialogu 🤖 AI.
         </p>
 
         <label className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">
@@ -86,23 +83,6 @@ export default function RulesModal({ rules: initialRules, rulesInAi: initialInAi
             placeholder={'Např.: Vampire: The Masquerade 5e. Hody zapisuju jako „Síla + Rvačka: 3 úspěchy vs. obtížnost 2“.\nOrákulum: d20 – 1–5 ne a komplikace, 6–10 ne, 11–15 ano, 16–20 ano a bonus.'}
             className={`${inputClass} font-mono text-sm resize-y whitespace-pre-wrap`}
           />
-        </label>
-
-        <label className="flex items-start gap-3 text-left text-sm text-[var(--text)] cursor-pointer">
-          <input
-            type="checkbox"
-            checked={rulesInAi}
-            onChange={(e) => setRulesInAi(e.target.checked)}
-            className="mt-1 accent-[var(--accent)]"
-          />
-          <span>
-            <span className="font-semibold">Posílat informace o kostkách a pravidlech AI vypravěči</span>
-            <span className="block opacity-70">
-              Týká se jen generování nových textů vypravěče ve scéně řízené AI. Zapnuto: k požadavku se připojí vysvětlení orákula
-              (hody zapsané v textu) a tento popis pravidel. Vypnuto: vypravěč se o kostkách nedozví nic – vhodné pro čistě
-              příběhové scény bez hodů. Ke shrnutí scény a do textového exportu celé hry (📄) se pravidla přidávají vždy.
-            </span>
-          </span>
         </label>
 
         <label className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">

@@ -5,7 +5,7 @@ import path from 'node:path'
 import { openDatabase, type Database } from '../src/storage/db.js'
 import { FsAssetStore } from '../src/storage/AssetStore.js'
 import { PostgresProvider } from '../src/storage/PostgresProvider.js'
-import { NotFoundError } from '../src/vault/StorageProvider.js'
+import { NotFoundError, ValidationError } from '../src/vault/StorageProvider.js'
 import { SuggestionService } from '../src/narrative/suggestions.js'
 import { BEAT_ACCEPTED_EVENT, BRIEF_CREATED_EVENT, DirectorService, EVENT_ABANDONED_EVENT, EVENT_RESOLVED_EVENT, EVENT_STARTED_EVENT } from '../src/director/directorService.js'
 import type { Config } from '../src/config.js'
@@ -42,7 +42,7 @@ beforeAll(async () => {
   await storage.createNarrator(G, { name: 'Vypravěč' })
   await storage.createCharacter(G, { firstName: 'Klára', lastName: 'Nováková', nickname: 'Klára' })
   await storage.createThread(G, { title: 'Zrada', type: 'threat', status: 'escalated', horizon: 'short-term', certainty: 'confirmed', characters: ['Klára Nováková'] })
-  const scene = await storage.createScene(G, { title: 'Noc', ai: true, characters: ['Klára Nováková'] })
+  const scene = await storage.createScene(G, { title: 'Noc', ai: true, aiMode: 'advanced', characters: ['Klára Nováková'] })
   sceneId = scene.id
   director = new DirectorService(storage)
   suggestions = new SuggestionService(storage, { ai: { contextTokens: 1000, transcriptTokens: 1000 } } as unknown as Config, director)
@@ -68,6 +68,24 @@ describe('DirectorService', () => {
     expect(a.focus.thread).toBe('Zrada')
     expect((await director.get(G, sceneId)).brief?.id).toBe(b.id)
     await expect(director.create(G, 'scn_neni', 1)).rejects.toBeInstanceOf(NotFoundError)
+  })
+
+  it('základní režim AI: režie se nevytvoří a rozpracovaný brief se při psaní ignoruje', async () => {
+    const basic = await storage.createScene(G, { title: 'Klidná scéna', ai: true, aiMode: 'basic', characters: ['Klára Nováková'] })
+    await expect(director.create(G, basic.id, 1)).rejects.toBeInstanceOf(ValidationError)
+    expect(await director.pending(G, basic.id)).toBeNull()
+
+    // Brief vznikl v pokročilém režimu; po přepnutí scény na základní ho AI nedostane (zůstává uložený pro případný návrat)
+    await storage.updateScene(G, basic.id, { title: basic.title, aiMode: 'advanced' })
+    const brief = await director.create(G, basic.id, 1)
+    await storage.updateScene(G, basic.id, { title: basic.title, aiMode: 'basic' })
+    expect(await director.pending(G, basic.id)).toBeNull()
+    expect((await director.get(G, basic.id)).brief?.id).toBe(brief.id)
+    seenBriefs.length = 0
+    const suggestion = await suggestions.generate(G, basic.id)
+    expect(seenBriefs).toEqual([null])
+    expect(suggestion.briefId).toBeNull()
+    await storage.deleteScene(G, basic.id)
   })
 
   it('patch upraví brief; ruční korekce pulsu z nastavení hry se projeví', async () => {

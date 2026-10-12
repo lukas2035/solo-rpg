@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
+import type { AiMode, DirectorState } from '@solo-rpg/shared'
 import { inputClass } from '../utils/forms'
+import { AI_MODE_LABEL, BEAT_SHORT, OUTCOME_LABEL, PHASE_LABEL, STAKES_LABEL, eventTitle } from '../utils/director'
 
 /** Postava scény pro rozdělení hráč / AI */
 export interface AiSceneCharacter {
@@ -15,6 +17,10 @@ export interface AiSceneSettings {
   aiCharacters: string[]
   /** Volitelný doplňující/shrnující popis situace jen pro AI */
   aiPrompt: string
+  /** Základní (jen vypravěč + scéna) / pokročilá (kontext kampaně + Režie) */
+  aiMode: AiMode
+  /** Posílat AI sekci o kostkách a pravidlech hry */
+  rulesInAi: boolean
 }
 
 interface AiSceneModalProps {
@@ -23,12 +29,18 @@ interface AiSceneModalProps {
   settings: AiSceneSettings
   /** Aktuální vypravěč hry (portrét jako URL); null = hra vypravěče nemá */
   narrator: { name: string; image: string | null; hasPrompt: boolean } | null
+  /** Stav Režie scény (puls, brief, probíhající událost) – jen informativně pro pokročilý režim; null = nenačteno */
+  director: DirectorState | null
+  /** Hra má vyplněný popis pravidel pod příběhem (🎲) */
+  hasRules: boolean
   /** Uloží nastavení scény (PATCH); chyba se zobrazí v dialogu */
   onSave: (settings: AiSceneSettings) => Promise<void>
   /** Otevře výběr vypravěče */
   onSelectNarrator: () => void
   /** Otevře úpravu aktuálního vypravěče (AI prompt) */
   onEditNarrator: () => void
+  /** Otevře dialog pravidel pod příběhem (🎲) */
+  onOpenRules: () => void
   /** Ručně vyžádá odpověď AI bez nového záznamu (nastavení se předtím uloží) */
   onGenerate: () => Promise<void>
   /** AI právě generuje odpověď */
@@ -36,11 +48,54 @@ interface AiSceneModalProps {
   onClose: () => void
 }
 
-/** Dialog AI vypravěče pro aktuální scénu: zapnutí, rozdělení postav mezi hráče a AI, ruční pokračování */
-export default function AiSceneModal({ sceneTitle, characters, settings, narrator, onSave, onSelectNarrator, onEditNarrator, onGenerate, busy, onClose }: AiSceneModalProps) {
+const MODE_HINT: Record<AiMode, string> = {
+  basic: 'AI dostane jen výchozí prompt, postavy, popis scény, její dosavadní průběh a pokyny vypravěče. Bez kontextu ostatních scén, questů, nití a bez Režie – vhodné pro klidné scény, kde má vypravěč prostě navázat.',
+  advanced: 'Navíc kontext kampaně (shrnutí jiných scén, lokace, questy, nitě, frakce, lore, tajemství) a Režie: puls kampaně, brief pro další beat a události přes více beatů (🎬 vedle 🤖 u vstupu).',
+}
+
+/** Souhrn Režie pro pokročilý režim: probíhající událost, beaty, rozpracovaný brief a puls */
+function DirectorSummary({ director }: { director: DirectorState | null }) {
+  if (!director) {
+    return <p className="text-xs opacity-70">Stav režie se načte po uložení pokročilého režimu.</p>
+  }
+  const { event, brief, pulse } = director
+  const nextBeat = event ? event.beats.length + 1 : 1
+  return (
+    <div className="flex flex-col gap-1.5 text-xs">
+      {event ? (
+        <div>
+          <div className="text-amber-200">
+            ⚡ Probíhající událost: <span className="font-semibold">{eventTitle(event)}</span>
+            <span className="opacity-70"> · sázky {STAKES_LABEL[event.stakes]} · {event.beats.length === 0 ? 'zatím bez beatů' : `${event.beats.length}. beat odehrán`}, další = {nextBeat}. beat</span>
+          </div>
+          {event.beats.length > 0 && (
+            <div className="opacity-70">
+              {event.beats.map((b, i) => (
+                <span key={i}>{i > 0 && ' → '}{i + 1}. {BEAT_SHORT[b.beatKind]}{b.outcome ? ` (${OUTCOME_LABEL[b.outcome]})` : ''}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="opacity-80">Žádná probíhající událost – další režie může novou založit.</div>
+      )}
+      <div className="opacity-80">
+        {brief
+          ? `🎬 Rozpracovaný brief: ${BEAT_SHORT[brief.beatKind]}${brief.eventId && event && brief.eventId === event.id ? ` (${nextBeat}. beat události)` : brief.mode === 'event' ? ' (nová událost)' : ' (pokračování)'} – čeká na „Nechat AI psát“`
+          : '🎬 Bez rozpracovaného briefu – 🤖 ho nejdřív připraví.'}
+      </div>
+      <div className="opacity-70">Puls kampaně (společný pro celou hru): napětí {pulse.tension}/10, fáze {PHASE_LABEL[pulse.phase]}</div>
+    </div>
+  )
+}
+
+/** Dialog AI vypravěče pro aktuální scénu: zapnutí, režim AI, rozdělení postav mezi hráče a AI, pravidla pro AI, ruční pokračování */
+export default function AiSceneModal({ sceneTitle, characters, settings, narrator, director, hasRules, onSave, onSelectNarrator, onEditNarrator, onOpenRules, onGenerate, busy, onClose }: AiSceneModalProps) {
   const [enabled, setEnabled] = useState(settings.enabled)
   const [aiCharacters, setAiCharacters] = useState<string[]>(settings.aiCharacters)
   const [aiPrompt, setAiPrompt] = useState(settings.aiPrompt)
+  const [aiMode, setAiMode] = useState<AiMode>(settings.aiMode)
+  const [rulesInAi, setRulesInAi] = useState(settings.rulesInAi)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -53,7 +108,7 @@ export default function AiSceneModal({ sceneTitle, characters, settings, narrato
   const setControl = (name: string, ai: boolean) =>
     setAiCharacters(prev => (ai ? (prev.includes(name) ? prev : [...prev, name]) : prev.filter(n => n !== name)))
 
-  const current = (): AiSceneSettings => ({ enabled, aiCharacters: aiCharacters.filter(n => characters.some(c => c.name === n)), aiPrompt })
+  const current = (): AiSceneSettings => ({ enabled, aiCharacters: aiCharacters.filter(n => characters.some(c => c.name === n)), aiPrompt, aiMode, rulesInAi })
 
   const handleSave = async (close: boolean) => {
     if (saving) return false
@@ -101,6 +156,47 @@ export default function AiSceneModal({ sceneTitle, characters, settings, narrato
             <span className="block text-xs opacity-70">Vedle záložky vypravěče se objeví tlačítko „🤖 AI pokračuje“ – na kliknutí aktuální vypravěč napíše přes OpenRouter další text a ten se uloží do scény.</span>
           </span>
         </label>
+
+        <fieldset className="flex flex-col gap-2 text-left text-sm text-[var(--text)]">
+          <legend className="mb-1 font-semibold">Režim AI pro tuto scénu</legend>
+          <div className="flex items-start gap-3">
+            <div className="flex rounded-md overflow-hidden border border-[var(--accent)]/50 text-xs flex-shrink-0">
+              {(['basic', 'advanced'] as AiMode[]).map(mode => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setAiMode(mode)}
+                  className={`px-3 py-1.5 transition-colors ${aiMode === mode ? 'bg-[var(--accent)] text-white' : 'bg-black/50 text-gray-400 hover:text-[var(--text)]'}`}
+                >
+                  {mode === 'basic' ? '📜' : '🎬'} {AI_MODE_LABEL[mode]}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs opacity-70 flex-1">{MODE_HINT[aiMode]}</p>
+          </div>
+          {aiMode === 'advanced' && (
+            <div className="p-3 rounded-lg border border-amber-500/40 bg-amber-950/40 text-amber-50">
+              <DirectorSummary director={director} />
+            </div>
+          )}
+        </fieldset>
+
+        <div className="flex items-start gap-3 text-left text-sm text-[var(--text)]">
+          <label className="flex items-start gap-3 cursor-pointer flex-1">
+            <input type="checkbox" checked={rulesInAi} onChange={(e) => setRulesInAi(e.target.checked)} className="mt-0.5 w-5 h-5 accent-[var(--accent)] cursor-pointer" />
+            <span className="flex-1">
+              <span className="font-semibold">Posílat informace o kostkách a pravidlech AI vypravěči</span>
+              <span className="block text-xs opacity-70">
+                Zapnuto: k požadavku se připojí vysvětlení orákula (hody zapsané v textu) a popis pravidel hry. Vypnuto: vypravěč se o kostkách
+                nedozví nic – vhodné pro čistě příběhové scény. Platí v obou režimech AI; shrnutí scény a textový export (📄) dostávají pravidla vždy.
+                {!hasRules && <span className="block text-amber-300">Hra zatím nemá popis pravidel – AI dostane jen obecné vysvětlení orákula.</span>}
+              </span>
+            </span>
+          </label>
+          <button type="button" onClick={onOpenRules} title="Upravit popis pravidel pod příběhem" className="px-3 py-1.5 rounded-md border border-[var(--accent)]/60 text-[var(--accent)] hover:border-[var(--accent)] hover:bg-black/60 transition-all text-xs flex-shrink-0">
+            🎲 Pravidla
+          </button>
+        </div>
 
         <div className="flex items-center gap-3 p-3 rounded-lg border border-[var(--accent)]/30 bg-black/40 text-left text-sm text-[var(--text)]">
           <div className="w-12 h-12 flex-shrink-0 rounded-md overflow-hidden border border-[var(--accent)]/50 bg-gray-800 flex items-center justify-center">

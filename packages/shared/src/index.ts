@@ -94,8 +94,6 @@ export const GameSettingsSchema = z.object({
   narrator: z.string().nullable(),
   /** Popis herních pravidel běžících pod příběhem (VtM 5e, D&D 5e, Fate…; markdown, tělo `game.md` za `<!-- rules -->`); prázdné = bez pravidel */
   rules: z.string().max(20000),
-  /** Posílat popis pravidel AI vypravěči při generování textů scény (shrnutí je dostává vždy); frontmatter `rulesInAi` */
-  rulesInAi: z.boolean(),
   /** Systém pravidel pro překlad obtížnosti v briefu Directoru; frontmatter `rulesSystem` */
   rulesSystem: RulesSystemSchema,
   /** Ruční korekce pulsu kampaně (napětí / fáze); frontmatter `pulseTension`, `pulsePhase` */
@@ -116,6 +114,14 @@ export const GameMetaSchema = z.object({
 })
 export type GameMeta = z.infer<typeof GameMetaSchema>
 
+/**
+ * Režim AI vypravěče scény (frontmatter `aiMode`):
+ * - `basic` – prompt jen z vypravěče, postav, popisu scény a jejího průběhu; bez kontextu kampaně a bez Režie (Director)
+ * - `advanced` – navíc kontext kampaně (shrnutí jiných scén, lokace, questy, nitě, frakce, lore) a Režie (puls, brief, události)
+ */
+export const AiModeSchema = z.enum(['basic', 'advanced'])
+export type AiMode = z.infer<typeof AiModeSchema>
+
 export const SceneMetaSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -134,6 +140,10 @@ export const SceneMetaSchema = z.object({
   aiCharacters: z.array(z.string()),
   /** Volitelný doplňující/shrnující popis situace jen pro AI (frontmatter `aiPrompt`); vloží se za popis scény */
   aiPrompt: z.string(),
+  /** Režim AI vypravěče – základní / pokročilá (dědí se do nové scény; první scéna hry `basic`) */
+  aiMode: AiModeSchema,
+  /** Posílat AI vypravěči sekci o kostkách a pravidlech hry při generování textů této scény (frontmatter `rulesInAi`; dědí se do nové scény) */
+  rulesInAi: z.boolean(),
   /** Celkové zhodnocení / shrnutí děje scény (markdown; tělo souboru za značkou `<!-- summary -->`) – rychlý kontext pro hráče i AI */
   summary: z.string(),
   /** Shrnutí je zastaralé – od jeho posledního uložení se změnily záznamy nebo popis scény (frontmatter `summaryStale`) */
@@ -165,6 +175,8 @@ export const SceneInputSchema = z.object({
   ai: z.boolean().optional(),
   aiCharacters: z.array(z.string().trim().min(1)).optional(),
   aiPrompt: z.string().max(5000).optional(),
+  aiMode: AiModeSchema.optional(),
+  rulesInAi: z.boolean().optional(),
   summary: z.string().max(20000).optional(),
   contextScenes: z.array(z.string().trim().min(1)).max(50).optional(),
 })
@@ -903,7 +915,7 @@ export type SceneImportResponse = z.infer<typeof SceneImportResponseSchema>
 
 /** Odpověď `GET /api/games/:game/rules-prompt` – kompletní sekce o kostkách a pravidlech, jak ji dostává AI (pro textový export hry) */
 export const RulesPromptResponseSchema = z.object({
-  /** `prompts/rules-prompt.md` + `## Herní pravidla pod příběhem` s popisem pravidel hry; bez ohledu na `rulesInAi` */
+  /** `prompts/rules-prompt.md` + `## Herní pravidla pod příběhem` s popisem pravidel hry; bez ohledu na `SceneMeta.rulesInAi` */
   text: z.string(),
 })
 export type RulesPromptResponse = z.infer<typeof RulesPromptResponseSchema>

@@ -38,10 +38,8 @@ interface CharacterBarProps {
   onSelectNarrator?: () => void
   /** Otevře nastavení AI vypravěče pro aktuální scénu */
   onOpenAi?: () => void
-  /** Otevře dialog pravidel pod příběhem (popis systému + zda ho posílat AI) */
+  /** Otevře dialog pravidel pod příběhem (popis systému + systém pro režii) */
   onOpenRules?: () => void
-  /** Hra posílá AI informace o kostkách a pravidlech (zvýraznění tlačítka 🎲) */
-  rulesInAi?: boolean
   /** AI je pro aktuální scénu zapnutá (zvýraznění tlačítka) */
   aiEnabled?: boolean
   /** AI právě generuje odpověď */
@@ -95,7 +93,6 @@ export default function CharacterBar({
   onSelectNarrator,
   onOpenAi,
   onOpenRules,
-  rulesInAi = false,
   aiEnabled = false,
   aiBusy = false,
   onOpenSession,
@@ -355,15 +352,10 @@ export default function CharacterBar({
             <button
               type="button"
               onClick={onOpenRules}
-              title={rulesInAi ? 'Kostky a pravidla pod příběhem (posílají se AI vypravěči)' : 'Kostky a pravidla pod příběhem (AI vypravěči se neposílají)'}
-              className={`relative w-8 h-8 rounded-md border bg-black/50 flex items-center justify-center cursor-pointer text-sm hover:bg-black/80 transition-all ${
-                rulesInAi ? 'border-cyan-400 bg-cyan-500/20 text-cyan-300 hover:border-cyan-300' : 'border-[var(--accent)]/60 text-[var(--accent)] hover:border-[var(--accent)]'
-              }`}
+              title="Kostky a pravidla pod příběhem"
+              className="w-8 h-8 rounded-md border bg-black/50 flex items-center justify-center cursor-pointer text-sm hover:bg-black/80 transition-all border-[var(--accent)]/60 text-[var(--accent)] hover:border-[var(--accent)]"
             >
               🎲
-              {rulesInAi && (
-                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(34,211,238,0.9)] pointer-events-none" />
-              )}
             </button>
           )}
           <button

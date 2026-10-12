@@ -78,7 +78,6 @@ export class VaultImporter {
       name: detail.meta.name,
       notes: gameNotes,
       rules: detail.setup.rules,
-      rulesInAi: detail.setup.rulesInAi,
       brightBackground: detail.setup.brightBackground,
       background: { imageAssetId: null, imageUrl: null },
       createdAt: detail.meta.createdAt,
@@ -162,7 +161,7 @@ export class VaultImporter {
     for (const s of [...detail.scenes].sort((a, b) => a.order - b.order)) {
       await add('scene', s.title, {
         name: s.title,
-        fields: { description: s.description, ai: s.ai, aiPrompt: s.aiPrompt, summary: s.summary, summaryStale: s.summaryStale, director: null },
+        fields: { description: s.description, ai: s.ai, aiPrompt: s.aiPrompt, aiMode: s.aiMode, rulesInAi: s.rulesInAi, summary: s.summary, summaryStale: s.summaryStale, director: null },
         sortOrder: s.order,
         image: await image(s.image, 'scene'),
         createdAt: s.createdAt,
@@ -276,7 +275,6 @@ export class VaultImporter {
       brightBackground: detail.setup.brightBackground,
       narrator: detail.setup.narrator,
       rules: detail.setup.rules,
-      rulesInAi: detail.setup.rulesInAi,
       rulesSystem: detail.setup.rulesSystem,
       pulseOverride: detail.setup.pulseOverride,
     })

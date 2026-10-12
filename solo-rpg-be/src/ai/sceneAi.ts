@@ -17,9 +17,10 @@ export interface SceneReplyDraft {
 }
 
 /**
- * Nechá aktuálního vypravěče hry navrhnout pokračování scény: sestaví prompt (postavy, scéna, kontext kampaně,
- * přepis), zavolá AI providera (OpenRouter / Mistral AI) a odpověď rozparsuje na záznamy.
+ * Nechá aktuálního vypravěče hry navrhnout pokračování scény: sestaví prompt (postavy, scéna, přepis; v pokročilém
+ * režimu scény navíc kontext kampaně a Režie), zavolá AI providera (OpenRouter / Mistral AI) a odpověď rozparsuje na záznamy.
  * **Nic neukládá** – o uložení rozhoduje hráč přes Suggestion → Accept (viz `narrative/suggestions.ts`).
+ * `brief` se uplatní jen u scény v režimu `advanced`; základní režim ho ignoruje.
  */
 export async function draftSceneReply(
   storage: StorageProvider,
@@ -54,12 +55,15 @@ export async function draftSceneReply(
     throw new AiError(500, `Soubor s výchozím promptem nenalezen: ${config.ai.promptPath}`)
   }
 
-  const context = buildSceneContext(detail, scene, { budgetTokens: config.ai.contextTokens })
+  const advanced = scene.aiMode === 'advanced'
+  // Základní režim: žádný kontext kampaně ani Režie – jen vypravěč, postavy, scéna a její průběh
+  const context: SceneContext = advanced ? buildSceneContext(detail, scene, { budgetTokens: config.ai.contextTokens }) : { sections: [], included: [], dropped: 0, tokensUsed: 0 }
+  const activeBrief = advanced ? brief : null
   // Beat uvnitř probíhající události: AI dostane i její dosavadní průběh
-  const event = brief?.eventId ? ((await storage.getSceneDirector(gameName, sceneId))?.event ?? null) : null
+  const event = activeBrief?.eventId ? ((await storage.getSceneDirector(gameName, sceneId))?.event ?? null) : null
   const messages = buildMessages({
     defaultPrompt,
-    rulesPrompt: await buildRulesSection(config, detail.setup, true),
+    rulesPrompt: scene.rulesInAi ? await buildRulesSection(config, detail.setup) : '',
     narrator,
     scene,
     playerCharacters,
@@ -67,13 +71,13 @@ export async function draftSceneReply(
     entries,
     contextSections: context.sections,
     rejectedReasons,
-    briefSection: brief ? buildBriefSection(brief, detail, event) : undefined,
+    briefSection: activeBrief ? buildBriefSection(activeBrief, detail, event) : undefined,
     transcriptBudgetTokens: config.ai.transcriptTokens,
   })
   if (config.ai.debug) {
     const dump = messages.map(m => `───── ${m.role.toUpperCase()} ─────\n${m.content}`).join('\n\n')
     log?.info(
-      `[AI] provider=${PROVIDER_LABEL[config.ai.provider]} model=${config.ai.model} scéna="${scene.title}" hráč=[${playerCharacters.map(c => c.name).join(', ')}] AI=[${aiCharacters.map(c => c.name).join(', ')}] kontext≈${context.tokensUsed} tokenů (${context.included.length} položek, ${context.dropped} vynecháno)${brief ? ` režie=${brief.id}` : ''}\n${dump}`,
+      `[AI] provider=${PROVIDER_LABEL[config.ai.provider]} model=${config.ai.model} scéna="${scene.title}" režim=${scene.aiMode} hráč=[${playerCharacters.map(c => c.name).join(', ')}] AI=[${aiCharacters.map(c => c.name).join(', ')}] kontext≈${context.tokensUsed} tokenů (${context.included.length} položek, ${context.dropped} vynecháno)${activeBrief ? ` režie=${activeBrief.id}` : ''}\n${dump}`,
     )
   }
   const raw = await chatCompletion(config.ai.provider, messages, {

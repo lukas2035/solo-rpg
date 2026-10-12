@@ -103,9 +103,8 @@ export default function StoryEditor() {
   const [showAiModal, setShowAiModal] = useState(false)
   const [showRulesModal, setShowRulesModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
-  /** Pravidla pod příběhem (popis systému) a zda se posílají AI – součást nastavení hry */
+  /** Pravidla pod příběhem (popis systému) – součást nastavení hry; zda se posílají AI je per scéna (`SceneMeta.rulesInAi`) */
   const [rules, setRules] = useState('')
-  const [rulesInAi, setRulesInAi] = useState(false)
   /** Systém pravidel pro překlad obtížnosti v režii a ruční korekce pulsu kampaně – součást nastavení hry */
   const [rulesSystem, setRulesSystem] = useState<RulesSystem>('none')
   const [pulseOverride, setPulseOverride] = useState<PulseOverride>({ tension: null, phase: null })
@@ -333,10 +332,9 @@ export default function StoryEditor() {
     setNarrators(setup.narrators)
     setNarratorName(setup.narrator)
     setRules(setup.rules)
-    setRulesInAi(setup.rulesInAi)
     setRulesSystem(setup.rulesSystem)
     setPulseOverride(setup.pulseOverride)
-    const settings: GameSettings = { backgroundImage: setup.backgroundImage, brightBackground: setup.brightBackground, narrator: setup.narrator, rules: setup.rules, rulesInAi: setup.rulesInAi, rulesSystem: setup.rulesSystem, pulseOverride: setup.pulseOverride }
+    const settings: GameSettings = { backgroundImage: setup.backgroundImage, brightBackground: setup.brightBackground, narrator: setup.narrator, rules: setup.rules, rulesSystem: setup.rulesSystem, pulseOverride: setup.pulseOverride }
     lastSavedSetupRef.current = JSON.stringify(settings)
   }, [])
 
@@ -376,8 +374,8 @@ export default function StoryEditor() {
   }, [gameName, resolveEntries, applySetup])
 
   const currentSettings = useMemo<GameSettings>(
-    () => ({ backgroundImage, brightBackground, narrator: narratorName, rules, rulesInAi, rulesSystem, pulseOverride }),
-    [backgroundImage, brightBackground, narratorName, rules, rulesInAi, rulesSystem, pulseOverride]
+    () => ({ backgroundImage, brightBackground, narrator: narratorName, rules, rulesSystem, pulseOverride }),
+    [backgroundImage, brightBackground, narratorName, rules, rulesSystem, pulseOverride]
   )
 
   // Automatické ukládání nastavení (pozadí, aktuální vypravěč) do vaultu – postavy a vypravěči mají vlastní endpointy
@@ -606,9 +604,10 @@ export default function StoryEditor() {
     }
   }, [gameName])
 
-  // Při přepnutí scény načíst stav Directoru; panel se otevře sám, pokud má scéna brief (křížkem ho lze skrýt)
+  // Při přepnutí scény načíst stav Directoru (jen pokročilý režim AI); panel se otevře sám, pokud má scéna brief (křížkem ho lze skrýt)
+  const currentAiMode = currentScene?.aiMode ?? 'basic'
   useEffect(() => {
-    if (!currentSceneId) return
+    if (!currentSceneId || currentAiMode !== 'advanced') return
     let cancelled = false
     api.getDirector(gameName, currentSceneId)
       .then(state => {
@@ -618,10 +617,12 @@ export default function StoryEditor() {
       })
       .catch(() => { /* bez Directoru */ })
     return () => { cancelled = true }
-  }, [gameName, currentSceneId])
+  }, [gameName, currentSceneId, currentAiMode])
 
-  const directorState = directorBySceneId && directorBySceneId.sceneId === currentSceneId ? directorBySceneId.state : null
-  const showDirector = !!currentSceneId && directorOpenFor === currentSceneId
+  /** Režie (Director) je dostupná jen scénám v pokročilém režimu AI */
+  const directorAvailable = currentAiMode === 'advanced'
+  const directorState = directorAvailable && directorBySceneId && directorBySceneId.sceneId === currentSceneId ? directorBySceneId.state : null
+  const showDirector = directorAvailable && !!currentSceneId && directorOpenFor === currentSceneId
   const setDirectorState = (sceneId: string, update: (prev: DirectorState | null) => DirectorState | null) => {
     setDirectorBySceneId(prev => {
       const state = update(prev && prev.sceneId === sceneId ? prev.state : null)
@@ -787,9 +788,13 @@ export default function StoryEditor() {
     persistStory(newEntries)
   }
 
-  /** Tlačítko 🤖 v InputArea: bez briefu nejdřív připravit režii (viditelný krok), s briefem nechat AI psát */
+  /** Tlačítko 🤖 v InputArea: v pokročilém režimu bez briefu nejdřív připravit režii (viditelný krok), jinak nechat AI psát rovnou */
   const handleGenerateAi = () => {
     if (!currentSceneId || !currentScene?.ai || aiBusy) return
+    if (!directorAvailable) {
+      runAi(currentSceneId).catch(() => { /* chyba je v aiError */ })
+      return
+    }
     const brief = directorState?.brief
     if (brief) {
       // Hráč hodil / dobojoval, ale výsledek nezadal – otevřít panel místo psaní
@@ -905,20 +910,19 @@ export default function StoryEditor() {
     setShowNarratorPicker(false)
   }
 
-  /** Uloží nastavení AI aktuální scény (zapnuto + postavy hrané AI) do frontmatteru scény */
+  /** Uloží nastavení AI aktuální scény (zapnuto, režim, postavy hrané AI, pravidla pro AI) do scény */
   const handleAiSettingsSave = async (settings: AiSceneSettings) => {
     if (!currentScene) return
-    const saved = await api.updateScene(gameName, currentScene.id, { title: currentScene.title, ai: settings.enabled, aiCharacters: settings.aiCharacters, aiPrompt: settings.aiPrompt })
+    const saved = await api.updateScene(gameName, currentScene.id, { title: currentScene.title, ai: settings.enabled, aiCharacters: settings.aiCharacters, aiPrompt: settings.aiPrompt, aiMode: settings.aiMode, rulesInAi: settings.rulesInAi })
     setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))
   }
 
   /** Uloží pravidla pod příběhem ihned a zapíše je i do stavu, aby autosave nastavení nic nepřepsal */
   const handleRulesSave = async (values: RulesFormValues) => {
-    const next: GameSettings = { ...currentSettings, rules: values.rules, rulesInAi: values.rulesInAi, rulesSystem: values.rulesSystem }
+    const next: GameSettings = { ...currentSettings, rules: values.rules, rulesSystem: values.rulesSystem }
     await api.saveSetup(gameName, next)
     lastSavedSetupRef.current = JSON.stringify(next)
     setRules(values.rules)
-    setRulesInAi(values.rulesInAi)
     setRulesSystem(values.rulesSystem)
     // Popisek obtížnosti v rozpracovaném briefu závisí na systému
     if (currentSceneId && directorState?.brief) void refreshDirector(currentSceneId)
@@ -1418,7 +1422,6 @@ export default function StoryEditor() {
         onSelectNarrator={() => setShowNarratorPicker(true)}
         onOpenAi={() => { if (currentScene) setShowAiModal(true) }}
         onOpenRules={() => setShowRulesModal(true)}
-        rulesInAi={rulesInAi}
         aiEnabled={currentScene?.ai ?? false}
         aiBusy={aiBusy}
         onOpenSession={() => setShowSessionModal(true)}
@@ -1581,7 +1584,7 @@ export default function StoryEditor() {
             onAddEntry={handleAddEntry}
             onGenerateAi={currentScene?.ai && currentNarrator ? handleGenerateAi : undefined}
             aiBusy={aiBusy}
-            onToggleDirector={currentScene?.ai && currentNarrator ? () => setDirectorOpenFor(prev => (prev === currentSceneId ? null : currentSceneId)) : undefined}
+            onToggleDirector={directorAvailable && currentScene?.ai && currentNarrator ? () => setDirectorOpenFor(prev => (prev === currentSceneId ? null : currentSceneId)) : undefined}
             directorOpen={showDirector || !!directorState?.brief}
             briefPending={!!directorState?.brief}
             brightBackground={brightBackground}
@@ -1668,6 +1671,26 @@ export default function StoryEditor() {
         <SessionModal game={gameName} timer={sessionTimer} onClose={() => setShowSessionModal(false)} />
       )}
 
+      {/* AI vypravěč pro aktuální scénu – vykreslen před výběrem vypravěče a pravidly, aby se dialogy otevřené z něj zobrazily nad ním */}
+      {showAiModal && currentScene && (
+        <AiSceneModal
+          key={currentScene.id}
+          sceneTitle={currentScene.title}
+          characters={displayCharacters.filter(c => !c.id.startsWith('tmp-')).map(c => ({ name: c.name, nickname: c.nickname, image: c.image }))}
+          settings={{ enabled: currentScene.ai, aiCharacters: currentScene.aiCharacters, aiPrompt: currentScene.aiPrompt, aiMode: currentScene.aiMode, rulesInAi: currentScene.rulesInAi }}
+          narrator={currentNarrator ? { name: currentNarrator.name, image: assetUrl(gameName, currentNarrator.image, assetVersion), hasPrompt: currentNarrator.aiPrompt.trim().length > 0 } : null}
+          director={directorState}
+          hasRules={rules.trim().length > 0}
+          onSave={handleAiSettingsSave}
+          onSelectNarrator={() => setShowNarratorPicker(true)}
+          onEditNarrator={() => { if (currentNarrator) setNarratorModal({ mode: 'edit', id: currentNarrator.id }) }}
+          onOpenRules={() => setShowRulesModal(true)}
+          onGenerate={() => runAi(currentScene.id)}
+          busy={aiBusy}
+          onClose={() => setShowAiModal(false)}
+        />
+      )}
+
       {/* Výběr aktuálního vypravěče */}
       {showNarratorPicker && (
         <NarratorPickerModal
@@ -1696,27 +1719,9 @@ export default function StoryEditor() {
       {showRulesModal && (
         <RulesModal
           rules={rules}
-          rulesInAi={rulesInAi}
           rulesSystem={rulesSystem}
           onSubmit={handleRulesSave}
           onClose={() => setShowRulesModal(false)}
-        />
-      )}
-
-      {/* AI vypravěč pro aktuální scénu */}
-      {showAiModal && currentScene && (
-        <AiSceneModal
-          key={currentScene.id}
-          sceneTitle={currentScene.title}
-          characters={displayCharacters.filter(c => !c.id.startsWith('tmp-')).map(c => ({ name: c.name, nickname: c.nickname, image: c.image }))}
-          settings={{ enabled: currentScene.ai, aiCharacters: currentScene.aiCharacters, aiPrompt: currentScene.aiPrompt }}
-          narrator={currentNarrator ? { name: currentNarrator.name, image: assetUrl(gameName, currentNarrator.image, assetVersion), hasPrompt: currentNarrator.aiPrompt.trim().length > 0 } : null}
-          onSave={handleAiSettingsSave}
-          onSelectNarrator={() => setShowNarratorPicker(true)}
-          onEditNarrator={() => { if (currentNarrator) setNarratorModal({ mode: 'edit', id: currentNarrator.id }) }}
-          onGenerate={() => runAi(currentScene.id)}
-          busy={aiBusy}
-          onClose={() => setShowAiModal(false)}
         />
       )}
 
