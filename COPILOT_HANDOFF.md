@@ -86,11 +86,12 @@ solo-rpg/
 ### Layout vaultu (na hru)
 ```
 vault/<Název hry>/
-  game.md                 frontmatter: name, createdAt, updatedAt, background, brightBackground, narrator (wikilink `[[Jméno]]` aktuálního vypravěče | null);
+  game.md                 frontmatter: name, createdAt, updatedAt, background, narrator (wikilink `[[Jméno]]` aktuálního vypravěče | null);
                           tělo = volné poznámky hráče + volitelně `<!-- rules -->` + popis pravidel pod příběhem
                           (`GameSettings.rules`; `splitGameBody`/`joinGameBody`, saveSetup poznámky zachová). UI: `RulesModal` přes 🎲 v CharacterBar,
                           StoryEditor.handleRulesSave ukládá hned (ne debounce) a synchronizuje `lastSavedSetupRef`.
-                          (starý klíč `rulesInAi` v game.md je legacy – slouží jen jako fallback pro scény bez vlastního `rulesInAi`, saveSetup ho maže)
+                          (staré klíče `rulesInAi` a `brightBackground` v game.md jsou legacy – slouží jen jako fallback pro scény bez vlastního
+                          `rulesInAi` / `darkBackground` (`brightBackground: false` → `darkBackground: true`), saveSetup je maže)
   characters/<Celé jméno>.md  frontmatter: id, name (celé), firstName, lastName, nickname, portrait, order;
                           tělo = markdown poznámky (editovatelné v modalu i v Obsidianu). PC i NPC bez rozlišení.
                           (stará složka npcs/ se při prvním čtení automaticky přejmenuje, `name` se rozdělí na jméno/příjmení)
@@ -113,7 +114,9 @@ vault/<Název hry>/
                           v UI se už nenastavuje ani nemaže, slouží jen jako fallback pro scény bez obrázku)
   scenes/001 - Název.md   frontmatter: id, title, order, image, characters (wikilinky `[[Celé jméno]]` postav ve scéně), location,
                           ai (bool – AI vypravěč zapnutý), aiMode (`basic` | `advanced`; chybí → `advanced`), rulesInAi (bool – posílat AI
-                          kostky/pravidla; chybí → legacy `game.md rulesInAi`), aiCharacters (wikilinky postav hraných AI), aiPrompt (volitelný doplňující popis
+                          kostky/pravidla; chybí → legacy `game.md rulesInAi`), darkBackground (bool – ztmavený obrázek pozadí při přehrávání scény;
+                          zapisuje se jen `true`, chybí → legacy `game.md brightBackground === false`; dědí se do nové scény; checkbox 🌙 v `InputArea`,
+                          `StoryEditor.handleDarkBackgroundChange` = optimistický PATCH scény), aiCharacters (wikilinky postav hraných AI), aiPrompt (volitelný doplňující popis
                           situace jen pro AI; null když prázdný, nedědí se do nové scény), createdAt, updatedAt
                           tělo: markdown popis scény, pak značka `<!-- entries -->`, pak záznamy
                           záznamy: <!-- entry id="..." ts="..." --> + **[[Celé jméno|nickname]]**: text  |  **[[Jméno vypravěče]]**:\n víceřádkový text
@@ -266,7 +269,8 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
   pokyny vypravěče + důvody odmítnutí; bez kontextu kampaně (`contextBuilder`) a bez Režie (`directorService.pending()` vrací null,
   `create()` hází ValidationError). **advanced** = vše (kontext kampaně, brief, eventy, puls). `rulesInAi` platí v obou režimech
   (`buildRulesSection` už nemá přepínač; volá se jen když `scene.rulesInAi`). Nová scéna dědí `aiMode` i `rulesInAi` ze sousední
-  (`createScene`: `input.aiMode ?? neighbor?.aiMode ?? 'basic'`, `rulesInAi` default false). FE: `AiSceneModal` má přepínač
+  (`createScene`: `input.aiMode ?? neighbor?.aiMode ?? 'basic'`, `rulesInAi` default false; stejně `darkBackground` – scene schema v5,
+  migrace `0004_scene_dark_background.sql` = `NOT games.bright_background` do scén a drop sloupce). FE: `AiSceneModal` má přepínač
   📜 Základní / 🎬 Pokročilá, checkbox pravidel (přesunut z `RulesModal`, tlačítko 🎲 už nemá zvýraznění) a v advanced
   `DirectorSummary` (událost, beaty, další beat, brief, puls); `StoryEditor` načítá Director a ukazuje panel/tlačítko 🎬 jen
   pro `aiMode === 'advanced'`, v basic 🤖 volá rovnou `runAi`. Při přepnutí advanced → basic uložený brief/event zůstává a ignoruje se.
@@ -343,7 +347,7 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
 ```
 GET  /api/health
 GET/POST /api/games            GET/PATCH(rename)/DELETE /api/games/:name
-PUT  /api/games/:name/setup    (GameSettings: backgroundImage, brightBackground, narrator = jméno | null, rules, rulesSystem, pulseOverride; 404 pro neznámého vypravěče)
+PUT  /api/games/:name/setup    (GameSettings: backgroundImage, narrator = jméno | null, rules, rulesSystem, pulseOverride; 404 pro neznámého vypravěče)
 POST /api/games/:name/characters             PUT/DELETE /api/games/:name/characters/:id
 POST /api/games/:name/narrators              PUT/DELETE /api/games/:name/narrators/:id   ({ name, description?, aiPrompt?, image? })
 GET/POST /api/games/:name/threads            PUT/DELETE /api/games/:name/threads/:id     (ThreadInput; title+type povinné)
@@ -351,7 +355,7 @@ GET/POST /api/games/:name/factions           PUT/DELETE /api/games/:name/faction
 GET/POST /api/games/:name/quests             PUT/DELETE /api/games/:name/quests/:id      (QuestInput; jen title povinný, type default side)
 POST /api/games/:name/assets (multipart: kind portrait|narrator|faction|background|scene, ownerName?, file)
 POST /api/games/:name/assets/from-url ({ kind, url, ownerName? })
-GET/POST /api/games/:name/scenes ({title, description?, image?, characters?, location?, ai?, aiMode?, rulesInAi?, aiCharacters?})
+GET/POST /api/games/:name/scenes ({title, description?, image?, characters?, location?, ai?, aiMode?, rulesInAi?, darkBackground?, aiCharacters?})
 GET(záznamy)/PUT(záznamy)/PATCH(meta)/DELETE /api/games/:name/scenes/:id
 POST /api/games/:name/scenes/:id/ai  ({ prompt? } – jednorázový pokyn hráče; AI vypravěč navrhne pokračování, NEUKLÁDÁ; → AiSuggestion (+ promptEntry); 503 bez klíče, 400 bez vypravěče, 502 chyba providera)
 GET  /api/games/:name/scenes/:id/ai/suggestion  (→ { suggestion | null, rejectedReasons })

@@ -45,6 +45,8 @@ export const SceneFields = z.object({
   aiMode: AiModeSchema,
   /** Posílat AI sekci o kostkách a pravidlech při generování textů této scény */
   rulesInAi: z.boolean(),
+  /** Ztmavený obrázek na pozadí scény (výchozí false = původní jas) */
+  darkBackground: z.boolean(),
   summary: z.string(),
   summaryStale: z.boolean(),
   /** Stav Directoru (rozpracovaný brief + probíhající událost); null = nic rozehraného */
@@ -121,12 +123,14 @@ export const KIND_VERSIONS: Record<EntityKind, { current: number; migrations: Re
   // v3: stav Directoru (brief + událost) u scény
   // v4: režim AI (stávající scény zůstávají v pokročilém režimu) + přepínač pravidel per scéna (dřív `games.rules_in_ai`;
   //     SQL migrace 0002 ho do scén překopírovala, proto mají přednost už přítomné klíče)
+  // v5: ztmavení pozadí per scéna (dřív `games.bright_background`; SQL migrace 0004 ho do scén překopírovala jako negaci)
   scene: {
-    current: 4,
+    current: 5,
     migrations: {
       1: old => ({ ...(old as object), summaryStale: false }),
       2: old => ({ ...(old as object), director: null }),
       3: old => ({ aiMode: 'advanced', rulesInAi: false, ...(old as object) }),
+      4: old => ({ darkBackground: false, ...(old as object) }),
     },
   },
   thread: { current: 1, migrations: {} },

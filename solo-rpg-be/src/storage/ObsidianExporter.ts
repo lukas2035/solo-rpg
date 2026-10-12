@@ -87,7 +87,6 @@ export class ObsidianExporter {
     }
     await target.saveSetup(game, {
       backgroundImage: await image(detail.setup.backgroundImage, 'background', ''),
-      brightBackground: detail.setup.brightBackground,
       narrator: detail.setup.narrator,
       rules: detail.setup.rules,
       rulesSystem: detail.setup.rulesSystem,

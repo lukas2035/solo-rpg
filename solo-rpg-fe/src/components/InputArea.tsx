@@ -15,8 +15,9 @@ interface InputAreaProps {
   /** Zobrazit u jmen pořadové číslo pro přepínání klávesnicí (drženo Ctrl/Alt) */
   showShortcutNumbers?: boolean
   onAddEntry: (text: string, characterId: string | null, markdown?: boolean) => void
-  brightBackground?: boolean
-  onBrightBackgroundChange?: (value: boolean) => void
+  /** Ztmavené pozadí aktuální scény (false = původní jas obrázku) */
+  darkBackground?: boolean
+  onDarkBackgroundChange?: (value: boolean) => void
   /** Jméno aktuálního vypravěče; null = hra vypravěče nemá a text vypravěče nelze zadávat */
   narratorName: string | null
   /** Otevře vytvoření prvního vypravěče (tlačítko „Zadat vypravěče“) */
@@ -34,7 +35,7 @@ interface InputAreaProps {
   briefPending?: boolean
 }
 
-export default function InputArea({ characters, showShortcutNumbers, onAddEntry, brightBackground, onBrightBackgroundChange, narratorName, onCreateNarrator, onGenerateAi, onPromptAi, aiBusy = false, onToggleDirector, directorOpen = false, briefPending = false }: InputAreaProps) {
+export default function InputArea({ characters, showShortcutNumbers, onAddEntry, darkBackground = false, onDarkBackgroundChange, narratorName, onCreateNarrator, onGenerateAi, onPromptAi, aiBusy = false, onToggleDirector, directorOpen = false, briefPending = false }: InputAreaProps) {
   const [text, setText] = useState('')
   const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null)
   const [quoteMode, setQuoteMode] = useState(false)
@@ -251,14 +252,15 @@ export default function InputArea({ characters, showShortcutNumbers, onAddEntry,
 
         <div className="ml-auto flex items-center gap-3 flex-shrink-0">
           <label
-            title="Zesvětlit obrázek na pozadí"
-            className="flex items-center gap-1 cursor-pointer text-[#aa3bff]"
+            title="Ztmavit obrázek na pozadí (platí pro tuto scénu, nová scéna ho převezme)"
+            className={`flex items-center gap-1 text-[#aa3bff] ${onDarkBackgroundChange ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
           >
-            <span className="text-sm select-none">🔆</span>
+            <span className="text-sm select-none">🌙</span>
             <input
               type="checkbox"
-              checked={brightBackground ?? true}
-              onChange={(e) => onBrightBackgroundChange?.(e.target.checked)}
+              checked={darkBackground}
+              disabled={!onDarkBackgroundChange}
+              onChange={(e) => onDarkBackgroundChange?.(e.target.checked)}
               className="w-4 h-4 accent-[#aa3bff] cursor-pointer"
             />
           </label>

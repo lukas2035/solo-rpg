@@ -41,7 +41,6 @@ describe('hry', () => {
   it('vytvoří, najde a přejmenuje hru; duplicitní název je 409', async () => {
     const detail = await storage.getGame(G)
     expect(detail?.meta.name).toBe(G)
-    expect(detail?.setup.brightBackground).toBe(true)
     await expect(storage.createGame(G.toUpperCase())).rejects.toBeInstanceOf(ConflictError)
     const meta = await storage.renameGame(G, `${G} b`)
     expect(meta.name).toBe(`${G} b`)
@@ -162,16 +161,16 @@ describe('postavy a scény', () => {
     await storage.saveSceneEntries(G, scene.id, [{ ...entries[0], text: 'Zase jiný' }])
     expect(await find()).toMatchObject({ summaryStale: true })
     const [row] = await database.db.execute(sql`SELECT schema_version FROM entities WHERE id = ${scene.id}`).then(r => r.rows as { schema_version: number }[])
-    expect(row.schema_version).toBe(4)
+    expect(row.schema_version).toBe(5)
 
-    // Režim AI a přepínač pravidel: default basic/false, dědí se do nové sousední scény, PATCH bez nich hodnoty zachová
-    expect(await find()).toMatchObject({ aiMode: 'basic', rulesInAi: false })
-    await storage.updateScene(G, scene.id, { title: 'Přejmenovaná', aiMode: 'advanced', rulesInAi: true })
-    expect(await find()).toMatchObject({ aiMode: 'advanced', rulesInAi: true })
+    // Režim AI, přepínač pravidel a ztmavení pozadí: default basic/false/false, dědí se do nové sousední scény, PATCH bez nich hodnoty zachová
+    expect(await find()).toMatchObject({ aiMode: 'basic', rulesInAi: false, darkBackground: false })
+    await storage.updateScene(G, scene.id, { title: 'Přejmenovaná', aiMode: 'advanced', rulesInAi: true, darkBackground: true })
+    expect(await find()).toMatchObject({ aiMode: 'advanced', rulesInAi: true, darkBackground: true })
     await storage.updateScene(G, scene.id, { title: 'Přejmenovaná', description: 'y' })
-    expect(await find()).toMatchObject({ aiMode: 'advanced', rulesInAi: true })
+    expect(await find()).toMatchObject({ aiMode: 'advanced', rulesInAi: true, darkBackground: true })
     const inherited = await storage.createScene(G, { title: 'Dědí AI' })
-    expect(inherited).toMatchObject({ aiMode: 'advanced', rulesInAi: true })
+    expect(inherited).toMatchObject({ aiMode: 'advanced', rulesInAi: true, darkBackground: true })
     await storage.deleteScene(G, inherited.id)
 
     // Kontextové scény: vazba scéna → scéna podle názvu, sama sebe a neznámé vypustí, rename se promítne
@@ -193,8 +192,8 @@ describe('vypravěči a setup', () => {
   it('aktuální vypravěč: saveSetup s neznámým = 404, smazání aktuálního = null', async () => {
     const n = await storage.createNarrator(G, { name: 'Vypravěč' })
     const noPulse = { tension: null, phase: null }
-    await expect(storage.saveSetup(G, { backgroundImage: null, brightBackground: false, narrator: 'Nikdo', rules: '', rulesSystem: 'none', pulseOverride: noPulse })).rejects.toBeInstanceOf(NotFoundError)
-    const setup = await storage.saveSetup(G, { backgroundImage: 'https://x/bg.png', brightBackground: false, narrator: 'vypravěč', rules: 'VtM', rulesSystem: 'vtm5e', pulseOverride: { tension: 7, phase: null } })
+    await expect(storage.saveSetup(G, { backgroundImage: null, narrator: 'Nikdo', rules: '', rulesSystem: 'none', pulseOverride: noPulse })).rejects.toBeInstanceOf(NotFoundError)
+    const setup = await storage.saveSetup(G, { backgroundImage: 'https://x/bg.png', narrator: 'vypravěč', rules: 'VtM', rulesSystem: 'vtm5e', pulseOverride: { tension: 7, phase: null } })
     expect(setup.narrator).toBe('Vypravěč')
     expect(setup.backgroundImage).toBe('https://x/bg.png')
     expect(setup.rules).toBe('VtM')

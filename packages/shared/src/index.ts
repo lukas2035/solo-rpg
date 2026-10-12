@@ -89,7 +89,6 @@ export type PulseOverride = z.infer<typeof PulseOverrideSchema>
 /** Nastavení hry bez postav a vypravěčů (ti mají vlastní CRUD endpointy) */
 export const GameSettingsSchema = z.object({
   backgroundImage: ImageRefSchema,
-  brightBackground: z.boolean(),
   /** Jméno aktuálního vypravěče; null = žádný (nová hra vypravěče nemá, uživatel ho musí vytvořit) */
   narrator: z.string().nullable(),
   /** Popis herních pravidel běžících pod příběhem (VtM 5e, D&D 5e, Fate…; markdown, tělo `game.md` za `<!-- rules -->`); prázdné = bez pravidel */
@@ -144,6 +143,8 @@ export const SceneMetaSchema = z.object({
   aiMode: AiModeSchema,
   /** Posílat AI vypravěči sekci o kostkách a pravidlech hry při generování textů této scény (frontmatter `rulesInAi`; dědí se do nové scény) */
   rulesInAi: z.boolean(),
+  /** Ztmavený obrázek na pozadí při přehrávání scény (frontmatter `darkBackground`; dědí se do nové scény). Výchozí false = původní jas */
+  darkBackground: z.boolean(),
   /** Celkové zhodnocení / shrnutí děje scény (markdown; tělo souboru za značkou `<!-- summary -->`) – rychlý kontext pro hráče i AI */
   summary: z.string(),
   /** Shrnutí je zastaralé – od jeho posledního uložení se změnily záznamy nebo popis scény (frontmatter `summaryStale`) */
@@ -177,6 +178,7 @@ export const SceneInputSchema = z.object({
   aiPrompt: z.string().max(5000).optional(),
   aiMode: AiModeSchema.optional(),
   rulesInAi: z.boolean().optional(),
+  darkBackground: z.boolean().optional(),
   summary: z.string().max(20000).optional(),
   contextScenes: z.array(z.string().trim().min(1)).max(50).optional(),
 })

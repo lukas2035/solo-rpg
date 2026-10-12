@@ -29,6 +29,13 @@
       "when": 1791829143145,
       "tag": "0003_scene_entry_ai",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791830879900,
+      "tag": "0004_scene_dark_background",
+      "breakpoints": true
     }
   ]
 }

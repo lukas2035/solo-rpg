@@ -105,7 +105,6 @@ export default function StoryEditor() {
   /** ID postav otevřených v plovoucích oknech (poslední v poli je nahoře); `BACKGROUND_FLOAT_ID` = obrázek pozadí */
   const [floatingPortraitIds, setFloatingPortraitIds] = useState<string[]>([])
   const [backgroundImage, setBackgroundImage] = useState<ImageRef>(null)
-  const [brightBackground, setBrightBackground] = useState(true)
   /** Jméno aktuálního vypravěče; null = hra vypravěče nemá */
   const [narratorName, setNarratorName] = useState<string | null>(null)
   const [showNarratorPicker, setShowNarratorPicker] = useState(false)
@@ -175,6 +174,8 @@ export default function StoryEditor() {
     [gameName, assetVersion]
   )
   const currentScene = useMemo(() => scenes.find(s => s.id === currentSceneId) ?? null, [scenes, currentSceneId])
+  /** Ztmavené pozadí aktuální scény (per scéna, dědí se do nové; false = původní jas obrázku) */
+  const darkBackground = currentScene?.darkBackground ?? false
   // V pásu a při psaní jen postavy aktuální scény (+ dočasní mluvčí, kteří v ní mluví); AI postavy označené
   const displayCharacters = useMemo(() => {
     const inScene = new Set(currentScene?.characters ?? [])
@@ -347,13 +348,12 @@ export default function StoryEditor() {
 
   const applySetup = useCallback((setup: GameSetup) => {
     setBackgroundImage(setup.backgroundImage)
-    setBrightBackground(setup.brightBackground)
     setNarrators(setup.narrators)
     setNarratorName(setup.narrator)
     setRules(setup.rules)
     setRulesSystem(setup.rulesSystem)
     setPulseOverride(setup.pulseOverride)
-    const settings: GameSettings = { backgroundImage: setup.backgroundImage, brightBackground: setup.brightBackground, narrator: setup.narrator, rules: setup.rules, rulesSystem: setup.rulesSystem, pulseOverride: setup.pulseOverride }
+    const settings: GameSettings = { backgroundImage: setup.backgroundImage, narrator: setup.narrator, rules: setup.rules, rulesSystem: setup.rulesSystem, pulseOverride: setup.pulseOverride }
     lastSavedSetupRef.current = JSON.stringify(settings)
   }, [])
 
@@ -393,8 +393,8 @@ export default function StoryEditor() {
   }, [gameName, resolveEntries, applySetup])
 
   const currentSettings = useMemo<GameSettings>(
-    () => ({ backgroundImage, brightBackground, narrator: narratorName, rules, rulesSystem, pulseOverride }),
-    [backgroundImage, brightBackground, narratorName, rules, rulesSystem, pulseOverride]
+    () => ({ backgroundImage, narrator: narratorName, rules, rulesSystem, pulseOverride }),
+    [backgroundImage, narratorName, rules, rulesSystem, pulseOverride]
   )
 
   // Automatické ukládání nastavení (pozadí, aktuální vypravěč) do vaultu – postavy a vypravěči mají vlastní endpointy
@@ -951,7 +951,18 @@ export default function StoryEditor() {
     setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))
   }
 
-  /** Uloží pravidla pod příběhem ihned a zapíše je i do stavu, aby autosave nastavení nic nepřepsal */
+  /** Přepne ztmavení pozadí aktuální scény (optimisticky, pak PATCH scény) */
+  const handleDarkBackgroundChange = async (value: boolean) => {
+    if (!currentScene) return
+    setScenes(prev => prev.map(s => (s.id === currentScene.id ? { ...s, darkBackground: value } : s)))
+    try {
+      const saved = await api.updateScene(gameName, currentScene.id, { title: currentScene.title, darkBackground: value })
+      setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))
+    } catch (error) {
+      setScenes(prev => prev.map(s => (s.id === currentScene.id ? { ...s, darkBackground: !value } : s)))
+      setLoadError(error instanceof Error ? error.message : 'Ztmavení pozadí se nepodařilo uložit.')
+    }
+  }
   const handleRulesSave = async (values: RulesFormValues) => {
     const next: GameSettings = { ...currentSettings, rules: values.rules, rulesSystem: values.rulesSystem }
     await api.saveSetup(gameName, next)
@@ -1433,7 +1444,7 @@ export default function StoryEditor() {
     <div className="flex flex-col h-screen bg-black relative">
       {/* Pozadí celé aplikace */}
       <div
-        className={`absolute inset-0 bg-no-repeat bg-center bg-cover pointer-events-none ${brightBackground ? 'opacity-90' : 'opacity-40'}`}
+        className={`absolute inset-0 bg-no-repeat bg-center bg-cover pointer-events-none ${darkBackground ? 'opacity-40' : 'opacity-90'}`}
         style={{
           backgroundImage: displayBackground
             ? `url('${displayBackground}')`
@@ -1546,7 +1557,7 @@ export default function StoryEditor() {
             onEntryEdit={handleEntryEdit}
             speakerOptions={{ characters: displayCharacters, narrators: displayNarrators }}
             onEntrySpeakerChange={handleEntrySpeakerChange}
-            darkenEntries={brightBackground}
+            darkenEntries={!darkBackground}
           />
           {/* Nové questy navržené AI při shrnutí scén – schválit / zamítnout */}
           <QuestProposalsPanel
@@ -1554,7 +1565,7 @@ export default function StoryEditor() {
             onAccept={acceptQuestProposal}
             onReject={key => setQuestProposals(prev => prev.filter(p => p.key !== key))}
             onClose={() => setQuestProposals([])}
-            darken={brightBackground}
+            darken={!darkBackground}
           />
           {/* Režie Directoru: puls kampaně + brief pro další beat (viditelný krok před psaním AI) */}
           {directorState && showDirector && (
@@ -1574,7 +1585,7 @@ export default function StoryEditor() {
               onPulseOverride={override => void handlePulseOverride(override)}
               onResolveEvent={outcome => void handleCreateBrief(undefined, { outcome })}
               onAbandonEvent={() => void handleAbandonEvent()}
-              darken={brightBackground}
+              darken={!darkBackground}
             />
           )}
           {/* Návrh AI vypravěče k přijetí / odmítnutí */}
@@ -1586,7 +1597,7 @@ export default function StoryEditor() {
               busy={aiBusy}
               onAccept={entry => void handleAcceptSuggestion(entry)}
               onReject={(reason, regenerate, prompt) => void handleRejectSuggestion(reason, regenerate, prompt)}
-              darken={brightBackground}
+              darken={!darkBackground}
             />
           )}
           {/* Stav AI vypravěče: generování / chyba */}
@@ -1627,8 +1638,8 @@ export default function StoryEditor() {
             onToggleDirector={directorAvailable && currentScene?.ai && currentNarrator ? () => setDirectorOpenFor(prev => (prev === currentSceneId ? null : currentSceneId)) : undefined}
             directorOpen={showDirector || !!directorState?.brief}
             briefPending={!!directorState?.brief}
-            brightBackground={brightBackground}
-            onBrightBackgroundChange={setBrightBackground}
+            darkBackground={darkBackground}
+            onDarkBackgroundChange={currentScene ? value => void handleDarkBackgroundChange(value) : undefined}
           />
         </div>
 
