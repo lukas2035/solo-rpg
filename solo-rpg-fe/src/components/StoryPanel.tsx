@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -79,6 +79,14 @@ export default function StoryPanel({ entries, allEntries = entries, onPortraitCl
       el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
     }
   }, [entries.length])
+
+  // Výška editační textarey podle skutečného (zalomeného) obsahu, ne jen podle počtu řádků
+  useLayoutEffect(() => {
+    const el = editRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [editingId, editText])
 
   const handleImageLoad = (entryId: string, img: HTMLImageElement) => {
     const ratio = img.naturalWidth / img.naturalHeight
@@ -236,7 +244,7 @@ export default function StoryPanel({ entries, allEntries = entries, onPortraitCl
                 {editingId === entry.id ? (
                   <textarea
                     ref={editRef}
-                    rows={entry.markdown || isPrompt ? Math.max(5, editText.split('\n').length + 1) : Math.max(1, editText.split('\n').length)}
+                    rows={entry.markdown || isPrompt ? 5 : 1}
                     value={editText}
                     onChange={(e) => setEditText(e.target.value)}
                     onBlur={() => saveEditing(entry)}
@@ -255,7 +263,7 @@ export default function StoryPanel({ entries, allEntries = entries, onPortraitCl
                         }
                       }
                     }}
-                    className="w-full bg-black/50 border-2 border-[#aa3bff]/60 rounded-lg px-3 py-2 text-[var(--text)] leading-relaxed outline-none focus:border-[#aa3bff] focus:shadow-[0_0_20px_rgba(170,59,255,0.3)] resize-none whitespace-pre-wrap break-words"
+                    className="w-full bg-black/50 border-2 border-[#aa3bff]/60 rounded-lg px-3 py-2 text-[var(--text)] leading-relaxed outline-none focus:border-[#aa3bff] focus:shadow-[0_0_20px_rgba(170,59,255,0.3)] resize-none overflow-hidden whitespace-pre-wrap break-words"
                   />
                 ) : entry.markdown || isPrompt ? (
                   <div className="markdown-body">
