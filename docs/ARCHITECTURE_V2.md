@@ -256,6 +256,27 @@ FE: `utils/api.ts` přejde na generické entity endpointy; `vaultPath.ts`, `Vaul
 > implementace mechanik. Brief in‑memory per scéna, spotřebuje se přijetím návrhu (`director.beat.accepted`). Detaily v `COPILOT_HANDOFF.md` § Director v1.
 > **Další krok: 4** (Extrakce → Patch → events) – po přijetí návrhu AI navrhne `Patch` (stav nití/questů, hodiny, nové entity),
 > hráč schválí v panelu; teprve pak zápis + event. Před tím play‑test Directoru s reálným modelem.
+>
+> **Stav (12. 10. 2026) – odchylky od plánu po play‑testu:**
+> - **Režim AI per scéna** `SceneMeta.aiMode: 'basic' | 'advanced'` (dědí se do nové scény, první scéna `basic`). *basic* = jen prompt
+>   vypravěče + popis scény + přepis (chování v1, bez `ContextBuilder`, Directoru i pulsu); *advanced* = celý pipeline z § 4.
+>   Dokument výše předpokládá vždy plný pipeline – pro krátké / vedlejší scény to Lukáš nechce. Krok 4 se týká **jen advanced**.
+> - Nastavení přesunutá ze hry do scény (dědí se ze sousední scény): `rulesInAi` (migrace `0002`), `darkBackground` (migrace `0004`).
+>   `GameSettings` už nemá `brightBackground` ani `rulesInAi`.
+> - `DirectorEvent` (rozehraná událost + beaty) je **vázaný na scénu** (`SceneFields.director`), nepřenáší se do další scény;
+>   `CampaignPulse` se počítá pro celou kampaň (z dat + `GameSettings.pulseOverride`). Dialog 🤖 AI v advanced ukazuje `DirectorSummary`.
+> - **Prompt hráče pro AI** (`POST …/ai { prompt }`): jednorázový pokyn pro jedno volání (sekce „Pokyn hráče pro tento krok“).
+>   Do scény se ukládá jako replika `kind: 'prompt'` (bez mluvčího) až s první přijatou replikou; AI texty mají `ai: true` +
+>   `promptId`. `scene_entries` má tedy navíc `speaker_kind = 'prompt'`, `ai`, `prompt_id` (migrace `0003`). Prompty se nikdy
+>   neposílají do AI přepisu, shrnutí ani exportu.
+> - Hráč zadává do advanced smyčky také `outcome` hodu ručně (rules adapter zůstává jen překlad obtížnosti) – beze změny proti kroku 3.
+>
+> **Z plánu zatím neimplementováno** (nad rámec kroku 4): structured output v `ai/provider.ts` (quest návrhy se parsují z JSON
+> bloku v textu); resolver jmen a `entities.aliases` (sloupec existuje, nic ho neplní); `entities.ai_state` a `deleted_at`
+> (sloupce bez logiky – soft‑delete se nedělá); reject‑důvod → constraint u entity; assety bez `sharp`, dedupe GC a kvót;
+> eager migrace `fields` + fixture testy per verzi; úklid v1 z § 5 (`GameWatcher`, `VaultManager`, `x-vault-path`,
+> `system/dialogs.ts`, `routes/vault.ts`, FE `VaultGate`/`VaultSetup`/`vaultPath`) stále v repu, `StorageProvider` má ~47 metod
+> po typech, žádné generické `/entities?kind=` routy, FE `api.ts` mluví jmény; krok 5 (SaaS) jen `tenant_id` konstanta.
 
 1. **Model + úložiště**: `shared` schémata (Entity/Link/Event/Brief/Suggestion/Patch, per‑kind Zod + verze), Drizzle schéma,
    `docker-compose.yml`, `FsAssetStore`, **importér ze stávajícího vaultu** (ať nepřijdeš o hry; mapování je v
@@ -271,8 +292,10 @@ Před každým krokem: krátký návrh → `ask_user` na sporné body → implem
 
 ## 7. Otevřené otázky (zeptat se, až budou na řadě)
 - Přesný seznam `kind` v2 a která typovaná pole přežijí vs. přejdou na `links.kind`.
-- Konkrétní podoba `CampaignPulse` a první sada tabulek (žánrově neutrální vs. per hra).
-- Které patche jsou „nízkorizikové“ (auto‑apply) – odsouhlasit seznam.
-- Zda scény zůstávají samostatnou entitou s replikami v `scene_entries`, nebo repliky jdou do `events`.
+- ~~Konkrétní podoba `CampaignPulse` a první sada tabulek~~ – v1 hotovo (`director/pulse.ts`, `tables/director-tables.json`); otevřené: per žánr / editovatelné hráčem.
+- Které patche jsou „nízkorizikové“ (auto‑apply) – odsouhlasit seznam (krok 4).
+- Zda má krok 4 (extrakce stavu) běžet i nad `basic` scénami (alespoň shrnutí + questy), nebo striktně jen `advanced`.
+- Kdy začít úklid v1 (§ 5) – samostatný krok mezi 4 a 5, nebo až s přechodem FE na generické entity endpointy?
+- ~~Zda scény zůstávají samostatnou entitou s replikami v `scene_entries`~~ – zůstávají (`scene_entries` + `events` jen jako log).
 - Granularita exportu do Obsidianu (celá hra při kliknutí vs. průběžně).
 - Lokalizace: UI česky, AI prompty česky/anglicky? (dnes česky)
