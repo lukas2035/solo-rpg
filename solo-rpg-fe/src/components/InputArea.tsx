@@ -23,6 +23,8 @@ interface InputAreaProps {
   onCreateNarrator: () => void
   /** Scéna řízená AI: tlačítko 🤖 vpravo od vypravěče nechá AI napsat další text; undefined = AI ve scéně vypnutá */
   onGenerateAi?: () => void
+  /** Otevře dialog „Zadat prompt“ – jednorázový pokyn pro další text AI; undefined = bez tlačítka */
+  onPromptAi?: () => void
   /** AI právě generuje – tlačítko je neaktivní a pulzuje */
   aiBusy?: boolean
   /** Otevře/zavře panel režie Directoru (puls kampaně + brief); undefined = bez tlačítka */
@@ -32,7 +34,7 @@ interface InputAreaProps {
   briefPending?: boolean
 }
 
-export default function InputArea({ characters, showShortcutNumbers, onAddEntry, brightBackground, onBrightBackgroundChange, narratorName, onCreateNarrator, onGenerateAi, aiBusy = false, onToggleDirector, directorOpen = false, briefPending = false }: InputAreaProps) {
+export default function InputArea({ characters, showShortcutNumbers, onAddEntry, brightBackground, onBrightBackgroundChange, narratorName, onCreateNarrator, onGenerateAi, onPromptAi, aiBusy = false, onToggleDirector, directorOpen = false, briefPending = false }: InputAreaProps) {
   const [text, setText] = useState('')
   const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null)
   const [quoteMode, setQuoteMode] = useState(false)
@@ -221,6 +223,17 @@ export default function InputArea({ characters, showShortcutNumbers, onAddEntry,
             }`}
           >
             🤖 {aiBusy ? 'Píše…' : briefPending ? 'AI píše podle režie' : 'AI pokračuje'}
+          </button>
+        )}
+        {hasNarrator && onGenerateAi && onPromptAi && (
+          <button
+            type="button"
+            onClick={onPromptAi}
+            disabled={aiBusy}
+            title={`Zadat jednorázový pokyn, podle kterého má AI (${narratorName}) napsat další text`}
+            className="px-3 py-2 rounded-lg text-sm font-bold whitespace-nowrap cursor-pointer transition-all bg-black/70 text-cyan-300 border-2 border-cyan-500/60 hover:border-cyan-400 hover:bg-cyan-950/60 disabled:cursor-wait disabled:opacity-60"
+          >
+            ✍️ Zadat prompt
           </button>
         )}
         {hasNarrator && onToggleDirector && (

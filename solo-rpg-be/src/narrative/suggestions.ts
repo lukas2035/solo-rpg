@@ -52,27 +52,34 @@ export class SuggestionService {
     return { suggestion: s?.pending ?? null, rejectedReasons: s?.rejectedReasons ?? [] }
   }
 
-  /** Vygeneruje nový návrh; případný dřívější nepřijatý návrh scény nahradí (bez záznamu důvodu) */
-  async generate(game: string, sceneId: string, log?: Logger): Promise<AiSuggestion> {
+  /** Vygeneruje nový návrh; případný dřívější nepřijatý návrh scény nahradí (bez záznamu důvodu). `prompt` = jednorázový pokyn hráče */
+  async generate(game: string, sceneId: string, log?: Logger, prompt = ''): Promise<AiSuggestion> {
     const s = this.state(game, sceneId)
     const brief = (await this.director?.pending(game, sceneId)) ?? null
     if (brief && brief.rollPhase === 'after' && !brief.outcome) throw new ValidationError('Nejdřív v režii zadej výsledek hodu / střetu – AI pak popíše dopad.')
-    const draft = await draftSceneReply(this.storage, this.config, game, sceneId, s.rejectedReasons, log, brief)
+    const userPrompt = prompt.trim()
+    const draft = await draftSceneReply(this.storage, this.config, game, sceneId, s.rejectedReasons, log, brief, userPrompt)
+    // Prompt jako záznam scény – zapíše se až s přijetím první repliky (viz `accept`); repliky na něj odkazují přes `promptId`
+    const now = Date.now()
+    const promptEntry: StoryEntry | null = userPrompt
+      ? { id: `${now - 1}`, characterName: null, narratorName: null, text: userPrompt, timestamp: now - 1, kind: 'prompt', markdown: userPrompt.includes('\n') || undefined }
+      : null
     const suggestion: AiSuggestion = {
       id: newId('suggestion'),
       sceneId,
-      entries: draft.entries,
+      entries: draft.entries.map(e => ({ ...e, ai: true, promptId: promptEntry?.id ?? null })),
       raw: draft.raw,
       rejectedReasons: [...s.rejectedReasons],
       contextIncluded: draft.context.included,
       briefId: brief?.id ?? null,
-      createdAt: Date.now(),
+      promptEntry,
+      createdAt: now,
     }
     s.pending = suggestion
     await this.storage.appendEvent(game, {
       sceneId,
       kind: 'ai.suggestion.created',
-      payload: { suggestionId: suggestion.id, briefId: suggestion.briefId, entries: suggestion.entries.length, rejectedReasons: suggestion.rejectedReasons, context: draft.context.included, contextTokens: draft.context.tokensUsed, contextDropped: draft.context.dropped },
+      payload: { suggestionId: suggestion.id, briefId: suggestion.briefId, prompt: userPrompt || null, entries: suggestion.entries.length, rejectedReasons: suggestion.rejectedReasons, context: draft.context.included, contextTokens: draft.context.tokensUsed, contextDropped: draft.context.dropped },
     })
     return suggestion
   }
@@ -95,15 +102,18 @@ export class SuggestionService {
     const current = await this.storage.getSceneEntries(game, sceneId)
     if (!current) throw new NotFoundError(`Scéna „${sceneId}“ neexistuje.`)
     const ids = new Set(current.map(e => e.id))
-    const toAdd = entries.filter(e => !ids.has(e.id))
+    const accepted = entries.filter(e => !ids.has(e.id)).map(e => ({ ...e, ai: true, promptId: suggestion.promptEntry?.id ?? e.promptId ?? null }))
+    // S první přijatou replikou se do scény zapíše i prompt, podle kterého vznikla (těsně před ni)
+    const promptToAdd = suggestion.promptEntry && accepted.length && !ids.has(suggestion.promptEntry.id) ? [suggestion.promptEntry] : []
+    const toAdd = [...promptToAdd, ...accepted]
     if (toAdd.length) await this.storage.saveSceneEntries(game, sceneId, [...current, ...toAdd])
     const acceptedIds = new Set(entries.map(e => e.id))
     const remaining = partial ? suggestion.entries.filter(e => !acceptedIds.has(e.id)) : []
-    const edited = JSON.stringify(toAdd) !== JSON.stringify(partial ? suggestion.entries.filter(e => acceptedIds.has(e.id)) : suggestion.entries)
+    const edited = JSON.stringify(accepted) !== JSON.stringify(partial ? suggestion.entries.filter(e => acceptedIds.has(e.id)) : suggestion.entries)
     await this.storage.appendEvent(game, {
       sceneId,
       kind: 'ai.suggestion.accepted',
-      payload: { suggestionId, briefId: suggestion.briefId, raw: suggestion.raw, entries: toAdd, edited, partial: remaining.length > 0, remaining: remaining.length, rejectedReasons: state.rejectedReasons },
+      payload: { suggestionId, briefId: suggestion.briefId, promptId: suggestion.promptEntry?.id ?? null, raw: suggestion.raw, entries: accepted, edited, partial: remaining.length > 0, remaining: remaining.length, rejectedReasons: state.rejectedReasons },
     })
     if (remaining.length) {
       state.pending = { ...suggestion, entries: remaining }

@@ -12,10 +12,13 @@ interface SceneBarProps {
   onFillSummaries?: () => void
   /** Průběh hromadného doplňování (null = neběží) */
   summaryProgress?: { done: number; total: number; title: string } | null
+  /** Zobrazovat mezi texty scény i prompty pro AI; undefined = zaškrtávátko se nenabízí (scéna bez AI i bez promptů) */
+  showAiPrompts?: boolean
+  onShowAiPromptsChange?: (value: boolean) => void
 }
 
 /** Tenký pás pro přepínání scén (každá scéna = samostatný .md soubor ve vaultu) */
-export default function SceneBar({ scenes, currentSceneId, onSelect, onCreate, onEdit, onFillSummaries, summaryProgress = null }: SceneBarProps) {
+export default function SceneBar({ scenes, currentSceneId, onSelect, onCreate, onEdit, onFillSummaries, summaryProgress = null, showAiPrompts, onShowAiPromptsChange }: SceneBarProps) {
   const current = scenes.find(s => s.id === currentSceneId) ?? null
   const missingSummaries = scenes.filter(needsSummary).length
 
@@ -64,6 +67,15 @@ export default function SceneBar({ scenes, currentSceneId, onSelect, onCreate, o
         >
           🤖 {summaryProgress ? `Shrnutí ${summaryProgress.done + 1}/${summaryProgress.total}…` : `Doplnit shrnutí (${missingSummaries})`}
         </button>
+      )}
+      {showAiPrompts !== undefined && onShowAiPromptsChange && (
+        <label
+          title="Zobrazit mezi texty scény i prompty zadané AI vypravěči (záznamy „Prompt AI“)"
+          className="h-7 px-2 rounded-md border border-cyan-500/40 bg-black/50 flex items-center gap-1 text-xs text-cyan-200 cursor-pointer hover:border-cyan-400 transition-all select-none"
+        >
+          <input type="checkbox" checked={showAiPrompts} onChange={(e) => onShowAiPromptsChange(e.target.checked)} className="w-3.5 h-3.5 accent-cyan-400 cursor-pointer" />
+          💬 Prompty
+        </label>
       )}
       {current?.description && (
         <span className="text-xs text-[var(--text)] opacity-70 truncate max-w-md" title={current.description}>

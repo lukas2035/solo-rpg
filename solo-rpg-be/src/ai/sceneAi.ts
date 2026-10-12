@@ -30,6 +30,8 @@ export async function draftSceneReply(
   rejectedReasons: string[] = [],
   log?: Logger,
   brief: NarrativeBrief | null = null,
+  /** Jednorázový pokyn hráče pro toto volání (markdown); prázdný = bez pokynu */
+  userPrompt = '',
 ): Promise<SceneReplyDraft> {
   const apiKey = requireApiKey(config)
 
@@ -73,11 +75,12 @@ export async function draftSceneReply(
     rejectedReasons,
     briefSection: activeBrief ? buildBriefSection(activeBrief, detail, event) : undefined,
     transcriptBudgetTokens: config.ai.transcriptTokens,
+    userPrompt,
   })
   if (config.ai.debug) {
     const dump = messages.map(m => `───── ${m.role.toUpperCase()} ─────\n${m.content}`).join('\n\n')
     log?.info(
-      `[AI] provider=${PROVIDER_LABEL[config.ai.provider]} model=${config.ai.model} scéna="${scene.title}" režim=${scene.aiMode} hráč=[${playerCharacters.map(c => c.name).join(', ')}] AI=[${aiCharacters.map(c => c.name).join(', ')}] kontext≈${context.tokensUsed} tokenů (${context.included.length} položek, ${context.dropped} vynecháno)${activeBrief ? ` režie=${activeBrief.id}` : ''}\n${dump}`,
+      `[AI] provider=${PROVIDER_LABEL[config.ai.provider]} model=${config.ai.model} scéna="${scene.title}" režim=${scene.aiMode} hráč=[${playerCharacters.map(c => c.name).join(', ')}] AI=[${aiCharacters.map(c => c.name).join(', ')}] kontext≈${context.tokensUsed} tokenů (${context.included.length} položek, ${context.dropped} vynecháno)${activeBrief ? ` režie=${activeBrief.id}` : ''}${userPrompt.trim() ? ' prompt=ano' : ''}\n${dump}`,
     )
   }
   const raw = await chatCompletion(config.ai.provider, messages, {

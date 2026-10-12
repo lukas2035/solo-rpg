@@ -36,7 +36,12 @@ export interface ScenePromptContext {
   briefSection?: string
   /** Rozpočet tokenů pro přepis scény; starší záznamy nad rozpočet se vynechají */
   transcriptBudgetTokens?: number
+  /** Jednorázový pokyn hráče pro tento krok („Zadat prompt“); prázdný = bez pokynu */
+  userPrompt?: string
 }
+
+/** Jen repliky příběhu – záznamy typu `prompt` (jednorázové pokyny pro AI) do přepisu nepatří */
+export const storyEntries = (entries: StoryEntry[]) => entries.filter(e => e.kind !== 'prompt')
 
 /** Zobrazované jméno mluvčího – stejné jako v exportu do schránky (nickname postavy / jméno vypravěče) */
 export const normalize = (s: string) => s.trim().toLocaleLowerCase('cs')
@@ -49,7 +54,7 @@ function speakerLabel(entry: StoryEntry, characters: Character[], narrator: Narr
 
 /** Průběh scény ve stejném formátu jako tlačítko „Zkopírovat příběh jako Markdown“ */
 export function formatTranscript(entries: StoryEntry[], characters: Character[], narrator: Narrator): string {
-  return entries
+  return storyEntries(entries)
     .map(entry => `**${speakerLabel(entry, characters, narrator)}**:${entry.markdown ? '\n' : ' '}${entry.text}`)
     .join('\n\n')
 }
@@ -73,7 +78,8 @@ function characterBlock(character: Character): string {
 }
 
 export function buildMessages(ctx: ScenePromptContext): ChatMessage[] {
-  const { narrator, scene, playerCharacters, aiCharacters, entries } = ctx
+  const { narrator, scene, playerCharacters, aiCharacters } = ctx
+  const entries = storyEntries(ctx.entries)
   const sections: string[] = []
 
   const narratorLines = [`## Vypravěč\nŘádky vypravěče uvozuj přesně jménem: \`${narrator.name}:\``]
@@ -115,6 +121,10 @@ export function buildMessages(ctx: ScenePromptContext): ChatMessage[] {
   }
 
   if (ctx.briefSection?.trim()) sections.push(ctx.briefSection.trim())
+
+  if (ctx.userPrompt?.trim()) {
+    sections.push(`## Pokyn hráče pro tento krok\nHráč chce, aby se další pokračování řídilo tímto pokynem (má přednost před obecným směřováním scény):\n${ctx.userPrompt.trim()}`)
+  }
 
   sections.push('## Úkol\nNavaž na poslední záznam a pokračuj ve scéně. Odpověz pouze řádky ve formátu `Jméno: text`.')
 

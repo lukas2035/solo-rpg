@@ -113,7 +113,7 @@ export const sceneEntries = pgTable(
       .notNull()
       .references(() => entities.id, { onDelete: 'cascade' }),
     position: integer('position').notNull(),
-    /** 'character' | 'narrator' */
+    /** 'character' | 'narrator' | 'prompt' (jednorázový prompt hráče pro AI – bez mluvčího) */
     speakerKind: text('speaker_kind').notNull(),
     /** Entita mluvčího; null = mluvčí bez entity (dočasná postava / starý zápis bez vypravěče) */
     speakerId: text('speaker_id').references(() => entities.id, { onDelete: 'set null' }),
@@ -121,6 +121,10 @@ export const sceneEntries = pgTable(
     speakerName: text('speaker_name'),
     text: text('text').notNull(),
     markdown: boolean('markdown').notNull().default(false),
+    /** Text vygenerovala AI */
+    ai: boolean('ai').notNull().default(false),
+    /** Id záznamu typu prompt (`speaker_kind = 'prompt'`), podle kterého AI text napsala */
+    promptId: text('prompt_id'),
     timestamp: timestamp('timestamp', { withTimezone: true, mode: 'date' }).notNull(),
   },
   table => [uniqueIndex('scene_entries_scene_id_idx').on(table.sceneId, table.id), index('scene_entries_scene_pos_idx').on(table.sceneId, table.position)],

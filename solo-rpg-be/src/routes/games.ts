@@ -18,6 +18,7 @@ import {
   LoreInputSchema,
   GameSessionInputSchema,
   BackupGameRequestSchema,
+  AiGenerateRequestSchema,
   AiSuggestionAcceptRequestSchema,
   AiSuggestionRejectRequestSchema,
   BriefPatchSchema,
@@ -310,10 +311,11 @@ export async function registerGameRoutes(app: FastifyInstance, vault: VaultManag
 
   // ---------- AI vypravěč: návrh → přijmout / odmítnout ----------
 
-  /** Nechá aktuálního vypravěče navrhnout pokračování; nic se neukládá, FE zobrazí návrh k přijetí/odmítnutí */
+  /** Nechá aktuálního vypravěče navrhnout pokračování; nic se neukládá, FE zobrazí návrh k přijetí/odmítnutí. Tělo: volitelný jednorázový prompt */
   app.post('/api/games/:game/scenes/:scene/ai', async (request): Promise<AiSuggestion> => {
     const { game, scene } = SceneParams.parse(request.params)
-    return suggestions.generate(game, scene, request.log)
+    const { prompt } = AiGenerateRequestSchema.parse(request.body ?? {})
+    return suggestions.generate(game, scene, request.log, prompt ?? '')
   })
 
   /** Rozpracovaný návrh scény (po přepnutí scény / obnovení stránky) */

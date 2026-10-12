@@ -22,6 +22,13 @@
       "when": 1791824334944,
       "tag": "0002_scene_ai_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791829143145,
+      "tag": "0003_scene_entry_ai",
+      "breakpoints": true
     }
   ]
 }

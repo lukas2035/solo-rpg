@@ -871,7 +871,13 @@ export class PostgresProvider implements StorageProvider {
         timestamp: ms(r.timestamp),
       }
       if (r.speakerKind === 'narrator') entry.narratorName = speakerName
+      if (r.speakerKind === 'prompt') {
+        entry.narratorName = null
+        entry.kind = 'prompt'
+      }
       if (r.markdown) entry.markdown = true
+      if (r.ai) entry.ai = true
+      if (r.promptId) entry.promptId = r.promptId
       return entry
     })
   }
@@ -887,8 +893,9 @@ export class PostgresProvider implements StorageProvider {
       const values = entries.flatMap((entry, position) => {
         if (seen.has(entry.id)) return []
         seen.add(entry.id)
-        const isCharacter = entry.characterName !== null
-        const speakerName = isCharacter ? entry.characterName : (entry.narratorName ?? null)
+        const isPrompt = entry.kind === 'prompt'
+        const isCharacter = !isPrompt && entry.characterName !== null
+        const speakerName = isPrompt ? null : isCharacter ? entry.characterName : (entry.narratorName ?? null)
         // Dočasné postavy (`tmp-…`) a neznámí mluvčí nemají entitu – zůstane jen jméno
         const speaker = speakerName ? (isCharacter ? snap.byName('character', speakerName) : snap.byName('narrator', speakerName)) : undefined
         return [
@@ -897,11 +904,13 @@ export class PostgresProvider implements StorageProvider {
             gameId: snap.game.id,
             sceneId,
             position,
-            speakerKind: isCharacter ? 'character' : 'narrator',
+            speakerKind: isPrompt ? 'prompt' : isCharacter ? 'character' : 'narrator',
             speakerId: speaker?.row.id ?? null,
             speakerName,
             text: entry.text,
             markdown: entry.markdown === true,
+            ai: entry.ai === true,
+            promptId: entry.promptId ?? null,
             timestamp: new Date(entry.timestamp),
           },
         ]

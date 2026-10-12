@@ -147,4 +147,25 @@ describe('SuggestionService', () => {
     expect(a2.suggestion).toBeNull()
     expect(service.get(G, sceneId)).toEqual({ suggestion: null, rejectedReasons: [] })
   })
+
+  it('prompt hráče: repliky mají ai + promptId, prompt se zapíše až s první přijatou replikou (jednou)', async () => {
+    const s = await service.generate(G, sceneId, undefined, '  Nech vejít cizince.\nNeprozrazuj, kdo to je. ')
+    expect(s.promptEntry).toMatchObject({ kind: 'prompt', characterName: null, narratorName: null, text: 'Nech vejít cizince.\nNeprozrazuj, kdo to je.', markdown: true })
+    expect(s.entries.every(e => e.ai === true && e.promptId === s.promptEntry!.id)).toBe(true)
+    const before = (await storage.getSceneEntries(G, sceneId))!.length
+    const first = await service.accept(G, sceneId, s.id, [s.entries[0]], true)
+    expect(first.entries.map(e => e.kind ?? 'speech')).toEqual(['prompt', 'speech'])
+    expect(first.entries[1]).toMatchObject({ ai: true, promptId: s.promptEntry!.id })
+    const second = await service.accept(G, sceneId, s.id, first.suggestion!.entries, true)
+    expect(second.entries).toHaveLength(1)
+    const stored = (await storage.getSceneEntries(G, sceneId))!
+    expect(stored.length).toBe(before + 3)
+    expect(stored[before]).toMatchObject({ id: s.promptEntry!.id, kind: 'prompt', text: 'Nech vejít cizince.\nNeprozrazuj, kdo to je.' })
+    expect(stored[before + 1]).toMatchObject({ ai: true, promptId: s.promptEntry!.id })
+    // Bez promptu: promptEntry null, repliky bez promptId
+    const plain = await service.generate(G, sceneId)
+    expect(plain.promptEntry).toBeNull()
+    expect(plain.entries[0]).toMatchObject({ ai: true, promptId: null })
+    await service.reject(G, sceneId, plain.id, '')
+  })
 })

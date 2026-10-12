@@ -22,8 +22,8 @@ interface AiSuggestionPanelProps {
   busy: boolean
   /** Přijetí aktuální (první zbývající) repliky – `last` = byla poslední, návrh je tím vyřízen */
   onAccept: (entry: StoryEntry, last: boolean) => void
-  /** Odmítnutí aktuální repliky a všech dalších; `regenerate` = hned nechat AI pokračovat od tohoto místa */
-  onReject: (reason: string, regenerate: boolean) => void
+  /** Odmítnutí aktuální repliky a všech dalších; `regenerate` = hned nechat AI pokračovat od tohoto místa, `prompt` = (upravený) prompt pro nový pokus ('' = bez promptu) */
+  onReject: (reason: string, regenerate: boolean, prompt: string) => void
   /** Ztmavit podklad (při zesvětleném pozadí) */
   darken?: boolean
 }
@@ -42,7 +42,10 @@ export default function AiSuggestionPanel({ suggestion, speakerOptions, busy, on
   const [editing, setEditing] = useState(false)
   const [rejecting, setRejecting] = useState(false)
   const [reason, setReason] = useState('')
+  /** Prompt pro opravný pokus – předvyplněný promptem tohoto návrhu; smazání = další pokus bez promptu */
+  const [retryPrompt, setRetryPrompt] = useState(suggestion.promptEntry?.text ?? '')
   const [showContext, setShowContext] = useState(false)
+  const hadPrompt = !!suggestion.promptEntry
 
   const update = (patch: Partial<StoryEntry>) => setEntry(prev => ({ ...prev, ...patch }))
 
@@ -71,6 +74,7 @@ export default function AiSuggestionPanel({ suggestion, speakerOptions, busy, on
           {total === 1 ? 'poslední replika' : `replika 1 z ${total} · ${remaining} ${remaining === 1 ? 'další čeká' : remaining < 5 ? 'další čekají' : 'dalších čeká'}`}
           {edited ? ' · upraveno' : ''}
           {suggestion.rejectedReasons.length ? ` · ${suggestion.rejectedReasons.length}. pokus po odmítnutí` : ''}
+          {hadPrompt ? ' · s promptem' : ''}
         </span>
         <button
           type="button"
@@ -84,6 +88,12 @@ export default function AiSuggestionPanel({ suggestion, speakerOptions, busy, on
 
       {showContext && (
         <div className="px-4 py-2 border-b border-cyan-500/40 text-xs text-cyan-200/80 max-h-32 overflow-y-auto">
+          {hadPrompt && (
+            <div className="mb-2">
+              <span className="font-semibold">💬 Prompt hráče pro tento pokus:</span>
+              <p className="whitespace-pre-wrap">{suggestion.promptEntry!.text}</p>
+            </div>
+          )}
           {suggestion.contextIncluded.length ? (
             <ul className="list-disc pl-4">
               {suggestion.contextIncluded.map(item => (
@@ -165,20 +175,36 @@ export default function AiSuggestionPanel({ suggestion, speakerOptions, busy, on
 
       <div className="px-4 py-2 border-t border-cyan-500/40 flex flex-col gap-2">
         {rejecting && (
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-cyan-200/80">
-              Proč replika nesedí? (fakt o světě – AI ho dostane při dalším pokusu; může zůstat prázdné)
-              {remaining > 0 ? ` Odmítne se i ${remaining} ${remaining === 1 ? 'další' : 'dalších'}.` : ''}
-            </label>
-            <textarea
-              value={reason}
-              onChange={e => setReason(e.target.value)}
-              disabled={busy}
-              rows={2}
-              autoFocus
-              placeholder="Např. Julia není Klářina kamarádka, znají se jen od vidění."
-              className={`${inputClass} text-sm`}
-            />
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-cyan-200/80">
+                Proč replika nesedí? (fakt o světě – AI ho dostane při dalším pokusu; může zůstat prázdné)
+                {remaining > 0 ? ` Odmítne se i ${remaining} ${remaining === 1 ? 'další' : 'dalších'}.` : ''}
+              </label>
+              <textarea
+                value={reason}
+                onChange={e => setReason(e.target.value)}
+                disabled={busy}
+                rows={2}
+                autoFocus
+                placeholder="Např. Julia není Klářina kamarádka, znají se jen od vidění."
+                className={`${inputClass} text-sm`}
+              />
+            </div>
+            {hadPrompt && (
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-cyan-200/80">
+                  💬 Prompt pro opravný pokus – uprav, nebo celý smaž, aby AI psala bez promptu
+                </label>
+                <textarea
+                  value={retryPrompt}
+                  onChange={e => setRetryPrompt(e.target.value)}
+                  disabled={busy}
+                  rows={Math.min(6, Math.max(2, retryPrompt.split('\n').length))}
+                  className={`${inputClass} text-sm`}
+                />
+              </div>
+            )}
           </div>
         )}
         <div className="flex flex-wrap items-center gap-2">
@@ -204,10 +230,11 @@ export default function AiSuggestionPanel({ suggestion, speakerOptions, busy, on
               </button>
               <button
                 type="button"
-                onClick={() => onReject('', true)}
+                // S promptem nejdřív nabídnout jeho úpravu (formulář odmítnutí), bez promptu rovnou znovu
+                onClick={() => (hadPrompt ? setRejecting(true) : onReject('', true, ''))}
                 disabled={busy}
                 className="px-3 py-1 rounded-md border border-cyan-300/60 hover:border-cyan-200 transition-colors disabled:opacity-50"
-                title="Zahodit tuto repliku (i další) bez důvodu a nechat AI pokračovat odsud znovu"
+                title={hadPrompt ? 'Zahodit tuto repliku (i další) a nechat AI pokračovat znovu – prompt můžeš před odesláním upravit' : 'Zahodit tuto repliku (i další) bez důvodu a nechat AI pokračovat odsud znovu'}
               >
                 🔄 Zkusit znovu
               </button>
@@ -216,15 +243,15 @@ export default function AiSuggestionPanel({ suggestion, speakerOptions, busy, on
             <>
               <button
                 type="button"
-                onClick={() => onReject(reason, true)}
+                onClick={() => onReject(reason, true, retryPrompt)}
                 disabled={busy}
                 className="px-3 py-1 rounded-md border border-cyan-300/60 bg-cyan-800/50 hover:bg-cyan-700/60 transition-colors disabled:opacity-50"
               >
-                🔄 Odmítnout a pokračovat znovu
+                🔄 Odmítnout a pokračovat znovu{hadPrompt ? (retryPrompt.trim() ? ' s promptem' : ' bez promptu') : ''}
               </button>
               <button
                 type="button"
-                onClick={() => onReject(reason, false)}
+                onClick={() => onReject(reason, false, '')}
                 disabled={busy}
                 className="px-3 py-1 rounded-md border border-red-300/60 hover:border-red-200 transition-colors disabled:opacity-50"
               >

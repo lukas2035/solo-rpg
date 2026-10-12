@@ -15,6 +15,9 @@ import type { StoryEntry } from '@solo-rpg/shared'
  * vypravěči jsou wikilinky na soubory v `narrators/`. Záznam vypravěče bez souboru
  * (starý zápis `**DM**:` / `**Vypravěč**:`) se čte jako vypravěč bez jména.
  * Text za dvojtečkou na téže řádce = jednořádkový záznam, text od nové řádky = markdown.
+ *
+ * Další atributy markeru: `kind="prompt"` (jednorázový prompt hráče pro AI, hlavička `**Prompt AI**:`),
+ * `ai="1"` (text vygenerovala AI), `prompt="<id>"` (id promptu, podle kterého AI psala).
  */
 
 const ENTRY_MARKER = /<!--\s*entry\s+([^>]*?)\s*-->/g
@@ -25,6 +28,8 @@ const SPEAKER_LINE_GLOBAL = /^\*\*(?:\[\[[^\]]+?\]\]|[^*\n]+?)\*\*:/gm
 /** Hlavička vypravěče bez souboru; `DM` je historický zápis */
 const NARRATOR_FALLBACK = 'Vypravěč'
 const LEGACY_NARRATOR_NAMES = new Set(['DM', NARRATOR_FALLBACK])
+/** Hlavička záznamu typu prompt (jen pro čitelnost v Obsidianu; rozhoduje atribut `kind`) */
+const PROMPT_LABEL = 'Prompt AI'
 
 /** Známí mluvčí scény: celá jména + nicknamy postav a jména vypravěčů */
 export interface SceneSpeakers {
@@ -57,15 +62,21 @@ export function renameSpeaker(body: string, oldName: string, newName: string, ne
 export function serializeEntries(entries: StoryEntry[], nicknames: ReadonlyMap<string, string> = new Map()): string {
   return entries
     .map(entry => {
-      const speaker = entry.characterName !== null
-        ? speakerLink(entry.characterName, nicknames.get(entry.characterName))
-        : entry.narratorName
-          ? speakerLink(entry.narratorName)
-          : `**${NARRATOR_FALLBACK}**:`
+      const speaker = entry.kind === 'prompt'
+        ? `**${PROMPT_LABEL}**:`
+        : entry.characterName !== null
+          ? speakerLink(entry.characterName, nicknames.get(entry.characterName))
+          : entry.narratorName
+            ? speakerLink(entry.narratorName)
+            : `**${NARRATOR_FALLBACK}**:`
       const text = entry.text.trim()
       // Víceřádkový text musí začínat na nové řádce, jinak by se při čtení rozpadl na více záznamů
       const separator = entry.markdown || text.includes('\n') ? '\n' : ' '
-      return `<!-- entry id="${entry.id}" ts="${entry.timestamp}" -->\n${speaker}${separator}${text}`
+      const attrs = [`id="${entry.id}"`, `ts="${entry.timestamp}"`]
+      if (entry.kind === 'prompt') attrs.push('kind="prompt"')
+      if (entry.ai) attrs.push('ai="1"')
+      if (entry.promptId) attrs.push(`prompt="${entry.promptId.replace(/"/g, '')}"`)
+      return `<!-- entry ${attrs.join(' ')} -->\n${speaker}${separator}${text}`
     })
     .join('\n\n')
     .concat(entries.length ? '\n' : '')
@@ -82,16 +93,28 @@ export function parseEntries(body: string, known: SceneSpeakers = { characters: 
   const pushSingle = (attrs: Record<string, string>, chunk: string) => {
     const trimmed = chunk.trim()
     if (!trimmed) return
-    const parsed = parseSpeaker(trimmed, characters, narrators)
     const fallbackTs = Date.now() + generated++
     const timestamp = Number(attrs.ts)
-    entries.push({
+    const base = {
       id: attrs.id || `md-${fallbackTs}`,
+      timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : fallbackTs,
+    }
+    if (attrs.kind === 'prompt') {
+      // Prompt pro AI: hlavička je jen popisek, mluvčího nemá
+      const match = trimmed.match(SPEAKER_LINE)
+      const text = (match ? trimmed.slice(match[0].length) : trimmed).replace(/^\n/, '').trim()
+      entries.push({ ...base, characterName: null, narratorName: null, text, timestamp: base.timestamp, kind: 'prompt', markdown: text.includes('\n') || undefined })
+      return
+    }
+    const parsed = parseSpeaker(trimmed, characters, narrators)
+    entries.push({
+      ...base,
       characterName: parsed.characterName,
       narratorName: parsed.characterName === null ? parsed.narratorName : undefined,
       text: parsed.text,
-      timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : fallbackTs,
       markdown: parsed.markdown || undefined,
+      ai: attrs.ai === '1' || attrs.ai === 'true' || undefined,
+      promptId: attrs.prompt || undefined,
     })
   }
 
@@ -99,6 +122,11 @@ export function parseEntries(body: string, known: SceneSpeakers = { characters: 
   const pushChunk = (attrs: Record<string, string>, chunk: string) => {
     const trimmed = chunk.trim()
     if (!trimmed) return
+    // Prompt pro AI se nedělí – může obsahovat libovolný markdown včetně tučných hlaviček
+    if (attrs.kind === 'prompt') {
+      pushSingle(attrs, trimmed)
+      return
+    }
     // Wikilink dělí vždy; prosté `**Text**:` jen pokud jde o známého mluvčího (jinak je to jen tučný text)
     const starts = [...trimmed.matchAll(SPEAKER_LINE_GLOBAL)]
       .filter(m => m.index === 0 || m[0].includes('[[') || speakers.has(m[0].slice(2, -3).trim()))

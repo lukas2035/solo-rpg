@@ -10,6 +10,7 @@ import FloatingPortrait from '../components/FloatingPortrait'
 import NarratorPickerModal from '../components/NarratorPickerModal'
 import NarratorModal, { type NarratorFormValues } from '../components/NarratorModal'
 import AiSceneModal, { type AiSceneSettings } from '../components/AiSceneModal'
+import AiPromptModal from '../components/AiPromptModal'
 import AiSuggestionPanel from '../components/AiSuggestionPanel'
 import DirectorPanel from '../components/DirectorPanel'
 import QuestProposalsPanel, { type PendingQuestProposal } from '../components/QuestProposalsPanel'
@@ -60,7 +61,16 @@ interface StoryEntry {
   timestamp: number
   /** Text je víceřádkový markdown */
   markdown?: boolean
+  /** `prompt` = jednorázový pokyn hráče pro AI (bez mluvčího, není součást příběhu) */
+  kind?: 'prompt'
+  /** Text vygenerovala AI */
+  ai?: boolean
+  /** Id záznamu typu prompt, podle kterého AI text napsala */
+  promptId?: string | null
 }
+
+/** Klíč v localStorage pro zobrazení promptů AI mezi texty scény */
+const SHOW_AI_PROMPTS_KEY = 'solo-rpg:showAiPrompts'
 
 type CharacterModalState = { mode: 'create' } | { mode: 'edit'; id: string }
 /** Zástupné ID v seznamu plovoucích oken pro obrázek pozadí (ID postav začínají jinak) */
@@ -115,6 +125,11 @@ export default function StoryEditor() {
   const [directorOpenFor, setDirectorOpenFor] = useState<string | null>(null)
   /** AI právě generuje odpověď (jen jedna najednou) */
   const [aiBusy, setAiBusy] = useState(false)
+  /** Dialog „Zadat prompt“ (jednorázový pokyn pro AI); string = předvyplněný text */
+  const [aiPromptModal, setAiPromptModal] = useState<string | null>(null)
+  /** Zobrazovat mezi texty scény i prompty pro AI (persistováno) */
+  const [showAiPrompts, setShowAiPrompts] = useState(() => localStorage.getItem(SHOW_AI_PROMPTS_KEY) !== '0')
+  useEffect(() => { localStorage.setItem(SHOW_AI_PROMPTS_KEY, showAiPrompts ? '1' : '0') }, [showAiPrompts])
   const [aiError, setAiError] = useState<string | null>(null)
   /** Nepřijatý návrh AI pro aktuální scénu (kánonem se stane až po „Přijmout“) */
   const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null)
@@ -170,13 +185,17 @@ export default function StoryEditor() {
       .map(c => ({ ...toDisplay(c), ai: aiSet.has(c.name) || undefined, inScene: inScene.has(c.name) }))
   }, [characters, currentScene, storyEntries, toDisplay])
   const displayEntries = useMemo(
-    () => storyEntries.map(e => ({
-      ...e,
-      character: e.character ? toDisplay(e.character) : null,
-      narrator: e.narrator ? { id: e.narrator.id, name: e.narrator.name, image: assetUrl(gameName, e.narrator.image, assetVersion) } : null,
-    })),
-    [storyEntries, toDisplay, gameName, assetVersion]
+    () => storyEntries
+      .filter(e => showAiPrompts || e.kind !== 'prompt')
+      .map(e => ({
+        ...e,
+        character: e.character ? toDisplay(e.character) : null,
+        narrator: e.narrator ? { id: e.narrator.id, name: e.narrator.name, image: assetUrl(gameName, e.narrator.image, assetVersion) } : null,
+      })),
+    [storyEntries, showAiPrompts, toDisplay, gameName, assetVersion]
   )
+  /** Scéna má prompty pro AI (zaškrtávátko 💬 se nabízí i při vypnuté AI) */
+  const hasAiPrompts = useMemo(() => storyEntries.some(e => e.kind === 'prompt'), [storyEntries])
   const displayNarrators = useMemo(
     () => narrators.map(n => ({ id: n.id, name: n.name, description: n.description, image: assetUrl(gameName, n.image, assetVersion) })),
     [narrators, gameName, assetVersion]
@@ -321,7 +340,7 @@ export default function StoryEditor() {
       } else if (e.narratorName) {
         narrator = knownNarrators.find(n => n.name === e.narratorName) ?? null
       }
-      return { id: e.id, character, narrator, text: e.text, timestamp: e.timestamp, markdown: e.markdown }
+      return { id: e.id, character, narrator, text: e.text, timestamp: e.timestamp, markdown: e.markdown, kind: e.kind, ai: e.ai, promptId: e.promptId }
     })
     return { entries, characters: updated }
   }, [])
@@ -399,6 +418,9 @@ export default function StoryEditor() {
       text: e.text,
       timestamp: e.timestamp,
       markdown: e.markdown,
+      kind: e.kind,
+      ai: e.ai,
+      promptId: e.promptId,
     }))
 
   /** Poslední probíhající uložení scény – AI se spouští až po něm (BE čte scénu z vaultu) */
@@ -564,14 +586,14 @@ export default function StoryEditor() {
     charactersRef.current = characters
   }, [currentSceneId, characters])
 
-  /** Nechá AI vypravěče navrhnout pokračování scény (po dokončení rozpracovaného uložení); návrh se zobrazí k přijetí, nic se neukládá */
-  const runAi = useCallback(async (sceneId: string): Promise<void> => {
+  /** Nechá AI vypravěče navrhnout pokračování scény (po dokončení rozpracovaného uložení); návrh se zobrazí k přijetí, nic se neukládá. `prompt` = jednorázový pokyn hráče */
+  const runAi = useCallback(async (sceneId: string, prompt?: string): Promise<void> => {
     if (aiBusy) return
     setAiBusy(true)
     setAiError(null)
     try {
       await pendingSaveRef.current
-      const suggestion = await api.generateAiSuggestion(gameName, sceneId)
+      const suggestion = await api.generateAiSuggestion(gameName, sceneId, prompt)
       if (currentSceneIdRef.current !== sceneId) return
       setAiSuggestion(suggestion)
     } catch (error) {
@@ -733,8 +755,8 @@ export default function StoryEditor() {
     }
   }
 
-  /** Odmítnutí návrhu AI – důvod jde do dalšího pokusu; volitelně hned vygenerovat nový */
-  const handleRejectSuggestion = async (reason: string, regenerate: boolean) => {
+  /** Odmítnutí návrhu AI – důvod jde do dalšího pokusu; volitelně hned vygenerovat nový (s upraveným promptem, '' = bez promptu) */
+  const handleRejectSuggestion = async (reason: string, regenerate: boolean, prompt = '') => {
     if (!aiSuggestion || !currentSceneId || aiBusy) return
     const sceneId = currentSceneId
     setAiError(null)
@@ -747,7 +769,7 @@ export default function StoryEditor() {
       }
     }
     setAiSuggestion(null)
-    if (regenerate) runAi(sceneId).catch(() => { /* chyba je v aiError */ })
+    if (regenerate) runAi(sceneId, prompt).catch(() => { /* chyba je v aiError */ })
   }
 
   /** Import odehraného přepisu: BE záznamy uložil (a případně doplnil postavy do scény), tady je jen přidáme do stavu */
@@ -807,6 +829,18 @@ export default function StoryEditor() {
       return
     }
     void handleCreateBrief()
+  }
+
+  /** Odeslání promptu z dialogu „Zadat prompt“: AI píše rovnou (případný připravený brief se použije, nový se nevytváří) */
+  const handlePromptAi = (prompt: string) => {
+    if (!currentSceneId || !currentScene?.ai || aiBusy) return
+    const brief = directorState?.brief
+    if (brief && brief.rollPhase === 'after' && !brief.outcome) {
+      setDirectorOpenFor(currentSceneId)
+      setAiError('Nejdřív v režii zadej výsledek hodu / střetu.')
+      return
+    }
+    runAi(currentSceneId, prompt).catch(() => { /* chyba je v aiError */ })
   }
 
   const handleCharacterDelete = (characterId: string) => {
@@ -930,6 +964,8 @@ export default function StoryEditor() {
 
   const handleExportMarkdown = () =>
     storyEntries
+      // Prompty pro AI nejsou součást příběhu
+      .filter(entry => entry.kind !== 'prompt')
       // U víceřádkového markdownu začíná text na novém řádku pod jménem mluvčího
       .map(entry => `**${entry.character ? entry.character.nickname : entry.narrator?.name ?? 'Vypravěč'}**:${entry.markdown ? '\n' : ' '}${entry.text}`)
       .join('\n\n')
@@ -1460,6 +1496,8 @@ export default function StoryEditor() {
         onEdit={(id) => setSceneModal({ mode: 'edit', id })}
         onFillSummaries={fillMissingSummaries}
         summaryProgress={bulkSummary}
+        showAiPrompts={currentScene?.ai || hasAiPrompts ? showAiPrompts : undefined}
+        onShowAiPromptsChange={setShowAiPrompts}
       />
 
       {loadError && (
@@ -1502,6 +1540,7 @@ export default function StoryEditor() {
         <div className="relative flex-1 min-w-0 flex flex-col">
           <StoryPanel
             entries={displayEntries}
+            allEntries={storyEntries}
             onPortraitClick={handlePortraitClick}
             onEntryDelete={handleEntryDelete}
             onEntryEdit={handleEntryEdit}
@@ -1546,7 +1585,7 @@ export default function StoryEditor() {
               speakerOptions={{ characters: displayCharacters, narrators: displayNarrators }}
               busy={aiBusy}
               onAccept={entry => void handleAcceptSuggestion(entry)}
-              onReject={(reason, regenerate) => void handleRejectSuggestion(reason, regenerate)}
+              onReject={(reason, regenerate, prompt) => void handleRejectSuggestion(reason, regenerate, prompt)}
               darken={brightBackground}
             />
           )}
@@ -1583,6 +1622,7 @@ export default function StoryEditor() {
             onCreateNarrator={() => setNarratorModal({ mode: 'create' })}
             onAddEntry={handleAddEntry}
             onGenerateAi={currentScene?.ai && currentNarrator ? handleGenerateAi : undefined}
+            onPromptAi={currentScene?.ai && currentNarrator ? () => setAiPromptModal('') : undefined}
             aiBusy={aiBusy}
             onToggleDirector={directorAvailable && currentScene?.ai && currentNarrator ? () => setDirectorOpenFor(prev => (prev === currentSceneId ? null : currentSceneId)) : undefined}
             directorOpen={showDirector || !!directorState?.brief}
@@ -1722,6 +1762,16 @@ export default function StoryEditor() {
           rulesSystem={rulesSystem}
           onSubmit={handleRulesSave}
           onClose={() => setShowRulesModal(false)}
+        />
+      )}
+
+      {/* Jednorázový prompt pro AI vypravěče */}
+      {aiPromptModal !== null && currentNarrator && (
+        <AiPromptModal
+          narratorName={currentNarrator.name}
+          initialPrompt={aiPromptModal}
+          onSubmit={handlePromptAi}
+          onClose={() => setAiPromptModal(null)}
         />
       )}
 

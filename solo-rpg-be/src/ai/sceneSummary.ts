@@ -6,7 +6,7 @@ import type { Config } from '../config.js'
 import type { StorageProvider } from '../vault/StorageProvider.js'
 import { NotFoundError } from '../vault/StorageProvider.js'
 import { AiError, PROVIDER_LABEL, chatCompletion, requireApiKey, type ChatMessage } from './provider.js'
-import { formatTranscript } from './scenePrompt.js'
+import { formatTranscript, storyEntries } from './scenePrompt.js'
 import { buildRulesSection } from './rulesPrompt.js'
 
 /** Zástupný vypravěč pro přepis, když hra žádného nemá (záznamy vypravěče se pak označí obecně) */
@@ -25,7 +25,7 @@ export async function summarizeScene(storage: StorageProvider, config: Config, g
   if (!scene) throw new NotFoundError(`Scéna „${sceneId}“ neexistuje.`)
 
   const entries = (await storage.getSceneEntries(gameName, sceneId)) ?? []
-  if (entries.length === 0) throw new AiError(400, 'Scéna zatím nemá žádné záznamy – není co shrnout.')
+  if (storyEntries(entries).length === 0) throw new AiError(400, 'Scéna zatím nemá žádné záznamy – není co shrnout.')
 
   let prompt: string
   try {

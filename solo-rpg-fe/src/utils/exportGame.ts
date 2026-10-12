@@ -67,6 +67,8 @@ function section(parts: (string | null | undefined)[]): string {
 }
 
 function entryLine(entry: StoryEntry, characters: readonly Character[]): string {
+  // Prompty pro AI nejsou součást příběhu
+  if (entry.kind === 'prompt') return ''
   const speaker = entry.characterName
     ? (characters.find(c => c.name === entry.characterName)?.nickname ?? entry.characterName)
     : entry.narratorName ?? 'Vypravěč'
@@ -266,7 +268,7 @@ export function buildGameMarkdown(data: GameExportData): string {
         fields(field('Lokace', s.location), field('Postavy ve scéně', list(s.characters))),
         block(null, s.description),
         block('Shrnutí scény', s.summary),
-        entries.length ? `**Přepis**\n\n${entries.map(e => entryLine(e, characters)).join('\n\n')}` : '_Scéna zatím nemá žádné záznamy._',
+        entries.length ? `**Přepis**\n\n${entries.map(e => entryLine(e, characters)).filter(Boolean).join('\n\n')}` : '_Scéna zatím nemá žádné záznamy._',
       ])
     )
   })

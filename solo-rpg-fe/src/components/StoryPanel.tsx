@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
+import { promptPreview } from '@solo-rpg/shared'
 
 interface Character {
   id: string
@@ -26,10 +27,18 @@ interface StoryEntry {
   timestamp: number
   /** Text je víceřádkový markdown */
   markdown?: boolean
+  /** `prompt` = jednorázový pokyn hráče pro AI (není součást příběhu, bez mluvčího) */
+  kind?: 'prompt'
+  /** Text vygenerovala AI */
+  ai?: boolean
+  /** Id záznamu typu prompt, podle kterého AI text napsala */
+  promptId?: string | null
 }
 
 interface StoryPanelProps {
   entries: StoryEntry[]
+  /** Všechny záznamy scény včetně skrytých promptů – pro tooltip „podle jakého promptu AI psala“ */
+  allEntries?: StoryEntry[]
   onPortraitClick: (image: string, characterName: string) => void
   onEntryDelete?: (entryId: string) => void
   onEntryEdit?: (entryId: string, newText: string) => void
@@ -44,8 +53,17 @@ interface StoryPanelProps {
 const ENTRY_IMAGE_MAX_WIDTH = 140 // Zvětšená šířka pro obrázky
 /** Popisek záznamu vypravěče bez souboru */
 const NARRATOR_FALLBACK = 'Vypravěč'
+/** Popisek záznamu typu prompt */
+const PROMPT_LABEL = 'Prompt AI'
 
-export default function StoryPanel({ entries, onPortraitClick, onEntryDelete, onEntryEdit, speakerOptions, onEntrySpeakerChange, darkenEntries }: StoryPanelProps) {
+/** Tooltip ikonky 🤖 u textu vygenerovaného AI: zda měl prompt a jeho začátek */
+function aiTooltip(entry: StoryEntry, all: StoryEntry[]): string {
+  if (!entry.promptId) return 'Text vygenerovala AI (bez promptu hráče)'
+  const prompt = all.find(e => e.id === entry.promptId && e.kind === 'prompt')
+  return prompt ? `Text vygenerovala AI podle promptu: „${promptPreview(prompt.text)}“` : 'Text vygenerovala AI podle promptu, který už byl smazán'
+}
+
+export default function StoryPanel({ entries, allEntries = entries, onPortraitClick, onEntryDelete, onEntryEdit, speakerOptions, onEntrySpeakerChange, darkenEntries }: StoryPanelProps) {
   const [aspectRatios, setAspectRatios] = useState<Record<string, number>>({})
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
@@ -119,16 +137,28 @@ export default function StoryPanel({ entries, onPortraitClick, onEntryDelete, on
       {entries.map((entry) => {
         const ratio = aspectRatios[entry.id] || 1
         const width = Math.min(ENTRY_IMAGE_HEIGHT * ratio, ENTRY_IMAGE_MAX_WIDTH)
-        // Mluvčí záznamu: postava, nebo vypravěč (portrét + jméno)
-        const speaker = entry.character
-          ? { name: entry.character.name, label: entry.character.nickname, image: entry.character.image }
-          : { name: entry.narrator?.name ?? NARRATOR_FALLBACK, label: entry.narrator?.name ?? NARRATOR_FALLBACK, image: entry.narrator?.image ?? null }
+        const isPrompt = entry.kind === 'prompt'
+        // Mluvčí záznamu: postava, nebo vypravěč (portrét + jméno); prompt mluvčího nemá
+        const speaker = isPrompt
+          ? { name: PROMPT_LABEL, label: PROMPT_LABEL, image: null }
+          : entry.character
+            ? { name: entry.character.name, label: entry.character.nickname, image: entry.character.image }
+            : { name: entry.narrator?.name ?? NARRATOR_FALLBACK, label: entry.narrator?.name ?? NARRATOR_FALLBACK, image: entry.narrator?.image ?? null }
+        const speakerEditable = canChangeSpeaker && !isPrompt
 
         return (
-          <div key={entry.id} className="flex animate-fadeIn gap-4" style={{ alignItems: 'flex-start' }}>
+          <div key={entry.id} className={`flex animate-fadeIn gap-4 ${isPrompt ? 'opacity-80' : ''}`} style={{ alignItems: 'flex-start' }}>
             {/* Fixní šířka kontejner pro obrázek */}
             <div style={{ width: `${ENTRY_IMAGE_MAX_WIDTH}px`, flexShrink: 0 }}>
-              {speaker.image ? (
+              {isPrompt ? (
+                <div
+                  title="Prompt zadaný AI vypravěči – není součást příběhu"
+                  className="rounded-md bg-cyan-950/60 flex items-center justify-center flex-shrink-0 border border-dashed border-cyan-500/50 text-2xl"
+                  style={{ height: `${ENTRY_IMAGE_HEIGHT}px`, width: `${ENTRY_IMAGE_MAX_WIDTH}px` }}
+                >
+                  💬
+                </div>
+              ) : speaker.image ? (
                 <img
                   src={speaker.image}
                   alt={speaker.name}
@@ -157,7 +187,7 @@ export default function StoryPanel({ entries, onPortraitClick, onEntryDelete, on
 
             {/* Text vlevo */}
             <div className="flex-1 text-left">
-              {speakerEditId === entry.id && speakerOptions ? (
+              {speakerEditId === entry.id && speakerOptions && !isPrompt ? (
                 <select
                   autoFocus
                   defaultValue={speakerValue(entry)}
@@ -181,24 +211,32 @@ export default function StoryPanel({ entries, onPortraitClick, onEntryDelete, on
                     <option key={n.id} value={`n:${n.id}`}>🎭 {n.name}</option>
                   ))}
                 </select>
-              ) : (entry.character || entry.narrator || canChangeSpeaker) && (
+              ) : (entry.character || entry.narrator || canChangeSpeaker || isPrompt) && (
                 <div
-                  className={`text-sm font-semibold text-[var(--accent)] mb-1 inline-block ${canChangeSpeaker ? 'cursor-pointer hover:underline decoration-dotted' : ''}`}
-                  title={canChangeSpeaker ? `${speaker.name} – klikni pro změnu mluvčího` : speaker.name}
-                  onClick={() => { if (canChangeSpeaker) setSpeakerEditId(entry.id) }}
+                  className={`text-sm font-semibold mb-1 inline-block ${isPrompt ? 'text-cyan-300' : 'text-[var(--accent)]'} ${speakerEditable ? 'cursor-pointer hover:underline decoration-dotted' : ''}`}
+                  title={speakerEditable ? `${speaker.name} – klikni pro změnu mluvčího` : speaker.name}
+                  onClick={() => { if (speakerEditable) setSpeakerEditId(entry.id) }}
                 >
-                  {speaker.label}:
+                  {isPrompt ? '💬 ' : ''}{speaker.label}:
                 </div>
               )}
               <div
-                className={`text-[var(--text)] leading-relaxed rounded-lg p-3 ${darkenEntries ? 'bg-black/75' : 'bg-black/30'} ${onEntryEdit && editingId !== entry.id ? 'cursor-pointer' : ''}`}
+                className={`relative text-[var(--text)] leading-relaxed rounded-lg p-3 ${darkenEntries ? 'bg-black/75' : 'bg-black/30'} ${isPrompt ? 'border border-dashed border-cyan-500/40 italic' : ''} ${onEntryEdit && editingId !== entry.id ? 'cursor-pointer' : ''}`}
                 onContextMenu={(e) => handleEntryContextMenu(e, entry)}
                 onClick={() => editingId !== entry.id && startEditing(entry)}
               >
+                {editingId === entry.id && entry.ai && (
+                  <span
+                    title={aiTooltip(entry, allEntries)}
+                    className="absolute -top-2.5 right-2 px-1.5 py-0.5 rounded-md border border-cyan-400/70 bg-cyan-950 text-cyan-200 text-xs cursor-help select-none shadow"
+                  >
+                    🤖 AI
+                  </span>
+                )}
                 {editingId === entry.id ? (
                   <textarea
                     ref={editRef}
-                    rows={entry.markdown ? Math.max(5, editText.split('\n').length + 1) : Math.max(1, editText.split('\n').length)}
+                    rows={entry.markdown || isPrompt ? Math.max(5, editText.split('\n').length + 1) : Math.max(1, editText.split('\n').length)}
                     value={editText}
                     onChange={(e) => setEditText(e.target.value)}
                     onBlur={() => saveEditing(entry)}
@@ -211,7 +249,7 @@ export default function StoryPanel({ entries, onPortraitClick, onEntryDelete, on
                       // Víceřádkový markdown: Enter vkládá řádek, Ctrl+Enter uloží;
                       // jednoduchý text: Enter uloží
                       if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.metaKey) {
-                        if (entry.markdown ? e.ctrlKey : !e.ctrlKey) {
+                        if (entry.markdown || isPrompt ? e.ctrlKey : !e.ctrlKey) {
                           e.preventDefault()
                           saveEditing(entry)
                         }
@@ -219,7 +257,7 @@ export default function StoryPanel({ entries, onPortraitClick, onEntryDelete, on
                     }}
                     className="w-full bg-black/50 border-2 border-[#aa3bff]/60 rounded-lg px-3 py-2 text-[var(--text)] leading-relaxed outline-none focus:border-[#aa3bff] focus:shadow-[0_0_20px_rgba(170,59,255,0.3)] resize-none whitespace-pre-wrap break-words"
                   />
-                ) : entry.markdown ? (
+                ) : entry.markdown || isPrompt ? (
                   <div className="markdown-body">
                     <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{entry.text}</ReactMarkdown>
                   </div>

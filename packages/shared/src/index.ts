@@ -585,8 +585,23 @@ export const StoryEntrySchema = z.object({
   timestamp: z.number(),
   /** Text je víceřádkový markdown */
   markdown: z.boolean().optional(),
+  /**
+   * Druh záznamu; chybí = replika příběhu. `prompt` = jednorázový pokyn hráče pro AI („Zadat prompt“): není součástí
+   * příběhu (AI ho v přepisu nedostává, do exportu nejde), `characterName` i `narratorName` jsou null.
+   */
+  kind: z.literal('prompt').optional(),
+  /** Text vygenerovala AI (nastavuje se při přijetí návrhu) */
+  ai: z.boolean().optional(),
+  /** Id záznamu typu `prompt`, podle kterého AI text napsala; chybí/null = bez promptu */
+  promptId: z.string().nullable().optional(),
 })
 export type StoryEntry = z.infer<typeof StoryEntrySchema>
+
+/** Prvních pár slov promptu pro tooltip / popisek (ne celý text) */
+export function promptPreview(text: string, words = 8): string {
+  const parts = text.replace(/\s+/g, ' ').trim().split(' ')
+  return parts.length > words ? `${parts.slice(0, words).join(' ')}…` : parts.join(' ')
+}
 
 export const GameDetailSchema = z.object({
   meta: GameMetaSchema,
@@ -644,9 +659,20 @@ export const AiSuggestionSchema = z.object({
   contextIncluded: z.array(z.string()),
   /** Brief Directoru, podle kterého návrh vznikl; null = psáno bez režie */
   briefId: z.string().nullable(),
+  /**
+   * Jednorázový prompt hráče pro toto volání jako záznam `kind: 'prompt'` (zapíše se do scény až s přijetím první repliky);
+   * null = bez promptu. Repliky návrhu mají `ai: true` a `promptId` = jeho id.
+   */
+  promptEntry: StoryEntrySchema.nullable(),
   createdAt: z.number(),
 })
 export type AiSuggestion = z.infer<typeof AiSuggestionSchema>
+
+/** Tělo `POST …/ai` – volitelný jednorázový prompt hráče (markdown), platí jen pro toto volání */
+export const AiGenerateRequestSchema = z.object({
+  prompt: z.string().trim().max(10_000).optional(),
+})
+export type AiGenerateRequest = z.infer<typeof AiGenerateRequestSchema>
 
 /** Odpověď `GET …/ai/suggestion` – rozpracovaný (nepřijatý) návrh pro scénu, pokud existuje */
 export const AiSuggestionStateSchema = z.object({

@@ -81,6 +81,11 @@ AI_PROMPT_PATH=prompts/scene-prompt.md   # výchozí prompt pro vedení scény (
 - V AI módu se vypravěč nespouští automaticky – vpravo od záložky vypravěče je tlačítko **🤖 AI pokračuje**, které nechá
   AI napsat další text do scény (počká na uložení tvého posledního záznamu). Stejný efekt má Enter v prázdném zadávacím
   políčku. AI postavy jsou v pásu označené 🤖 AI.
+- **✍️ Zadat prompt** (vedle „AI pokračuje“): dialog s markdown políčkem pro jednorázový pokyn vypravěči („nech vejít
+  cizince, neprozrazuj kdo to je“). Pokyn platí jen pro toto volání; po přijetí první repliky se zapíše do scény jako
+  záznam **💬 Prompt AI** (není součást příběhu – AI ho příště nevidí, do exportu ani kopírování markdownu nejde).
+  Při odmítnutí návrhu s novým pokusem můžeš prompt upravit nebo smazat. Zaškrtávátko **💬 Prompty** v liště scény prompty
+  mezi texty skryje/zobrazí. Texty vygenerované AI mají při editaci ikonku 🤖 AI; tooltip ukáže začátek promptu, pokud nějaký byl.
 - **Shrnutí děje scény**: dialog scény (✏️) má víceřádkové markdown pole „Shrnutí děje scény“ – rychlý kontext pro tebe
   i AI. Tlačítko „🤖 Shrnout pomocí AI“ pošle přepis scény stejnému modelu s promptem `prompts/scene-summary-prompt.md`
   (`AI_SUMMARY_PROMPT_PATH`) a výsledek vloží do pole; uloží se až tlačítkem „Uložit“ (do souboru scény za značku `<!-- summary -->`).
@@ -313,7 +318,7 @@ POST          /api/games/:game/assets            (multipart: kind portrait|narra
 POST          /api/games/:game/assets/from-url   ({ kind, url, ownerName? })
 GET/POST      /api/games/:game/scenes            (POST: { title, description?, image?, characters?, location?, ai?, aiCharacters? })
 GET/PUT/PATCH/DEL /api/games/:game/scenes/:scene (PUT = záznamy, PATCH = název/popis/shrnutí/obrázek/postavy/lokace/AI nastavení)
-POST          /api/games/:game/scenes/:scene/ai  (AI vypravěč odpoví přes OpenRouter, záznamy se uloží; → { entries, raw })
+POST          /api/games/:game/scenes/:scene/ai  ({ prompt? } – jednorázový pokyn hráče; AI vypravěč navrhne pokračování; → AiSuggestion)
 POST          /api/games/:game/scenes/:scene/summary (AI shrnutí děje scény, nic neukládá; → { summary, raw })
 GET           /api/games/:game/events            (SSE – změny souborů hry provedené mimo aplikaci)
 POST          /api/games/:game/backup            ({ targetPath } – zip celé složky hry; → { path, bytes })

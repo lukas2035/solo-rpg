@@ -1,4 +1,5 @@
 import type {
+  AiGenerateRequest,
   AiSuggestion,
   AiSuggestionAcceptRequest,
   AiSuggestionAcceptResponse,
@@ -233,9 +234,9 @@ export const importSceneTranscript = (game: string, sceneId: string, text: strin
 
 // ---------- AI vypravěč: návrh → přijmout / odmítnout ----------
 
-/** Nechá aktuálního vypravěče navrhnout pokračování; nic se neukládá, návrh se zobrazí k přijetí/odmítnutí */
-export const generateAiSuggestion = (game: string, sceneId: string) =>
-  request<AiSuggestion>('POST', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/ai`)
+/** Nechá aktuálního vypravěče navrhnout pokračování; nic se neukládá, návrh se zobrazí k přijetí/odmítnutí. `prompt` = jednorázový pokyn hráče */
+export const generateAiSuggestion = (game: string, sceneId: string, prompt?: string) =>
+  request<AiSuggestion>('POST', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/ai`, { prompt: prompt?.trim() || undefined } satisfies AiGenerateRequest)
 
 /** Rozpracovaný (nepřijatý) návrh scény + nasbírané důvody odmítnutí */
 export const getAiSuggestion = (game: string, sceneId: string) =>

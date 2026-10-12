@@ -117,6 +117,8 @@ vault/<Název hry>/
                           situace jen pro AI; null když prázdný, nedědí se do nové scény), createdAt, updatedAt
                           tělo: markdown popis scény, pak značka `<!-- entries -->`, pak záznamy
                           záznamy: <!-- entry id="..." ts="..." --> + **[[Celé jméno|nickname]]**: text  |  **[[Jméno vypravěče]]**:\n víceřádkový text
+                          volitelné atributy markeru: `ai="1"` (text vygenerovala AI), `prompt="<id>"` (id promptu hráče, podle kterého AI psala),
+                          `kind="prompt"` = jednorázový pokyn hráče pro AI (bez mluvčího, hlavička `**Prompt AI**:`; do AI přepisu ani exportu nejde)
                           (soubor bez značky = starý formát, celé tělo jsou záznamy; `**DM**:`/`**Vypravěč**:` = vypravěč bez souboru)
 ```
 Parser scén dělí i ručně dopsané záznamy bez markeru podle řádků `**Jméno**:` – wikilink `[[..]]` vždy,
@@ -310,10 +312,19 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
   pravý klik = smazání z celé hry.   `StoryEditor`: `persistStory` vrací Promise a ukládá ji do `pendingSaveRef`; AI se **nespouští automaticky
     po záznamu hráče**, ale tlačítkem „🤖 AI pokračuje“ v `InputArea` vpravo od záložky vypravěče (`onGenerateAi`/`aiBusy` props,
     jen když `scene.ai` a existuje vypravěč; odeslání prázdného políčka v `handleSubmit` volá totéž) → `handleGenerateAi`
-  → `runAi(sceneId)`, který nejdřív počká na `pendingSaveRef`
+  → `runAi(sceneId, prompt?)`, který nejdřív počká na `pendingSaveRef`
     (guard přes `currentSceneIdRef` – odpověď se nepřipíše do jiné scény; `charactersRef` pro resolve); banner pod StoryPanelem
   „🤖 X píše…“ / chyba se „Zkusit znovu“; `handleAiSettingsSave` = `PATCH /scenes/:id {title, ai, aiCharacters}`; lokální rename/delete
   postavy aktualizuje i `aiCharacters` ve `scenes`.
+  **Prompt hráče pro AI**: tlačítko „✍️ Zadat prompt“ vedle „AI pokračuje“ → `AiPromptModal` (markdown textarea, Ctrl+Enter)
+  → `POST …/ai { prompt }` → `ScenePromptContext.userPrompt` = sekce „Pokyn hráče pro tento krok“ (jen pro toto volání).
+  `SuggestionService.generate` vytvoří `suggestion.promptEntry` (`kind:'prompt'`, bez mluvčího) a repliky návrhu dostanou
+  `ai:true, promptId`; prompt se do scény zapíše až v `accept` **před první přijatou repliku** (odmítnutí celého návrhu nic nezapíše).
+  Formulář odmítnutí v `AiSuggestionPanel` nabízí prompt k úpravě pro nový pokus (prázdný = bez promptu).
+  `StoryPanel`: prompt záznam = 💬 box s dashed rámečkem (vždy markdown, bez mluvčího); u AI textu v editaci badge „🤖 AI“
+  s tooltipem (`promptPreview` – prvních 8 slov promptu). Zaškrtávátko „💬 Prompty“ v `SceneBar` (jen když `scene.ai` nebo scéna
+  prompty obsahuje; localStorage `solo-rpg:showAiPrompts`, default zapnuto) prompty skryje/zobrazí. Prompty se nikdy neposílají
+  do AI přepisu (`storyEntries()` ve `scenePrompt.ts`), do shrnutí, exportu hry ani „Zkopírovat jako Markdown“.
 - **Ověřeno:** build + lint (jen pre-existující warning), API smoke test (aiPrompt roundtrip/zachování/vymazání sekce, ai +
   aiCharacters PATCH s filtrem neznámé a mimo-scénové postavy, dědění do nové scény, rename/delete postavy, 503 bez klíče),
   unit test parseru a pořadí částí promptu. **Reálné volání OpenRouteru neproběhlo** (Lukáš teprve doplní klíč) – první věc
@@ -342,7 +353,7 @@ POST /api/games/:name/assets (multipart: kind portrait|narrator|faction|backgrou
 POST /api/games/:name/assets/from-url ({ kind, url, ownerName? })
 GET/POST /api/games/:name/scenes ({title, description?, image?, characters?, location?, ai?, aiMode?, rulesInAi?, aiCharacters?})
 GET(záznamy)/PUT(záznamy)/PATCH(meta)/DELETE /api/games/:name/scenes/:id
-POST /api/games/:name/scenes/:id/ai  (AI vypravěč navrhne pokračování, NEUKLÁDÁ; → AiSuggestion; 503 bez klíče, 400 bez vypravěče, 502 chyba providera)
+POST /api/games/:name/scenes/:id/ai  ({ prompt? } – jednorázový pokyn hráče; AI vypravěč navrhne pokračování, NEUKLÁDÁ; → AiSuggestion (+ promptEntry); 503 bez klíče, 400 bez vypravěče, 502 chyba providera)
 GET  /api/games/:name/scenes/:id/ai/suggestion  (→ { suggestion | null, rejectedReasons })
 POST /api/games/:name/scenes/:id/ai/suggestions/:sug/accept ({ entries, partial? } – upravené repliky; → { entries, suggestion: zbylý návrh | null }; partial nechá nepřijaté repliky jako návrh; 404 neaktuální návrh)
 POST /api/games/:name/scenes/:id/ai/suggestions/:sug/reject ({ reason } → AiSuggestionState; 404 neaktuální návrh)
