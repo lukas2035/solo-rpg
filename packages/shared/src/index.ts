@@ -121,6 +121,15 @@ export type GameMeta = z.infer<typeof GameMetaSchema>
 export const AiModeSchema = z.enum(['basic', 'advanced'])
 export type AiMode = z.infer<typeof AiModeSchema>
 
+/**
+ * Způsob schvalování textů od AI ve scéně (frontmatter `aiReview`):
+ * - `panel` – návrh v samostatném panelu pod příběhem (úprava textu/mluvčího před přijetím)
+ * - `inline` – návrh se ukáže rovnou jako běžný text ve scéně, tlačítka pod ním; fokus na Přijmout (Enter)
+ * - `auto` – vše se přijme automaticky, texty se rovnou zapíší do scény
+ */
+export const AiReviewSchema = z.enum(['panel', 'inline', 'auto'])
+export type AiReview = z.infer<typeof AiReviewSchema>
+
 export const SceneMetaSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -143,6 +152,8 @@ export const SceneMetaSchema = z.object({
   aiMode: AiModeSchema,
   /** Posílat AI vypravěči sekci o kostkách a pravidlech hry při generování textů této scény (frontmatter `rulesInAi`; dědí se do nové scény) */
   rulesInAi: z.boolean(),
+  /** Způsob schvalování textů od AI (frontmatter `aiReview`; dědí se do nové scény; výchozí `panel`) */
+  aiReview: AiReviewSchema,
   /** Ztmavený obrázek na pozadí při přehrávání scény (frontmatter `darkBackground`; dědí se do nové scény). Výchozí false = původní jas */
   darkBackground: z.boolean(),
   /** Celkové zhodnocení / shrnutí děje scény (markdown; tělo souboru za značkou `<!-- summary -->`) – rychlý kontext pro hráče i AI */
@@ -178,6 +189,7 @@ export const SceneInputSchema = z.object({
   aiPrompt: z.string().max(5000).optional(),
   aiMode: AiModeSchema.optional(),
   rulesInAi: z.boolean().optional(),
+  aiReview: AiReviewSchema.optional(),
   darkBackground: z.boolean().optional(),
   summary: z.string().max(20000).optional(),
   contextScenes: z.array(z.string().trim().min(1)).max(50).optional(),

@@ -117,7 +117,8 @@ vault/<Název hry>/
                           kostky/pravidla; chybí → legacy `game.md rulesInAi`), darkBackground (bool – ztmavený obrázek pozadí při přehrávání scény;
                           zapisuje se jen `true`, chybí → legacy `game.md brightBackground === false`; dědí se do nové scény; checkbox 🌙 v `InputArea`,
                           `StoryEditor.handleDarkBackgroundChange` = optimistický PATCH scény), aiCharacters (wikilinky postav hraných AI), aiPrompt (volitelný doplňující popis
-                          situace jen pro AI; null když prázdný, nedědí se do nové scény), createdAt, updatedAt
+                          situace jen pro AI; null když prázdný, nedědí se do nové scény), aiReview (`panel` | `inline` | `auto` – způsob schvalování textů
+                          od AI; zapisuje se jen jiná hodnota než `panel`, dědí se do nové scény), createdAt, updatedAt
                           tělo: markdown popis scény, pak značka `<!-- entries -->`, pak záznamy
                           záznamy: <!-- entry id="..." ts="..." --> + **[[Celé jméno|nickname]]**: text  |  **[[Jméno vypravěče]]**:\n víceřádkový text
                           volitelné atributy markeru: `ai="1"` (text vygenerovala AI), `prompt="<id>"` (id promptu hráče, podle kterého AI psala),
@@ -301,7 +302,14 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
   `partial: true` – BE repliku připíše a vrátí zbylé jako `suggestion` (poslední → null, teprve pak se spotřebuje brief a vynulují
   důvody). ❌ Odmítnout… / 🔄 Zkusit znovu zahodí **tuto i všechny další** repliky (`reject`) a AI pokračuje od tohoto místa
   (už přijaté repliky jsou ve scéně). Rozbalovací „kontext (n)“. Panel se remountuje přes `key = id návrhu : id repliky`.
-  `StoryEditor`: `aiSuggestion` stav, `runAi` jen nastaví návrh, při přepnutí scény `getAiSuggestion`; accept → `resolveEntries` + append.
+  `StoryEditor`: `aiSuggestion` stav, `runAi` jen nastaví návrh, při přepnutí scény `getAiSuggestion`; accept → `applyAcceptResult` (`resolveEntries` + append).
+- **Schvalování per scéna** (`SceneMeta.aiReview: AiReview = 'panel' | 'inline' | 'auto'`, scene schema v6, migrace `5 → aiReview: 'panel'`;
+  dědí se do nové scény, segment „Schvalování textů od AI“ v `AiSceneModal`): **panel** = `AiSuggestionPanel` výše; **inline** =
+  první replika se vykreslí ve `StoryPanel` jako běžný záznam (prop `pending: { entry, footer }`, `renderEntry(entry, readOnly)` bez
+  editace/mazání/změny mluvčího, čárkovaný rámeček) a pod ní `AiInlineReview` (hlavička „replika 1 z N“, ✅ Přijmout má při
+  mountu fokus → Enter přijme, ❌ Odmítnout… s důvodem/promptem, 🔄 Zkusit znovu); **auto** = `runAi` po `generate` rovnou volá
+  `accept` s `partial: false` na všechny repliky a zapíše je přes `applyAcceptResult` (žádný návrh se nezobrazí). `aiReviewRef`
+  drží hodnotu pro dlouho běžící `runAi`.
 - **FE:** `AiSceneModal` (zapnout/vypnout, karta vypravěče s „✏️ Prompt“/„🎭 Vybrat“, řádek na postavu s přepínačem 🧑 Já / 🤖 AI,
   „Nechat AI pokračovat“ = uložit + `runAi`), `NarratorModal` má textarea „🤖 AI prompt“, `CharacterBar` má 🤖 (cyan zvýraznění +
   tečka při zapnuté AI, pulz při generování) a odznak „🤖 AI“ + cyan rámeček u AI postav (`DisplayCharacter.ai`), `InputArea`
@@ -355,7 +363,7 @@ GET/POST /api/games/:name/factions           PUT/DELETE /api/games/:name/faction
 GET/POST /api/games/:name/quests             PUT/DELETE /api/games/:name/quests/:id      (QuestInput; jen title povinný, type default side)
 POST /api/games/:name/assets (multipart: kind portrait|narrator|faction|background|scene, ownerName?, file)
 POST /api/games/:name/assets/from-url ({ kind, url, ownerName? })
-GET/POST /api/games/:name/scenes ({title, description?, image?, characters?, location?, ai?, aiMode?, rulesInAi?, darkBackground?, aiCharacters?})
+GET/POST /api/games/:name/scenes ({title, description?, image?, characters?, location?, ai?, aiMode?, rulesInAi?, aiReview?, darkBackground?, aiCharacters?})
 GET(záznamy)/PUT(záznamy)/PATCH(meta)/DELETE /api/games/:name/scenes/:id
 POST /api/games/:name/scenes/:id/ai  ({ prompt? } – jednorázový pokyn hráče; AI vypravěč navrhne pokračování, NEUKLÁDÁ; → AiSuggestion (+ promptEntry); 503 bez klíče, 400 bez vypravěče, 502 chyba providera)
 GET  /api/games/:name/scenes/:id/ai/suggestion  (→ { suggestion | null, rejectedReasons })

@@ -86,6 +86,10 @@ AI_PROMPT_PATH=prompts/scene-prompt.md   # výchozí prompt pro vedení scény (
   záznam **💬 Prompt AI** (není součást příběhu – AI ho příště nevidí, do exportu ani kopírování markdownu nejde).
   Při odmítnutí návrhu s novým pokusem můžeš prompt upravit nebo smazat. Zaškrtávátko **💬 Prompty** v liště scény prompty
   mezi texty skryje/zobrazí. Texty vygenerované AI mají při editaci ikonku 🤖 AI; tooltip ukáže začátek promptu, pokud nějaký byl.
+- **Schvalování textů od AI** (dialog 🤖 AI, per scéna, dědí se do nové): **📋 Panel** – každá replika v panelu pod příběhem
+  s možností upravit text a mluvčího; **📝 V textu** – replika se ukáže rovnou jako běžný text ve scéně s tlačítky
+  Přijmout / Odmítnout / Znovu pod ním, fokus je na Přijmout (stačí Enter); **⚡ Automaticky** – vše se bez schvalování
+  rovnou zapíše do scény.
 - **Shrnutí děje scény**: dialog scény (✏️) má víceřádkové markdown pole „Shrnutí děje scény“ – rychlý kontext pro tebe
   i AI. Tlačítko „🤖 Shrnout pomocí AI“ pošle přepis scény stejnému modelu s promptem `prompts/scene-summary-prompt.md`
   (`AI_SUMMARY_PROMPT_PATH`) a výsledek vloží do pole; uloží se až tlačítkem „Uložit“ (do souboru scény za značku `<!-- summary -->`).

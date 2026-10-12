@@ -161,16 +161,16 @@ describe('postavy a scény', () => {
     await storage.saveSceneEntries(G, scene.id, [{ ...entries[0], text: 'Zase jiný' }])
     expect(await find()).toMatchObject({ summaryStale: true })
     const [row] = await database.db.execute(sql`SELECT schema_version FROM entities WHERE id = ${scene.id}`).then(r => r.rows as { schema_version: number }[])
-    expect(row.schema_version).toBe(5)
+    expect(row.schema_version).toBe(6)
 
     // Režim AI, přepínač pravidel a ztmavení pozadí: default basic/false/false, dědí se do nové sousední scény, PATCH bez nich hodnoty zachová
-    expect(await find()).toMatchObject({ aiMode: 'basic', rulesInAi: false, darkBackground: false })
-    await storage.updateScene(G, scene.id, { title: 'Přejmenovaná', aiMode: 'advanced', rulesInAi: true, darkBackground: true })
-    expect(await find()).toMatchObject({ aiMode: 'advanced', rulesInAi: true, darkBackground: true })
+    expect(await find()).toMatchObject({ aiMode: 'basic', rulesInAi: false, darkBackground: false, aiReview: 'panel' })
+    await storage.updateScene(G, scene.id, { title: 'Přejmenovaná', aiMode: 'advanced', rulesInAi: true, darkBackground: true, aiReview: 'auto' })
+    expect(await find()).toMatchObject({ aiMode: 'advanced', rulesInAi: true, darkBackground: true, aiReview: 'auto' })
     await storage.updateScene(G, scene.id, { title: 'Přejmenovaná', description: 'y' })
-    expect(await find()).toMatchObject({ aiMode: 'advanced', rulesInAi: true, darkBackground: true })
+    expect(await find()).toMatchObject({ aiMode: 'advanced', rulesInAi: true, darkBackground: true, aiReview: 'auto' })
     const inherited = await storage.createScene(G, { title: 'Dědí AI' })
-    expect(inherited).toMatchObject({ aiMode: 'advanced', rulesInAi: true, darkBackground: true })
+    expect(inherited).toMatchObject({ aiMode: 'advanced', rulesInAi: true, darkBackground: true, aiReview: 'auto' })
     await storage.deleteScene(G, inherited.id)
 
     // Kontextové scény: vazba scéna → scéna podle názvu, sama sebe a neznámé vypustí, rename se promítne

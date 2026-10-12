@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AiSuggestion, BriefPatch, Character, CharacterInput, DirectorState, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, PulseOverride, Quest, QuestInput, QuestProposal, QuestStatus, RollOutcome, RulesSystem, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import type { AiReview, AiSuggestion, BriefPatch, Character, CharacterInput, DirectorState, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, PulseOverride, Quest, QuestInput, QuestProposal, QuestStatus, RollOutcome, RulesSystem, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
 import { OPEN_THREAD_STATUSES, locationPath } from '@solo-rpg/shared'
 import CharacterBar from '../components/CharacterBar'
 import StoryPanel from '../components/StoryPanel'
@@ -12,6 +12,7 @@ import NarratorModal, { type NarratorFormValues } from '../components/NarratorMo
 import AiSceneModal, { type AiSceneSettings } from '../components/AiSceneModal'
 import AiPromptModal from '../components/AiPromptModal'
 import AiSuggestionPanel from '../components/AiSuggestionPanel'
+import AiInlineReview from '../components/AiInlineReview'
 import DirectorPanel from '../components/DirectorPanel'
 import QuestProposalsPanel, { type PendingQuestProposal } from '../components/QuestProposalsPanel'
 import RulesModal, { type RulesFormValues } from '../components/RulesModal'
@@ -581,39 +582,14 @@ export default function StoryEditor() {
   // Aktuální scéna a postavy v ref – odpověď AI přijde po dlouhé době a nesmí se připsat do jiné, mezitím otevřené scény
   const currentSceneIdRef = useRef<string | null>(null)
   const charactersRef = useRef<Character[]>(characters)
+  /** Způsob schvalování AI textů aktuální scény (v ref kvůli `runAi`, který běží dlouho) */
+  const aiReviewRef = useRef<AiReview>('panel')
+  const currentAiReview: AiReview = currentScene?.aiReview ?? 'panel'
   useEffect(() => {
     currentSceneIdRef.current = currentSceneId
     charactersRef.current = characters
-  }, [currentSceneId, characters])
-
-  /** Nechá AI vypravěče navrhnout pokračování scény (po dokončení rozpracovaného uložení); návrh se zobrazí k přijetí, nic se neukládá. `prompt` = jednorázový pokyn hráče */
-  const runAi = useCallback(async (sceneId: string, prompt?: string): Promise<void> => {
-    if (aiBusy) return
-    setAiBusy(true)
-    setAiError(null)
-    try {
-      await pendingSaveRef.current
-      const suggestion = await api.generateAiSuggestion(gameName, sceneId, prompt)
-      if (currentSceneIdRef.current !== sceneId) return
-      setAiSuggestion(suggestion)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Odpověď AI selhala.'
-      setAiError(message)
-      throw error
-    } finally {
-      setAiBusy(false)
-    }
-  }, [aiBusy, gameName])
-
-  // Při přepnutí scény načíst její rozpracovaný návrh (přežije obnovení stránky, ne restart BE); panel se zobrazí jen pro aktuální scénu
-  useEffect(() => {
-    if (!currentSceneId) return
-    let cancelled = false
-    api.getAiSuggestion(gameName, currentSceneId)
-      .then(state => { if (!cancelled) setAiSuggestion(state.suggestion) })
-      .catch(() => { /* bez návrhu */ })
-    return () => { cancelled = true }
-  }, [gameName, currentSceneId])
+    aiReviewRef.current = currentAiReview
+  }, [currentSceneId, characters, currentAiReview])
 
   /** Znovu načte puls kampaně a brief scény (po přijetí návrhu, změně pulsu nebo systému pravidel) */
   const refreshDirector = useCallback(async (sceneId: string): Promise<DirectorState | null> => {
@@ -625,6 +601,58 @@ export default function StoryEditor() {
       return null
     }
   }, [gameName])
+
+  /** Zapíše do stavu repliky, které BE po přijetí návrhu uložil do scény; `null` ve `suggestion` = návrh vyřízen */
+  const applyAcceptResult = useCallback((sceneId: string, result: { entries: ApiStoryEntry[]; suggestion: AiSuggestion | null }) => {
+    const resolved = resolveEntries(result.entries, charactersRef.current, narrators)
+    setCharacters(resolved.characters)
+    setStoryEntries(prev => [...prev, ...resolved.entries])
+    setScenes(prev => prev.map(s => (s.id === sceneId ? { ...s, summaryStale: true, entryCount: s.entryCount + result.entries.length } : s)))
+    setAiSuggestion(result.suggestion)
+    if (!result.suggestion) {
+      // Brief se přijetím poslední repliky spotřeboval → puls se přepočítá z nového beatu
+      setDirectorOpenFor(null)
+      void refreshDirector(sceneId)
+    }
+  }, [resolveEntries, narrators, refreshDirector])
+
+  /**
+   * Nechá AI vypravěče navrhnout pokračování scény (po dokončení rozpracovaného uložení). Návrh se zobrazí k přijetí
+   * (panel / v textu); při schvalování `auto` se všechny repliky rovnou zapíší do scény. `prompt` = jednorázový pokyn hráče
+   */
+  const runAi = useCallback(async (sceneId: string, prompt?: string): Promise<void> => {
+    if (aiBusy) return
+    setAiBusy(true)
+    setAiError(null)
+    try {
+      await pendingSaveRef.current
+      const suggestion = await api.generateAiSuggestion(gameName, sceneId, prompt)
+      if (currentSceneIdRef.current !== sceneId) return
+      if (aiReviewRef.current === 'auto' && suggestion.entries.length > 0) {
+        const result = await api.acceptAiSuggestion(gameName, sceneId, suggestion.id, suggestion.entries, false)
+        if (currentSceneIdRef.current !== sceneId) return
+        applyAcceptResult(sceneId, { entries: result.entries, suggestion: null })
+        return
+      }
+      setAiSuggestion(suggestion)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Odpověď AI selhala.'
+      setAiError(message)
+      throw error
+    } finally {
+      setAiBusy(false)
+    }
+  }, [aiBusy, gameName, applyAcceptResult])
+
+  // Při přepnutí scény načíst její rozpracovaný návrh (přežije obnovení stránky, ne restart BE); panel se zobrazí jen pro aktuální scénu
+  useEffect(() => {
+    if (!currentSceneId) return
+    let cancelled = false
+    api.getAiSuggestion(gameName, currentSceneId)
+      .then(state => { if (!cancelled) setAiSuggestion(state.suggestion) })
+      .catch(() => { /* bez návrhu */ })
+    return () => { cancelled = true }
+  }, [gameName, currentSceneId])
 
   // Při přepnutí scény načíst stav Directoru (jen pokročilý režim AI); panel se otevře sám, pokud má scéna brief (křížkem ho lze skrýt)
   const currentAiMode = currentScene?.aiMode ?? 'basic'
@@ -737,16 +765,7 @@ export default function StoryEditor() {
     try {
       const result = await api.acceptAiSuggestion(gameName, sceneId, aiSuggestion.id, [entry], true)
       if (currentSceneIdRef.current !== sceneId) return
-      const resolved = resolveEntries(result.entries, charactersRef.current, narrators)
-      setCharacters(resolved.characters)
-      setStoryEntries(prev => [...prev, ...resolved.entries])
-      setScenes(prev => prev.map(s => (s.id === sceneId ? { ...s, summaryStale: true, entryCount: s.entryCount + result.entries.length } : s)))
-      setAiSuggestion(result.suggestion)
-      if (!result.suggestion) {
-        // Brief se přijetím poslední repliky spotřeboval → puls se přepočítá z nového beatu
-        setDirectorOpenFor(null)
-        void refreshDirector(sceneId)
-      }
+      applyAcceptResult(sceneId, result)
     } catch (error) {
       setAiError(error instanceof Error ? error.message : 'Přijetí návrhu selhalo.')
       if (error instanceof api.ApiError && error.status === 404) setAiSuggestion(null)
@@ -947,7 +966,7 @@ export default function StoryEditor() {
   /** Uloží nastavení AI aktuální scény (zapnuto, režim, postavy hrané AI, pravidla pro AI) do scény */
   const handleAiSettingsSave = async (settings: AiSceneSettings) => {
     if (!currentScene) return
-    const saved = await api.updateScene(gameName, currentScene.id, { title: currentScene.title, ai: settings.enabled, aiCharacters: settings.aiCharacters, aiPrompt: settings.aiPrompt, aiMode: settings.aiMode, rulesInAi: settings.rulesInAi })
+    const saved = await api.updateScene(gameName, currentScene.id, { title: currentScene.title, ai: settings.enabled, aiCharacters: settings.aiCharacters, aiPrompt: settings.aiPrompt, aiMode: settings.aiMode, rulesInAi: settings.rulesInAi, aiReview: settings.aiReview })
     setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))
   }
 
@@ -1440,6 +1459,32 @@ export default function StoryEditor() {
   const handleLoreKnowledgeChange = (entry: LoreEntry, knowledge: LoreKnowledge) => void patchLore(entry, { knowledge })
   const handleLoreTruthChange = (entry: LoreEntry, truth: LoreTruth) => void patchLore(entry, { truth })
 
+  /** Rozpracovaný návrh AI patřící aktuální scéně, který má ještě co schvalovat */
+  const activeSuggestion = aiSuggestion && aiSuggestion.sceneId === currentSceneId && aiSuggestion.entries.length > 0 ? aiSuggestion : null
+  /** Schvalování „v textu“: první replika návrhu vykreslená StoryPanelem jako běžný záznam + tlačítka pod ní */
+  let inlinePending: { entry: (typeof displayEntries)[number]; footer: ReactNode } | null = null
+  if (activeSuggestion && currentAiReview === 'inline') {
+    const first = activeSuggestion.entries[0]
+    const resolved = resolveEntries([first], characters, narrators).entries[0]
+    inlinePending = {
+      entry: {
+        ...resolved,
+        id: `pending-${activeSuggestion.id}-${first.id}`,
+        character: resolved.character ? toDisplay(resolved.character) : null,
+        narrator: resolved.narrator ? { id: resolved.narrator.id, name: resolved.narrator.name, image: assetUrl(gameName, resolved.narrator.image, assetVersion) } : null,
+      },
+      footer: (
+        <AiInlineReview
+          key={`${activeSuggestion.id}:${first.id}`}
+          suggestion={activeSuggestion}
+          busy={aiBusy}
+          onAccept={entry => void handleAcceptSuggestion(entry)}
+          onReject={(reason, regenerate, prompt) => void handleRejectSuggestion(reason, regenerate, prompt)}
+        />
+      ),
+    }
+  }
+
   return (
     <div className="flex flex-col h-screen bg-black relative">
       {/* Pozadí celé aplikace */}
@@ -1558,6 +1603,7 @@ export default function StoryEditor() {
             speakerOptions={{ characters: displayCharacters, narrators: displayNarrators }}
             onEntrySpeakerChange={handleEntrySpeakerChange}
             darkenEntries={!darkBackground}
+            pending={inlinePending}
           />
           {/* Nové questy navržené AI při shrnutí scén – schválit / zamítnout */}
           <QuestProposalsPanel
@@ -1588,11 +1634,11 @@ export default function StoryEditor() {
               darken={!darkBackground}
             />
           )}
-          {/* Návrh AI vypravěče k přijetí / odmítnutí */}
-          {aiSuggestion && aiSuggestion.sceneId === currentSceneId && aiSuggestion.entries.length > 0 && (
+          {/* Návrh AI vypravěče k přijetí / odmítnutí (schvalování „panel“; „v textu“ řeší StoryPanel přes `pending`) */}
+          {activeSuggestion && currentAiReview === 'panel' && (
             <AiSuggestionPanel
-              key={`${aiSuggestion.id}:${aiSuggestion.entries[0]?.id ?? ''}`}
-              suggestion={aiSuggestion}
+              key={`${activeSuggestion.id}:${activeSuggestion.entries[0].id}`}
+              suggestion={activeSuggestion}
               speakerOptions={{ characters: displayCharacters, narrators: displayNarrators }}
               busy={aiBusy}
               onAccept={entry => void handleAcceptSuggestion(entry)}
@@ -1728,7 +1774,7 @@ export default function StoryEditor() {
           key={currentScene.id}
           sceneTitle={currentScene.title}
           characters={displayCharacters.filter(c => !c.id.startsWith('tmp-')).map(c => ({ name: c.name, nickname: c.nickname, image: c.image }))}
-          settings={{ enabled: currentScene.ai, aiCharacters: currentScene.aiCharacters, aiPrompt: currentScene.aiPrompt, aiMode: currentScene.aiMode, rulesInAi: currentScene.rulesInAi }}
+          settings={{ enabled: currentScene.ai, aiCharacters: currentScene.aiCharacters, aiPrompt: currentScene.aiPrompt, aiMode: currentScene.aiMode, rulesInAi: currentScene.rulesInAi, aiReview: currentScene.aiReview }}
           narrator={currentNarrator ? { name: currentNarrator.name, image: assetUrl(gameName, currentNarrator.image, assetVersion), hasPrompt: currentNarrator.aiPrompt.trim().length > 0 } : null}
           director={directorState}
           hasRules={rules.trim().length > 0}

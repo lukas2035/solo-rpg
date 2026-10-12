@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -48,6 +48,8 @@ interface StoryPanelProps {
   onEntrySpeakerChange?: (entryId: string, speaker: { characterId: string } | { narratorId: string }) => void
   /** Ztmavit podklad textů (při zesvětleném pozadí) */
   darkenEntries?: boolean
+  /** Čekající návrh AI (schvalování „v textu“): vykreslí se jako běžný záznam na konci, pod ním `footer` s tlačítky */
+  pending?: { entry: StoryEntry; footer: ReactNode } | null
 }
 
 const ENTRY_IMAGE_MAX_WIDTH = 140 // Zvětšená šířka pro obrázky
@@ -63,7 +65,7 @@ function aiTooltip(entry: StoryEntry, all: StoryEntry[]): string {
   return prompt ? `Text vygenerovala AI podle promptu: „${promptPreview(prompt.text)}“` : 'Text vygenerovala AI podle promptu, který už byl smazán'
 }
 
-export default function StoryPanel({ entries, allEntries = entries, onPortraitClick, onEntryDelete, onEntryEdit, speakerOptions, onEntrySpeakerChange, darkenEntries }: StoryPanelProps) {
+export default function StoryPanel({ entries, allEntries = entries, onPortraitClick, onEntryDelete, onEntryEdit, speakerOptions, onEntrySpeakerChange, darkenEntries, pending }: StoryPanelProps) {
   const [aspectRatios, setAspectRatios] = useState<Record<string, number>>({})
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
@@ -78,7 +80,7 @@ export default function StoryPanel({ entries, allEntries = entries, onPortraitCl
     if (el) {
       el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
     }
-  }, [entries.length])
+  }, [entries.length, pending?.entry.id])
 
   // Výška editační textarey podle skutečného (zalomeného) obsahu, ne jen podle počtu řádků
   useLayoutEffect(() => {
@@ -140,9 +142,8 @@ export default function StoryPanel({ entries, allEntries = entries, onPortraitCl
     onEntrySpeakerChange?.(entry.id, kind === 'c' ? { characterId: id } : { narratorId: id })
   }
 
-  return (
-    <div ref={scrollRef} className="flex-1 overflow-y-auto p-2 pl-6 space-y-4">
-      {entries.map((entry) => {
+  /** Jeden záznam scény; `readOnly` = čekající návrh AI (bez editace, mazání a změny mluvčího) */
+  const renderEntry = (entry: StoryEntry, readOnly = false) => {
         const ratio = aspectRatios[entry.id] || 1
         const width = Math.min(ENTRY_IMAGE_HEIGHT * ratio, ENTRY_IMAGE_MAX_WIDTH)
         const isPrompt = entry.kind === 'prompt'
@@ -152,7 +153,8 @@ export default function StoryPanel({ entries, allEntries = entries, onPortraitCl
           : entry.character
             ? { name: entry.character.name, label: entry.character.nickname, image: entry.character.image }
             : { name: entry.narrator?.name ?? NARRATOR_FALLBACK, label: entry.narrator?.name ?? NARRATOR_FALLBACK, image: entry.narrator?.image ?? null }
-        const speakerEditable = canChangeSpeaker && !isPrompt
+        const speakerEditable = canChangeSpeaker && !isPrompt && !readOnly
+        const editable = Boolean(onEntryEdit) && !readOnly
 
         return (
           <div key={entry.id} className={`flex animate-fadeIn gap-4 ${isPrompt ? 'opacity-80' : ''}`} style={{ alignItems: 'flex-start' }}>
@@ -229,9 +231,9 @@ export default function StoryPanel({ entries, allEntries = entries, onPortraitCl
                 </div>
               )}
               <div
-                className={`relative text-[var(--text)] leading-relaxed rounded-lg p-3 ${darkenEntries ? 'bg-black/75' : 'bg-black/30'} ${isPrompt ? 'border border-dashed border-cyan-500/40 italic' : ''} ${onEntryEdit && editingId !== entry.id ? 'cursor-pointer' : ''}`}
-                onContextMenu={(e) => handleEntryContextMenu(e, entry)}
-                onClick={() => editingId !== entry.id && startEditing(entry)}
+                className={`relative text-[var(--text)] leading-relaxed rounded-lg p-3 ${darkenEntries ? 'bg-black/75' : 'bg-black/30'} ${isPrompt ? 'border border-dashed border-cyan-500/40 italic' : ''} ${readOnly ? 'border border-dashed border-cyan-400/60' : ''} ${editable && editingId !== entry.id ? 'cursor-pointer' : ''}`}
+                onContextMenu={readOnly ? undefined : (e) => handleEntryContextMenu(e, entry)}
+                onClick={() => editable && editingId !== entry.id && startEditing(entry)}
               >
                 {editingId === entry.id && entry.ai && (
                   <span
@@ -276,7 +278,17 @@ export default function StoryPanel({ entries, allEntries = entries, onPortraitCl
             </div>
           </div>
         )
-      })}
+  }
+
+  return (
+    <div ref={scrollRef} className="flex-1 overflow-y-auto p-2 pl-6 space-y-4">
+      {entries.map((entry) => renderEntry(entry))}
+      {pending && (
+        <>
+          {renderEntry(pending.entry, true)}
+          {pending.footer}
+        </>
+      )}
     </div>
   )
 }

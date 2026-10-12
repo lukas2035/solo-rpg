@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AiMode, DirectorState } from '@solo-rpg/shared'
+import type { AiMode, AiReview, DirectorState } from '@solo-rpg/shared'
 import { inputClass } from '../utils/forms'
 import { AI_MODE_LABEL, BEAT_SHORT, OUTCOME_LABEL, PHASE_LABEL, STAKES_LABEL, eventTitle } from '../utils/director'
 
@@ -21,6 +21,8 @@ export interface AiSceneSettings {
   aiMode: AiMode
   /** Posílat AI sekci o kostkách a pravidlech hry */
   rulesInAi: boolean
+  /** Způsob schvalování textů od AI: panel / inline / auto */
+  aiReview: AiReview
 }
 
 interface AiSceneModalProps {
@@ -51,6 +53,18 @@ interface AiSceneModalProps {
 const MODE_HINT: Record<AiMode, string> = {
   basic: 'AI dostane jen výchozí prompt, postavy, popis scény, její dosavadní průběh a pokyny vypravěče. Bez kontextu ostatních scén, questů, nití a bez Režie – vhodné pro klidné scény, kde má vypravěč prostě navázat.',
   advanced: 'Navíc kontext kampaně (shrnutí jiných scén, lokace, questy, nitě, frakce, lore, tajemství) a Režie: puls kampaně, brief pro další beat a události přes více beatů (🎬 vedle 🤖 u vstupu).',
+}
+
+const REVIEW_LABEL: Record<AiReview, string> = {
+  panel: '📋 Panel',
+  inline: '📝 V textu',
+  auto: '⚡ Automaticky',
+}
+
+const REVIEW_HINT: Record<AiReview, string> = {
+  panel: 'Každá replika AI se ukáže v samostatném panelu pod příběhem, kde ji můžeš před přijetím upravit, změnit mluvčího, odmítnout s důvodem nebo nechat vygenerovat znovu.',
+  inline: 'Replika se zobrazí rovnou jako běžný text ve scéně a pod ní budou tlačítka Přijmout / Odmítnout / Znovu. Fokus je na Přijmout – stačí stisknout Enter.',
+  auto: 'Vše, co AI vrátí, se bez schvalování rovnou zapíše do scény jako běžné texty. Nevyhovující text pak můžeš smazat nebo upravit jako kterýkoli jiný.',
 }
 
 /** Souhrn Režie pro pokročilý režim: probíhající událost, beaty, rozpracovaný brief a puls */
@@ -96,6 +110,7 @@ export default function AiSceneModal({ sceneTitle, characters, settings, narrato
   const [aiPrompt, setAiPrompt] = useState(settings.aiPrompt)
   const [aiMode, setAiMode] = useState<AiMode>(settings.aiMode)
   const [rulesInAi, setRulesInAi] = useState(settings.rulesInAi)
+  const [aiReview, setAiReview] = useState<AiReview>(settings.aiReview)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -108,7 +123,7 @@ export default function AiSceneModal({ sceneTitle, characters, settings, narrato
   const setControl = (name: string, ai: boolean) =>
     setAiCharacters(prev => (ai ? (prev.includes(name) ? prev : [...prev, name]) : prev.filter(n => n !== name)))
 
-  const current = (): AiSceneSettings => ({ enabled, aiCharacters: aiCharacters.filter(n => characters.some(c => c.name === n)), aiPrompt, aiMode, rulesInAi })
+  const current = (): AiSceneSettings => ({ enabled, aiCharacters: aiCharacters.filter(n => characters.some(c => c.name === n)), aiPrompt, aiMode, rulesInAi, aiReview })
 
   const handleSave = async (close: boolean) => {
     if (saving) return false
@@ -179,6 +194,25 @@ export default function AiSceneModal({ sceneTitle, characters, settings, narrato
               <DirectorSummary director={director} />
             </div>
           )}
+        </fieldset>
+
+        <fieldset className="flex flex-col gap-2 text-left text-sm text-[var(--text)]">
+          <legend className="mb-1 font-semibold">Schvalování textů od AI</legend>
+          <div className="flex items-start gap-3">
+            <div className="flex rounded-md overflow-hidden border border-[var(--accent)]/50 text-xs flex-shrink-0">
+              {(['panel', 'inline', 'auto'] as AiReview[]).map(mode => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setAiReview(mode)}
+                  className={`px-3 py-1.5 transition-colors ${aiReview === mode ? 'bg-[var(--accent)] text-white' : 'bg-black/50 text-gray-400 hover:text-[var(--text)]'}`}
+                >
+                  {REVIEW_LABEL[mode]}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs opacity-70 flex-1">{REVIEW_HINT[aiReview]}</p>
+          </div>
         </fieldset>
 
         <div className="flex items-start gap-3 text-left text-sm text-[var(--text)]">

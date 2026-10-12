@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import matter from 'gray-matter'
 import {
+  AiReviewSchema,
   fullName,
   isValidGameName,
   isRemoteImage,
@@ -1036,6 +1037,7 @@ export class ObsidianVaultProvider implements StorageProvider {
           // Soubor bez `aiMode` = scéna z doby před režimy → pokročilá (zachová dosavadní chování)
           aiMode: data.aiMode === 'basic' ? 'basic' : 'advanced',
           rulesInAi: typeof data.rulesInAi === 'boolean' ? data.rulesInAi : (gameRulesInAi ?? false),
+          aiReview: AiReviewSchema.catch('panel').parse(data.aiReview ?? 'panel'),
           darkBackground: typeof data.darkBackground === 'boolean' ? data.darkBackground : (gameDarkBackground ?? false),
           contextScenes: parseCharacterLinks(data.contextScenes),
           createdAt: toTimestamp(data.createdAt, stat.birthtimeMs),
@@ -1083,7 +1085,8 @@ export class ObsidianVaultProvider implements StorageProvider {
       aiPrompt: meta.aiPrompt.trim() ? meta.aiPrompt.trim() : null,
       aiMode: meta.aiMode,
       rulesInAi: meta.rulesInAi,
-      // Výchozí stav (původní jas) se do frontmatteru nezapisuje
+      // Výchozí hodnoty (panel, původní jas) se do frontmatteru nezapisují
+      aiReview: meta.aiReview === 'panel' ? null : meta.aiReview,
       darkBackground: meta.darkBackground ? true : null,
       summaryStale: meta.summaryStale ? true : null,
       contextScenes: meta.contextScenes.length ? toCharacterLinks(meta.contextScenes) : null,
@@ -1149,6 +1152,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     const aiMode = input.aiMode ?? neighbor?.meta.aiMode ?? 'basic'
     const rulesInAi = input.rulesInAi ?? neighbor?.meta.rulesInAi ?? false
     const darkBackground = input.darkBackground ?? neighbor?.meta.darkBackground ?? false
+    const aiReview = input.aiReview ?? neighbor?.meta.aiReview ?? 'panel'
     const aiCharacters = (input.aiCharacters ?? neighbor?.meta.aiCharacters ?? []).filter(n => characters.includes(n))
     const now = Date.now()
     const meta: SceneMeta = {
@@ -1166,6 +1170,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       ai,
       aiMode,
       rulesInAi,
+      aiReview,
       darkBackground,
       aiCharacters: await this.normalizeSceneCharacters(dir, aiCharacters),
       // Doplňující popis situace je specifický pro scénu – nedědí se
@@ -1225,6 +1230,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       ai: input.ai ?? previous.ai,
       aiMode: input.aiMode ?? previous.aiMode,
       rulesInAi: input.rulesInAi ?? previous.rulesInAi,
+      aiReview: input.aiReview ?? previous.aiReview,
       darkBackground: input.darkBackground ?? previous.darkBackground,
       // AI může hrát jen postavy, které ve scéně jsou
       aiCharacters: aiCharacters.filter(n => characters.includes(n)),

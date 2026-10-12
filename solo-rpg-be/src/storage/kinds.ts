@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   AiModeSchema,
+  AiReviewSchema,
   FactionStanceSchema,
   FactionStatusSchema,
   FactionTypeSchema,
@@ -45,6 +46,8 @@ export const SceneFields = z.object({
   aiMode: AiModeSchema,
   /** Posílat AI sekci o kostkách a pravidlech při generování textů této scény */
   rulesInAi: z.boolean(),
+  /** Způsob schvalování textů od AI (panel / inline / auto) */
+  aiReview: AiReviewSchema,
   /** Ztmavený obrázek na pozadí scény (výchozí false = původní jas) */
   darkBackground: z.boolean(),
   summary: z.string(),
@@ -124,13 +127,15 @@ export const KIND_VERSIONS: Record<EntityKind, { current: number; migrations: Re
   // v4: režim AI (stávající scény zůstávají v pokročilém režimu) + přepínač pravidel per scéna (dřív `games.rules_in_ai`;
   //     SQL migrace 0002 ho do scén překopírovala, proto mají přednost už přítomné klíče)
   // v5: ztmavení pozadí per scéna (dřív `games.bright_background`; SQL migrace 0004 ho do scén překopírovala jako negaci)
+  // v6: způsob schvalování textů od AI (panel = dosavadní chování)
   scene: {
-    current: 5,
+    current: 6,
     migrations: {
       1: old => ({ ...(old as object), summaryStale: false }),
       2: old => ({ ...(old as object), director: null }),
       3: old => ({ aiMode: 'advanced', rulesInAi: false, ...(old as object) }),
       4: old => ({ darkBackground: false, ...(old as object) }),
+      5: old => ({ ...(old as object), aiReview: 'panel' }),
     },
   },
   thread: { current: 1, migrations: {} },
