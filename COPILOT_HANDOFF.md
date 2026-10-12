@@ -86,7 +86,8 @@ solo-rpg/
 ### Layout vaultu (na hru)
 ```
 vault/<Název hry>/
-  game.md                 frontmatter: name, createdAt, updatedAt, background, narrator (wikilink `[[Jméno]]` aktuálního vypravěče | null);
+  game.md                 frontmatter: name, createdAt, updatedAt, background, narrator (legacy wikilink `[[Jméno]]` | null – jen fallback pro scény
+                          bez klíče `narrator`; UI ho už nemění, vypravěč je per scéna);
                           tělo = volné poznámky hráče + volitelně `<!-- rules -->` + popis pravidel pod příběhem
                           (`GameSettings.rules`; `splitGameBody`/`joinGameBody`, saveSetup poznámky zachová). UI: `RulesModal` přes 🎲 v CharacterBar,
                           StoryEditor.handleRulesSave ukládá hned (ne debounce) a synchronizuje `lastSavedSetupRef`.
@@ -113,6 +114,8 @@ vault/<Název hry>/
   backgrounds/<soubor>    obrázky scén jako backgrounds/<Název scény>.ext (+ případné staré pozadí hry `background` v game.md;
                           v UI se už nenastavuje ani nemaže, slouží jen jako fallback pro scény bez obrázku)
   scenes/001 - Název.md   frontmatter: id, title, order, image, characters (wikilinky `[[Celé jméno]]` postav ve scéně), location,
+                          narrator (wikilink `[[Jméno]]` vypravěče scény | null = bez vypravěče; klíč chybí → legacy `game.md narrator`;
+                          dědí se do nové scény; neznámé jméno → 404; Postgres = link kind `narrator`),
                           ai (bool – AI vypravěč zapnutý), aiMode (`basic` | `advanced`; chybí → `advanced`), rulesInAi (bool – posílat AI
                           kostky/pravidla; chybí → legacy `game.md rulesInAi`), darkBackground (bool – ztmavený obrázek pozadí při přehrávání scény;
                           zapisuje se jen `true`, chybí → legacy `game.md brightBackground === false`; dědí se do nové scény; checkbox 🌙 v `InputArea`,
@@ -131,24 +134,25 @@ Víceřádkový text → `markdown: true`. `StoryEntry.characterName` = celé jm
 `StoryEntry.narratorName` = jméno vypravěče u záznamů vypravěče (null = starý zápis bez souboru). Wikilink, který je zároveň
 postavou i vypravěčem, se bere jako postava.
 Přejmenování postavy / změna nicku na BE přepíše hlavičky mluvčího ve všech scénách a přejmenuje portrét; stejně přejmenování
-vypravěče (+ aktualizuje `narrator` v game.md). Smazání aktuálního vypravěče vynuluje `narrator` v game.md.
+vypravěče (+ přepíše `narrator` ve frontmatteru scén). Smazání vypravěče ho odebere ze všech scén (`narrator: null`).
 Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otevře povinný `SceneModal`.
 
 ### Postavy (FE)
 - „+“ v pásu i klik na postavu otevře `CharacterModal`: Jméno, Příjmení, Nickname (sleduje křestní jméno, dokud ho
   uživatel nepřepíše), portrét (klik/drop/URL), markdown poznámky. Fokus/Tab označí celý text. Enter odešle, Esc zavře.
 - Submit: `POST/PUT /characters` (409 při duplicitním celém jménu → hláška v dialogu) → `storeImage(kind portrait, celé jméno)`
-  → `PUT` s cestou portrétu. Postavy se **neukládají přes setup autosave** (ten jen pozadí + jméno aktuálního vypravěče).
+  → `PUT` s cestou portrétu. Postavy se **neukládají přes setup autosave** (ten jen pozadí + pravidla).
 - Mluvčí dopsaný v Obsidianu bez souboru postavy = dočasná postava (`id: tmp-…`); klik na ni otevře dialog a vytvoří soubor.
 - V UI (pás, taby, repliky) se zobrazuje nickname.
 
 ### Vypravěči (FE)
 - 🎭 v pásu otevře `NarratorPickerModal`: seznam vypravěčů hry (portrét, jméno, první řádek popisu), klik = vybrat
-  aktuálního (uloží se přes setup autosave `narrator`), ✏️ = upravit, „+ Nový vypravěč“ → `NarratorModal` (jméno, markdown
+  vypravěče **aktuální scény** (`SceneMeta.narrator`, `StoryEditor.setSceneNarrator` = optimistický PATCH scény; nová scéna
+  dědí z předchozí), ✏️ = upravit, „+ Nový vypravěč“ → `NarratorModal` (jméno, markdown
   popis, portrét). Submit: `POST/PUT /narrators` (409 duplicitní jméno) → `storeImage(kind narrator, jméno)` → `PUT` s cestou.
 - Dokud hra nemá vypravěče: v `InputArea` je místo tabu vypravěče tlačítko **„Zadat vypravěče“** (otevře `NarratorModal`),
   výběr vypravěče (klik, Ctrl/Alt+0, Tab) není možný, výchozí výběr padne na první postavu; první vytvořený vypravěč se
-  rovnou stane aktuálním. Záznam vypravěče nese `narrator` (portrét + jméno v `StoryPanel`); bez souboru → placeholder „Vypravěč“.
+  rovnou stane vypravěčem aktuální scény. Záznam vypravěče nese `narrator` (portrét + jméno v `StoryPanel`); bez souboru → placeholder „Vypravěč“.
 - `StoryPanel`: klik do textu = inline editace (`onEntryEdit`), pravý klik = smazání, **klik na jméno nad textem = změna
   mluvčího** (`speakerOptions` = postavy aktuální scény + vypravěči hry, `onEntrySpeakerChange` → `handleEntrySpeakerChange`
   přepíše `character`/`narrator` záznamu a uloží scénu). Select má hodnoty `c:<id>` / `n:<id>`; aktuální mluvčí mimo nabídku
@@ -355,7 +359,7 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
 ```
 GET  /api/health
 GET/POST /api/games            GET/PATCH(rename)/DELETE /api/games/:name
-PUT  /api/games/:name/setup    (GameSettings: backgroundImage, narrator = jméno | null, rules, rulesSystem, pulseOverride; 404 pro neznámého vypravěče)
+PUT  /api/games/:name/setup    (GameSettings: backgroundImage, rules, rulesSystem, pulseOverride; vypravěč je per scéna – `PATCH scenes/:id { narrator }`, 404 pro neznámého)
 POST /api/games/:name/characters             PUT/DELETE /api/games/:name/characters/:id
 POST /api/games/:name/narrators              PUT/DELETE /api/games/:name/narrators/:id   ({ name, description?, aiPrompt?, image? })
 GET/POST /api/games/:name/threads            PUT/DELETE /api/games/:name/threads/:id     (ThreadInput; title+type povinné)

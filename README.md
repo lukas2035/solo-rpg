@@ -74,7 +74,7 @@ AI_PROMPT_PATH=prompts/scene-prompt.md   # výchozí prompt pro vedení scény (
 - 🤖 v horním pásu otevře nastavení AI pro **aktuální scénu**: zapnutí, rozdělení postav scény na „hraju já“ / „hraje AI“,
   volitelný **doplňující popis situace** (shrnutí jen pro AI, vloží se za popis scény) a tlačítko „Nechat AI pokračovat“.
   Ukládá se do frontmatteru scény (`ai`, `aiCharacters`, `aiPrompt`); nová scéna dědí z poslední zapnutí a AI postavy (ne popis).
-- Odpovídá vždy **aktuální vypravěč** (🎭). Každý vypravěč má vedle popisu i vlastní **AI prompt** (v souboru za značkou
+- Odpovídá vždy **vypravěč aktuální scény** (🎭; ukládá se per scéna, nová scéna ho dědí z předchozí). Každý vypravěč má vedle popisu i vlastní **AI prompt** (v souboru za značkou
   `<!-- ai-prompt -->`), který se připojí na konec požadavku.
 - Požadavek = `prompts/scene-prompt.md` (system) + postavy hráče a AI s popisy + popis scény + celý dosavadní průběh scény
   (formát jako 📋 kopírování) + prompt vypravěče. Odpověď ve tvaru `Jméno: text` se rozparsuje na záznamy a uloží do scény.
@@ -127,7 +127,7 @@ vault/
     ├── game.md              # nastavení hry (frontmatter) + volné poznámky
     ├── sessions.md          # herní sezení (stopky): souhrn + blok na sezení (začátek, konec, délka v s, zábavnost, popis)
     ├── characters/<Celé jméno>.md  # jedna postava (PC i NPC) = jeden soubor (frontmatter + markdown poznámky)
-    ├── narrators/<Jméno>.md  # vypravěči (narrator) – jméno + markdown popis; aktuální vypravěč je v game.md (`narrator: [[Jméno]]`)
+    ├── narrators/<Jméno>.md  # vypravěči (narrator) – jméno + markdown popis; vypravěč scény je ve frontmatteru scény (`narrator: [[Jméno]]`)
     ├── threads/<Název>.md   # dějové nitě (threads) – otevřené komplikace, hrozby, záhady… (frontmatter + markdown popis)
     ├── factions/<Název>.md  # frakce – organizace ve světě (frontmatter + markdown popis, tajemství za `<!-- secrets -->`)
     ├── locations/<Název>.md # lokace – hierarchická místa světa (`parentLocation`), popis + tajemství za `<!-- secrets -->`

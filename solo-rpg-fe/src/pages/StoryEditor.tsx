@@ -106,8 +106,6 @@ export default function StoryEditor() {
   /** ID postav otevřených v plovoucích oknech (poslední v poli je nahoře); `BACKGROUND_FLOAT_ID` = obrázek pozadí */
   const [floatingPortraitIds, setFloatingPortraitIds] = useState<string[]>([])
   const [backgroundImage, setBackgroundImage] = useState<ImageRef>(null)
-  /** Jméno aktuálního vypravěče; null = hra vypravěče nemá */
-  const [narratorName, setNarratorName] = useState<string | null>(null)
   const [showNarratorPicker, setShowNarratorPicker] = useState(false)
   const [narratorModal, setNarratorModal] = useState<NarratorModalState | null>(null)
   const [showAiModal, setShowAiModal] = useState(false)
@@ -125,6 +123,8 @@ export default function StoryEditor() {
   const [directorOpenFor, setDirectorOpenFor] = useState<string | null>(null)
   /** AI právě generuje odpověď (jen jedna najednou) */
   const [aiBusy, setAiBusy] = useState(false)
+  /** Právě probíhá přijetí návrhu AI (bez volání AI) – v inline režimu se hláška „píše…“ nezobrazuje */
+  const [aiAccepting, setAiAccepting] = useState(false)
   /** Dialog „Zadat prompt“ (jednorázový pokyn pro AI); string = předvyplněný text */
   const [aiPromptModal, setAiPromptModal] = useState<string | null>(null)
   /** Zobrazovat mezi texty scény i prompty pro AI (persistováno) */
@@ -202,6 +202,8 @@ export default function StoryEditor() {
     () => narrators.map(n => ({ id: n.id, name: n.name, description: n.description, image: assetUrl(gameName, n.image, assetVersion) })),
     [narrators, gameName, assetVersion]
   )
+  /** Vypravěč aktuální scény (per scéna, nová scéna ho dědí z předchozí); null = scéna vypravěče nemá */
+  const narratorName = currentScene?.narrator ?? null
   const currentNarrator = useMemo(() => narrators.find(n => n.name === narratorName) ?? null, [narrators, narratorName])
   const editingNarrator = useMemo(
     () => (narratorModal?.mode === 'edit' ? narrators.find(n => n.id === narratorModal.id) ?? null : null),
@@ -350,11 +352,10 @@ export default function StoryEditor() {
   const applySetup = useCallback((setup: GameSetup) => {
     setBackgroundImage(setup.backgroundImage)
     setNarrators(setup.narrators)
-    setNarratorName(setup.narrator)
     setRules(setup.rules)
     setRulesSystem(setup.rulesSystem)
     setPulseOverride(setup.pulseOverride)
-    const settings: GameSettings = { backgroundImage: setup.backgroundImage, narrator: setup.narrator, rules: setup.rules, rulesSystem: setup.rulesSystem, pulseOverride: setup.pulseOverride }
+    const settings: GameSettings = { backgroundImage: setup.backgroundImage, rules: setup.rules, rulesSystem: setup.rulesSystem, pulseOverride: setup.pulseOverride }
     lastSavedSetupRef.current = JSON.stringify(settings)
   }, [])
 
@@ -394,11 +395,11 @@ export default function StoryEditor() {
   }, [gameName, resolveEntries, applySetup])
 
   const currentSettings = useMemo<GameSettings>(
-    () => ({ backgroundImage, narrator: narratorName, rules, rulesSystem, pulseOverride }),
-    [backgroundImage, narratorName, rules, rulesSystem, pulseOverride]
+    () => ({ backgroundImage, rules, rulesSystem, pulseOverride }),
+    [backgroundImage, rules, rulesSystem, pulseOverride]
   )
 
-  // Automatické ukládání nastavení (pozadí, aktuální vypravěč) do vaultu – postavy a vypravěči mají vlastní endpointy
+  // Automatické ukládání nastavení (pozadí, pravidla) do vaultu – postavy a vypravěči mají vlastní endpointy
   useEffect(() => {
     if (!setupLoadedRef.current) return
     const serialized = JSON.stringify(currentSettings)
@@ -761,6 +762,7 @@ export default function StoryEditor() {
     if (!aiSuggestion || !currentSceneId || aiBusy) return
     const sceneId = currentSceneId
     setAiBusy(true)
+    setAiAccepting(true)
     setAiError(null)
     try {
       const result = await api.acceptAiSuggestion(gameName, sceneId, aiSuggestion.id, [entry], true)
@@ -771,6 +773,7 @@ export default function StoryEditor() {
       if (error instanceof api.ApiError && error.status === 404) setAiSuggestion(null)
     } finally {
       setAiBusy(false)
+      setAiAccepting(false)
     }
   }
 
@@ -933,15 +936,16 @@ export default function StoryEditor() {
     if (editing) {
       setNarrators(prev => prev.map(n => (n.id === saved.id ? saved : n)))
       setStoryEntries(prev => prev.map(e => (e.narrator?.id === saved.id ? { ...e, narrator: saved } : e)))
-      // BE přepsal jméno i v game.md a ve scénách → promítnout do stavu
-      if (narratorName === editing.name) {
-        setNarratorName(saved.name)
-        lastSavedSetupRef.current = JSON.stringify({ ...currentSettings, narrator: saved.name })
+      // BE přepsal jméno i ve scénách → promítnout do stavu
+      if (saved.name !== editing.name) {
+        setScenes(prev => prev.map(s => (s.narrator === editing.name ? { ...s, narrator: saved.name } : s)))
       }
     } else {
       setNarrators(prev => [...prev, saved])
-      // První vypravěč hry se rovnou stane aktuálním
-      if (narratorName === null) setNarratorName(saved.name)
+      // První vypravěč hry se rovnou stane vypravěčem aktuální scény
+      if (currentScene && currentScene.narrator === null && narrators.length === 0) {
+        await setSceneNarrator(currentScene, saved.name)
+      }
     }
   }
 
@@ -950,16 +954,26 @@ export default function StoryEditor() {
     if (!narrator) return
     await api.deleteNarrator(gameName, narratorId)
     setNarrators(prev => prev.filter(n => n.id !== narratorId))
-    if (narratorName === narrator.name) {
-      // BE už aktuálního vypravěče v game.md vynuloval
-      setNarratorName(null)
-      lastSavedSetupRef.current = JSON.stringify({ ...currentSettings, narrator: null })
+    // BE už vypravěče ze scén odebral
+    setScenes(prev => prev.map(s => (s.narrator === narrator.name ? { ...s, narrator: null } : s)))
+  }
+
+  /** Nastaví vypravěče scény (optimisticky, pak PATCH scény) */
+  const setSceneNarrator = async (scene: SceneMeta, name: string | null) => {
+    const previous = scene.narrator
+    setScenes(prev => prev.map(s => (s.id === scene.id ? { ...s, narrator: name } : s)))
+    try {
+      const saved = await api.updateScene(gameName, scene.id, { title: scene.title, narrator: name })
+      setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))
+    } catch (error) {
+      setScenes(prev => prev.map(s => (s.id === scene.id ? { ...s, narrator: previous } : s)))
+      setLoadError(error instanceof Error ? error.message : 'Vypravěče scény se nepodařilo uložit.')
     }
   }
 
   const handleSelectNarrator = (narratorId: string) => {
     const narrator = narrators.find(n => n.id === narratorId)
-    if (narrator) setNarratorName(narrator.name)
+    if (narrator && currentScene) void setSceneNarrator(currentScene, narrator.name)
     setShowNarratorPicker(false)
   }
 
@@ -1015,7 +1029,7 @@ export default function StoryEditor() {
       }
       const markdown = buildGameMarkdown({
         gameName: detail.meta.name,
-        settings: { narrator: detail.setup.narrator, rules: detail.setup.rules },
+        settings: { rules: detail.setup.rules },
         rulesPrompt,
         characters: detail.setup.characters,
         narrators: detail.setup.narrators,
@@ -1647,7 +1661,7 @@ export default function StoryEditor() {
             />
           )}
           {/* Stav AI vypravěče: generování / chyba */}
-          {(aiBusy || aiError) && (
+          {((aiBusy && !(aiAccepting && currentAiReview === 'inline')) || aiError) && (
             <div
               className={`flex-shrink-0 mx-4 mb-2 px-4 py-2 rounded-lg border text-sm flex items-center gap-3 ${
                 aiError ? 'bg-red-900/70 border-red-500 text-red-100' : 'bg-cyan-950/80 border-cyan-500 text-cyan-100'

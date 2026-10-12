@@ -34,7 +34,7 @@ export async function summarizeScene(storage: StorageProvider, config: Config, g
     throw new AiError(500, `Soubor s promptem pro shrnutí scény nenalezen: ${config.ai.summaryPromptPath}`)
   }
 
-  const narrator = detail.setup.narrators.find(n => n.name === detail.setup.narrator) ?? FALLBACK_NARRATOR
+  const narrator = detail.setup.narrators.find(n => n.name === scene.narrator) ?? FALLBACK_NARRATOR
   const characters = detail.setup.characters.filter(c => scene.characters.includes(c.name))
 
   const sections: string[] = []

@@ -13,7 +13,7 @@ import { LORE_KNOWLEDGE_LABELS, LORE_TRUTH_LABELS, LORE_TYPE_LABELS } from './lo
 
 export interface GameExportData {
   gameName: string
-  settings: Pick<GameSettings, 'narrator' | 'rules'>
+  settings: Pick<GameSettings, 'rules'>
   /**
    * Sekce o kostkách a pravidlech z BE (`GET /api/games/:game/rules-prompt` – stejný text jako dostává AI).
    * Když chybí (BE nedostupné), použije se zkrácená záložní formulace přímo z kódu.
@@ -109,7 +109,7 @@ export function buildGameMarkdown(data: GameExportData): string {
   if (narrators.length) {
     h(2, 'Vypravěči')
     for (const n of narrators) {
-      h(3, `${n.name}${settings.narrator === n.name ? ' (aktuální vypravěč)' : ''}`)
+      h(3, n.name)
       out.push(section([block(null, n.description), block('Styl a pravidla vypravěče', n.aiPrompt)]) || '_Bez popisu._')
     }
   }

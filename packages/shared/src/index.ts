@@ -89,8 +89,6 @@ export type PulseOverride = z.infer<typeof PulseOverrideSchema>
 /** Nastavení hry bez postav a vypravěčů (ti mají vlastní CRUD endpointy) */
 export const GameSettingsSchema = z.object({
   backgroundImage: ImageRefSchema,
-  /** Jméno aktuálního vypravěče; null = žádný (nová hra vypravěče nemá, uživatel ho musí vytvořit) */
-  narrator: z.string().nullable(),
   /** Popis herních pravidel běžících pod příběhem (VtM 5e, D&D 5e, Fate…; markdown, tělo `game.md` za `<!-- rules -->`); prázdné = bez pravidel */
   rules: z.string().max(20000),
   /** Systém pravidel pro překlad obtížnosti v briefu Directoru; frontmatter `rulesSystem` */
@@ -142,7 +140,9 @@ export const SceneMetaSchema = z.object({
   characters: z.array(z.string()),
   /** Název lokace, kde se scéna odehrává (frontmatter `location` jako wikilink); null = neuvedeno */
   location: z.string().nullable(),
-  /** AI vypravěč zapnutý pro tuto scénu (frontmatter `ai`) – na tlačítko „🤖 AI pokračuje“ napíše aktuální vypravěč další text přes OpenRouter */
+  /** Jméno vypravěče scény (frontmatter `narrator` jako wikilink; dědí se do nové scény); null = scéna vypravěče nemá */
+  narrator: z.string().nullable(),
+  /** AI vypravěč zapnutý pro tuto scénu (frontmatter `ai`) – na tlačítko „🤖 AI pokračuje“ napíše vypravěč scény další text přes OpenRouter */
   ai: z.boolean(),
   /** Celá jména postav scény hraných AI (frontmatter `aiCharacters` jako wikilinky); ostatní postavy scény hraje hráč */
   aiCharacters: z.array(z.string()),
@@ -184,6 +184,8 @@ export const SceneInputSchema = z.object({
   image: ImageRefSchema.optional(),
   characters: z.array(z.string().trim().min(1)).optional(),
   location: z.string().trim().min(1).nullable().optional(),
+  /** Jméno vypravěče scény; null = bez vypravěče; undefined při vytvoření = převzít ze sousední scény */
+  narrator: z.string().trim().min(1).nullable().optional(),
   ai: z.boolean().optional(),
   aiCharacters: z.array(z.string().trim().min(1)).optional(),
   aiPrompt: z.string().max(5000).optional(),

@@ -233,6 +233,7 @@ export class VaultImporter {
       await links(id, 'characters', chars)
       await links(id, 'aiCharacters', resolve('character', s.aiCharacters).filter(c => chars.includes(c)))
       await links(id, 'location', resolve('location', s.location ? [s.location] : []))
+      await links(id, 'narrator', resolve('narrator', s.narrator ? [s.narrator] : []))
       await links(id, 'contextScenes', resolve('scene', s.contextScenes).filter(x => x !== id))
     }
     for (const t of detail.threads) {
@@ -268,10 +269,9 @@ export class VaultImporter {
       report.entries += entries.length
     }
 
-    // ---- setup (pozadí, aktuální vypravěč) ----
+    // ---- setup (pozadí, pravidla) ----
     await this.target.saveSetup(detail.meta.name, {
       backgroundImage: await backgroundRef(detail, image, this.target, detail.meta.name),
-      narrator: detail.setup.narrator,
       rules: detail.setup.rules,
       rulesSystem: detail.setup.rulesSystem,
       pulseOverride: detail.setup.pulseOverride,

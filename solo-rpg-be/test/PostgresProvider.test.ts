@@ -189,18 +189,33 @@ describe('postavy a scény', () => {
 })
 
 describe('vypravěči a setup', () => {
-  it('aktuální vypravěč: saveSetup s neznámým = 404, smazání aktuálního = null', async () => {
+  it('vypravěč per scéna: neznámý = 404, dědí se do nové scény, smazání ho ze scén odebere; saveSetup řeší jen pozadí a pravidla', async () => {
     const n = await storage.createNarrator(G, { name: 'Vypravěč' })
+    const scene = await storage.createScene(G, { title: 'S vypravěčem' })
+    expect(scene.narrator).toBeNull()
+    await expect(storage.updateScene(G, scene.id, { title: 'S vypravěčem', narrator: 'Nikdo' })).rejects.toBeInstanceOf(NotFoundError)
+    expect((await storage.updateScene(G, scene.id, { title: 'S vypravěčem', narrator: 'vypravěč' })).narrator).toBe('Vypravěč')
+    // PATCH bez `narrator` ho zachová, nová sousední scéna ho zdědí, explicitní null = bez vypravěče
+    expect((await storage.updateScene(G, scene.id, { title: 'S vypravěčem', description: 'x' })).narrator).toBe('Vypravěč')
+    const inherited = await storage.createScene(G, { title: 'Dědí vypravěče' })
+    expect(inherited.narrator).toBe('Vypravěč')
+    const without = await storage.createScene(G, { title: 'Bez vypravěče', narrator: null })
+    expect(without.narrator).toBeNull()
+    // Přejmenování vypravěče se promítne do scén
+    await storage.updateNarrator(G, n.id, { name: 'Vypravěčka' })
+    expect((await storage.listScenes(G)).find(s => s.id === inherited.id)!.narrator).toBe('Vypravěčka')
+
     const noPulse = { tension: null, phase: null }
-    await expect(storage.saveSetup(G, { backgroundImage: null, narrator: 'Nikdo', rules: '', rulesSystem: 'none', pulseOverride: noPulse })).rejects.toBeInstanceOf(NotFoundError)
-    const setup = await storage.saveSetup(G, { backgroundImage: 'https://x/bg.png', narrator: 'vypravěč', rules: 'VtM', rulesSystem: 'vtm5e', pulseOverride: { tension: 7, phase: null } })
-    expect(setup.narrator).toBe('Vypravěč')
+    const setup = await storage.saveSetup(G, { backgroundImage: 'https://x/bg.png', rules: 'VtM', rulesSystem: 'vtm5e', pulseOverride: { tension: 7, phase: null } })
     expect(setup.backgroundImage).toBe('https://x/bg.png')
     expect(setup.rules).toBe('VtM')
     expect(setup.rulesSystem).toBe('vtm5e')
     expect(setup.pulseOverride).toEqual({ tension: 7, phase: null })
+    await storage.saveSetup(G, { backgroundImage: null, rules: '', rulesSystem: 'none', pulseOverride: noPulse })
+
     await storage.deleteNarrator(G, n.id)
-    expect((await storage.getGame(G))!.setup.narrator).toBeNull()
+    expect((await storage.listScenes(G)).filter(s => s.narrator !== null)).toEqual([])
+    for (const s of [scene, inherited, without]) await storage.deleteScene(G, s.id)
   })
 })
 

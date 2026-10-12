@@ -50,7 +50,7 @@ export async function importSceneTranscript(storage: StorageProvider, gameName: 
   const scene = detail.scenes.find(s => s.id === sceneId)
   if (!scene) throw new NotFoundError(`Scéna „${sceneId}“ neexistuje.`)
 
-  const narrator = detail.setup.narrators.find(n => n.name === detail.setup.narrator) ?? FALLBACK_NARRATOR
+  const narrator = detail.setup.narrators.find(n => n.name === scene.narrator) ?? FALLBACK_NARRATOR
   const existing = (await storage.getSceneEntries(gameName, sceneId)) ?? []
 
   // Párovat na všechny postavy hry (přepis může zmiňovat i postavy, které ve scéně zatím nejsou)
@@ -65,7 +65,7 @@ export async function importSceneTranscript(storage: StorageProvider, gameName: 
   }
   if (parsed.length === 0) throw new ValidationError('V textu se nepodařilo najít žádné záznamy.')
 
-  // Hra bez vypravěče → záznamy vypravěče bez jména (starý zápis), ne odkaz na neexistující soubor
+  // Scéna bez vypravěče → záznamy vypravěče bez jména (starý zápis), ne odkaz na neexistující soubor
   const entries = narrator === FALLBACK_NARRATOR
     ? parsed.map(e => (e.characterName === null && e.narratorName === FALLBACK_NARRATOR.name ? { ...e, narratorName: null } : e))
     : parsed

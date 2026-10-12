@@ -40,8 +40,8 @@ export async function draftSceneReply(
   const scene = detail.scenes.find(s => s.id === sceneId)
   if (!scene) throw new NotFoundError(`Scéna „${sceneId}“ neexistuje.`)
 
-  const narrator = detail.setup.narrators.find(n => n.name === detail.setup.narrator) ?? null
-  if (!narrator) throw new AiError(400, 'Hra nemá aktuálního vypravěče – vyber ho přes 🎭.')
+  const narrator = detail.setup.narrators.find(n => n.name === scene.narrator) ?? null
+  if (!narrator) throw new AiError(400, 'Scéna nemá vypravěče – vyber ho přes 🎭.')
 
   const inScene = detail.setup.characters.filter(c => scene.characters.includes(c.name))
   const aiSet = new Set(scene.aiCharacters)

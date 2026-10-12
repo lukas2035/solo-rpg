@@ -34,8 +34,6 @@ export const games = pgTable(
     /** Pozadí hry: buď lokální asset, nebo vzdálená URL (nejvýš jedno) */
     backgroundAssetId: text('background_asset_id'),
     backgroundUrl: text('background_url'),
-    /** Aktuální vypravěč (entita kind=narrator); FK se řeší aplikačně, aby šlo smazat vypravěče bez cyklu FK */
-    currentNarratorId: text('current_narrator_id'),
     ...timestamps,
   },
   table => [uniqueIndex('games_tenant_name_idx').on(table.tenantId, sql`lower(${table.name})`)],

@@ -377,13 +377,10 @@ export class ObsidianVaultProvider implements StorageProvider {
   }
 
   private setupFromGameFile(file: GameFile, characters: Character[], narrators: Narrator[]): GameSetup {
-    const narratorName = parseLink(file.data.narrator)
     return {
       characters,
       narrators,
       backgroundImage: stringOrNull(file.data.background),
-      // Aktuální vypravěč musí existovat jako soubor; jinak žádný
-      narrator: narrators.find(n => nameKey(n.name) === nameKey(narratorName ?? ''))?.name ?? null,
       rules: splitGameBody(file.body).rules,
       rulesSystem: RulesSystemSchema.catch('none').parse(file.data.rulesSystem ?? 'none'),
       pulseOverride: PulseOverrideSchema.catch({ tension: null, phase: null }).parse({
@@ -431,7 +428,6 @@ export class ObsidianVaultProvider implements StorageProvider {
         createdAt: now,
         updatedAt: now,
         background: null,
-        narrator: null,
       },
       body: `# ${trimmed}\n\nPoznámky ke hře (volný text, aplikace jej nemění).\n`,
     })
@@ -790,12 +786,22 @@ export class ObsidianVaultProvider implements StorageProvider {
     return true
   }
 
-  /** Po přejmenování vypravěče přepsat hlavičky mluvčího ve všech scénách. */
+  /** Po přejmenování vypravěče přepsat hlavičky mluvčího a frontmatter `narrator` ve všech scénách. */
   private async renameNarratorInScenes(dir: string, oldName: string, newName: string): Promise<void> {
     for (const scene of await this.readScenes(dir)) {
       const body = renameSpeaker(scene.body, oldName, newName, newName)
-      if (body === null) continue
-      await writeFileAtomic(path.join(dir, SCENE_DIR, scene.fileName), matter.stringify(body, scene.data))
+      const linked = nameKey(parseLink(scene.data.narrator) ?? '') === nameKey(oldName)
+      if (body === null && !linked) continue
+      const data = linked ? { ...scene.data, narrator: `[[${newName}]]` } : scene.data
+      await writeFileAtomic(path.join(dir, SCENE_DIR, scene.fileName), matter.stringify(body ?? scene.body, data))
+    }
+  }
+
+  /** Po smazání vypravěče ho odebrat ze scén, které ho měly (explicitní `narrator: null` = scéna bez vypravěče). */
+  private async clearNarratorInScenes(dir: string, name: string): Promise<void> {
+    for (const scene of await this.readScenes(dir)) {
+      if (nameKey(scene.meta.narrator ?? '') !== nameKey(name)) continue
+      await writeFileAtomic(path.join(dir, SCENE_DIR, scene.fileName), matter.stringify(scene.body, { ...scene.data, narrator: null }))
     }
   }
 
@@ -859,6 +865,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     if (name !== previous.name) {
       await this.renameNarratorInScenes(dir, previous.name, name)
       await this.touchGame(dir, file => {
+        // Legacy klíč hry (fallback pro scény bez vlastního `narrator`) držet v souladu
         if (parseLink(file.data.narrator) === previous.name) file.data.narrator = `[[${name}]]`
       })
     } else {
@@ -874,22 +881,21 @@ export class ObsidianVaultProvider implements StorageProvider {
     if (!current) throw new NotFoundError(`Vypravěč „${narratorId}“ neexistuje.`)
     await removeIfExists(path.join(dir, NARRATOR_DIR, current.fileName))
     if (current.narrator.image) await this.removeNarratorPortraitIfUnused(dir, current.narrator.image, existing, narratorId)
-    // Smazaný vypravěč nemůže zůstat aktuálním
+    // Smazaný vypravěč nemůže zůstat vypravěčem scén (ani legacy fallbackem v game.md)
+    await this.clearNarratorInScenes(dir, current.narrator.name)
     await this.touchGame(dir, file => {
       if (parseLink(file.data.narrator) === current.narrator.name) file.data.narrator = null
     })
   }
 
-  // ---------- setup (pozadí, aktuální vypravěč) ----------
+  // ---------- setup (pozadí, pravidla) ----------
 
   async saveSetup(name: string, settings: GameSettings): Promise<GameSetup> {
     const dir = await this.requireGameDir(name)
     const narrators = await this.readNarrators(dir)
-    const narrator = settings.narrator ? narrators.find(n => nameKey(n.narrator.name) === nameKey(settings.narrator!)) : undefined
-    if (settings.narrator && !narrator) throw new NotFoundError(`Vypravěč „${settings.narrator}“ neexistuje.`)
     await this.touchGame(dir, file => {
       file.data.background = settings.backgroundImage
-      file.data.narrator = narrator ? `[[${narrator.narrator.name}]]` : null
+      // Vypravěč je dnes per scéna – `narrator` v game.md zůstává jen jako fallback pro staré scény bez vlastního klíče
       // Přepínač pravidel pro AI a ztmavení pozadí jsou dnes per scéna – staré klíče hry smazat
       delete file.data.rulesInAi
       delete file.data.brightBackground
@@ -995,6 +1001,9 @@ export class ObsidianVaultProvider implements StorageProvider {
     // Starší vault měl přepínač pravidel pro AI a jas pozadí u hry (`rulesInAi`, `brightBackground` v game.md) – scény bez vlastního klíče je převezmou
     let gameRulesInAi: boolean | null = null
     let gameDarkBackground: boolean | null = null
+    // Starší vault měl vypravěče u hry (`narrator` v game.md) – scény bez klíče `narrator` ho převezmou (explicitní null = bez vypravěče)
+    let gameNarrator: string | null | undefined
+    let narratorNames: string[] | null = null
     for (const [index, fileName] of files.entries()) {
       const raw = await readTextIfExists(path.join(sceneDir, fileName))
       if (raw === null) continue
@@ -1003,6 +1012,13 @@ export class ObsidianVaultProvider implements StorageProvider {
       if (data.characters === undefined && allCharacterNames === null) {
         allCharacterNames = (await this.readCharacters(dir)).map(c => c.character.name)
       }
+      if (data.narrator === undefined && gameNarrator === undefined) {
+        gameNarrator = parseLink((await this.readGameFile(dir))?.data.narrator)
+      }
+      narratorNames ??= (await this.readNarrators(dir)).map(n => n.narrator.name)
+      const narratorRaw = data.narrator === undefined ? gameNarrator : parseLink(data.narrator)
+      // Vypravěč scény musí existovat jako soubor (kanonický zápis jména); jinak žádný
+      const narrator = narratorRaw ? (narratorNames.find(n => nameKey(n) === nameKey(narratorRaw)) ?? null) : null
       if (typeof data.rulesInAi !== 'boolean' && gameRulesInAi === null) {
         gameRulesInAi = (await this.readGameFile(dir))?.data.rulesInAi === true
       }
@@ -1031,6 +1047,7 @@ export class ObsidianVaultProvider implements StorageProvider {
           image: stringOrNull(data.image),
           characters: data.characters === undefined ? (allCharacterNames ?? []) : parseCharacterLinks(data.characters),
           location: parseLink(data.location),
+          narrator,
           ai: data.ai === true,
           aiCharacters: parseCharacterLinks(data.aiCharacters),
           aiPrompt: stringOrNull(data.aiPrompt) ?? '',
@@ -1071,6 +1088,14 @@ export class ObsidianVaultProvider implements StorageProvider {
     return result
   }
 
+  /** Jméno vypravěče scény podle souboru (kanonický zápis); neexistující vypravěč = chyba */
+  private async normalizeNarratorRef(dir: string, name: string | null): Promise<string | null> {
+    if (!name) return null
+    const match = (await this.readNarrators(dir)).find(n => nameKey(n.narrator.name) === nameKey(name))
+    if (!match) throw new NotFoundError(`Vypravěč „${name}“ neexistuje.`)
+    return match.narrator.name
+  }
+
   private async writeSceneFile(dir: string, meta: SceneMeta, entriesBody: string, extra: Frontmatter): Promise<void> {
     const data: Frontmatter = {
       ...extra,
@@ -1080,6 +1105,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       image: meta.image,
       characters: toCharacterLinks(meta.characters),
       location: meta.location ? `[[${meta.location}]]` : null,
+      narrator: meta.narrator ? `[[${meta.narrator}]]` : null,
       ai: meta.ai,
       aiCharacters: toCharacterLinks(meta.aiCharacters),
       aiPrompt: meta.aiPrompt.trim() ? meta.aiPrompt.trim() : null,
@@ -1153,6 +1179,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     const rulesInAi = input.rulesInAi ?? neighbor?.meta.rulesInAi ?? false
     const darkBackground = input.darkBackground ?? neighbor?.meta.darkBackground ?? false
     const aiReview = input.aiReview ?? neighbor?.meta.aiReview ?? 'panel'
+    const narrator = await this.normalizeNarratorRef(dir, input.narrator === undefined ? (neighbor?.meta.narrator ?? null) : input.narrator)
     const aiCharacters = (input.aiCharacters ?? neighbor?.meta.aiCharacters ?? []).filter(n => characters.includes(n))
     const now = Date.now()
     const meta: SceneMeta = {
@@ -1167,6 +1194,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       image: input.image ?? null,
       characters,
       location: await this.normalizeLocationRef(dir, input.location ?? null),
+      narrator,
       ai,
       aiMode,
       rulesInAi,
@@ -1227,6 +1255,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       image,
       characters,
       location: input.location === undefined ? previous.location : await this.normalizeLocationRef(dir, input.location),
+      narrator: input.narrator === undefined ? previous.narrator : await this.normalizeNarratorRef(dir, input.narrator),
       ai: input.ai ?? previous.ai,
       aiMode: input.aiMode ?? previous.aiMode,
       rulesInAi: input.rulesInAi ?? previous.rulesInAi,

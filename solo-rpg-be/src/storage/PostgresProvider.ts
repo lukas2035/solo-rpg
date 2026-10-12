@@ -153,6 +153,14 @@ class Snapshot {
     return this.byName(kind, name)?.row.id ?? null
   }
 
+  /** Jako `resolveOne`, ale neznámé jméno = 404 (vypravěč scény musí existovat) */
+  requireOne(kind: EntityKind, name: string | null): string | null {
+    if (!name) return null
+    const match = this.byName(kind, name)
+    if (!match) throw new NotFoundError(`${KIND_LABEL[kind]} „${name}“ neexistuje.`)
+    return match.row.id
+  }
+
   /**
    * Nadřazená entita stejného druhu (frakce/quest/lokace): musí existovat, nesmí být entita sama
    * a nesmí vzniknout cyklus. Vrací id rodiče nebo null.
@@ -386,6 +394,7 @@ export class PostgresProvider implements StorageProvider {
       image: imageRef(e.row, paths),
       characters: snap.manyNames(e, 'characters'),
       location: snap.oneName(e, 'location'),
+      narrator: snap.oneName(e, 'narrator'),
       ai: e.fields.ai,
       aiCharacters: snap.manyNames(e, 'aiCharacters'),
       aiPrompt: e.fields.aiPrompt,
@@ -521,12 +530,10 @@ export class PostgresProvider implements StorageProvider {
 
   private toSetup(snap: Snapshot, paths: Map<string, string>): GameSetup {
     const g = snap.game
-    const narrator = g.currentNarratorId ? snap.get('narrator', g.currentNarratorId) : undefined
     return {
       characters: snap.list('character').map(c => this.toCharacter(c, paths)),
       narrators: snap.list('narrator').map(n => this.toNarrator(n, paths)),
       backgroundImage: g.backgroundUrl ?? (g.backgroundAssetId ? (paths.get(g.backgroundAssetId) ?? null) : null),
-      narrator: narrator?.row.name ?? null,
       rules: g.rules,
       rulesSystem: RulesSystemSchema.catch('none').parse(g.rulesSystem),
       pulseOverride: PulseOverrideSchema.catch({ tension: null, phase: null }).parse(g.pulseOverride),
@@ -652,15 +659,12 @@ export class PostgresProvider implements StorageProvider {
 
   async saveSetup(name: string, settings: GameSettings): Promise<GameSetup> {
     return this.mutate(name, async (tx, snap, paths) => {
-      const narrator = settings.narrator ? snap.byName('narrator', settings.narrator) : undefined
-      if (settings.narrator && !narrator) throw new NotFoundError(`Vypravěč „${settings.narrator}“ neexistuje.`)
       const bg = this.imageColumns(settings.backgroundImage, paths, { imageAssetId: snap.game.backgroundAssetId, imageUrl: snap.game.backgroundUrl })
       const [row] = await tx
         .update(games)
         .set({
           backgroundAssetId: bg.imageAssetId,
           backgroundUrl: bg.imageUrl,
-          currentNarratorId: narrator?.row.id ?? null,
           rules: settings.rules,
           rulesSystem: settings.rulesSystem,
           pulseOverride: settings.pulseOverride,
@@ -746,7 +750,7 @@ export class PostgresProvider implements StorageProvider {
   async deleteNarrator(gameName: string, narratorId: string): Promise<void> {
     await this.mutate(gameName, async (tx, snap) => {
       snap.require('narrator', narratorId)
-      if (snap.game.currentNarratorId === narratorId) await tx.update(games).set({ currentNarratorId: null }).where(eq(games.id, snap.game.id))
+      // Vazby `narrator` ze scén zmizí kaskádou (links.to_id ON DELETE CASCADE)
       await tx.delete(entities).where(eq(entities.id, narratorId))
     })
   }
@@ -789,6 +793,8 @@ export class PostgresProvider implements StorageProvider {
       // Ztmavení pozadí se také dědí; první scéna má původní jas
       const darkBackground = input.darkBackground ?? neighbor?.fields.darkBackground ?? false
       const aiReview = input.aiReview ?? neighbor?.fields.aiReview ?? 'panel'
+      // Vypravěč scény se dědí ze sousední; explicitní null = scéna bez vypravěče
+      const narratorId = input.narrator !== undefined ? snap.requireOne('narrator', input.narrator) : neighbor ? (snap.one(neighbor, 'narrator')?.row.id ?? null) : null
       const aiCandidates = input.aiCharacters ? snap.resolveMany('character', input.aiCharacters) : neighbor ? snap.many(neighbor, 'aiCharacters').map(c => c.row.id) : []
       const aiCharacterIds = aiCandidates.filter(id => characterIds.includes(id))
 
@@ -802,6 +808,7 @@ export class PostgresProvider implements StorageProvider {
       await this.setLinks(tx, snap.game.id, id, 'characters', characterIds)
       await this.setLinks(tx, snap.game.id, id, 'aiCharacters', aiCharacterIds)
       await this.setLink(tx, snap.game.id, id, 'location', snap.resolveOne('location', input.location))
+      await this.setLink(tx, snap.game.id, id, 'narrator', narratorId)
       await this.setLinks(tx, snap.game.id, id, 'contextScenes', snap.resolveMany('scene', input.contextScenes, id))
 
       const after = await this.loadSnapshot(tx, snap.game)
@@ -849,6 +856,7 @@ export class PostgresProvider implements StorageProvider {
       await this.setLinks(tx, snap.game.id, sceneId, 'characters', characterIds)
       await this.setLinks(tx, snap.game.id, sceneId, 'aiCharacters', aiCharacterIds)
       if (input.location !== undefined) await this.setLink(tx, snap.game.id, sceneId, 'location', snap.resolveOne('location', input.location))
+      if (input.narrator !== undefined) await this.setLink(tx, snap.game.id, sceneId, 'narrator', snap.requireOne('narrator', input.narrator))
       if (input.contextScenes) await this.setLinks(tx, snap.game.id, sceneId, 'contextScenes', snap.resolveMany('scene', input.contextScenes, sceneId))
 
       // Přesun na jinou pozici: přeskládat a přečíslovat
@@ -1437,10 +1445,6 @@ export class PostgresProvider implements StorageProvider {
       updatedAt: new Date(data.updatedAt),
     })
     return id
-  }
-
-  async setCurrentNarrator(gameId: string, narratorId: string | null): Promise<void> {
-    await this.db.update(games).set({ currentNarratorId: narratorId }).where(eq(games.id, gameId))
   }
 
   /** Uloží asset pro hru podle id (import) a vrátí sloupce obrázku + veřejnou cestu */
