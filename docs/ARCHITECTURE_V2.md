@@ -117,12 +117,19 @@ links     ( id, game_id, from_id, to_id, kind, note, created_at )      -- generi
 events    ( id, tenant_id, game_id, scene_id, kind, payload jsonb, created_at )  -- neměnný log
 assets    ( … viz 2.3 )
 scene_entries ( id, game_id, scene_id, order, speaker_id, text, markdown bool, created_at )  -- repliky
+scene_documents ( scene_id PK, game_id, doc jsonb, updated_at )  -- próza: text scény v režimu „textový editor“
 ```
 - **Sloupec** = to, podle čeho se filtruje/joinuje nebo je společné všem. **JSONB** = per‑typ (stance, relations, clock, objectives…).
 - Nová entita = nový `kind` + Zod schéma, **žádná DB migrace**. Zrušení = smazat schéma + řádky. Zásadní změna = nová verze schématu.
 - Výhled: `pgvector` sloupec/tabulka pro paměť až když graf+recency nestačí. `tenant_id` zatím konstanta.
 - Proč ne per‑typ tabulky: každá změna = migrace + ORM typ + repository; polymorfní FK pro hrany. Proč ne NoSQL: relace, event log,
   pgvector a jeden backup chceme v jedné DB; JSONB dává totéž „hoď tam dokument“.
+- **Režim scény** (`fields.mode`): `play` = repliky v `scene_entries` + AI vypravěč; `prose` = souvislý text psaný jako v Notionu
+  (TipTap/ProseMirror), uložený jako JSON strom v `scene_documents.doc` (`ProseDoc` ve shared). Obrázky v textu nesou v `attrs.src`
+  odkaz do vaultu (`assets/<id>.<ext>`, kind `illustration`) a `attrs.layout` (`full` | `left` | `right` – obtékání textem); na URL se
+  překládají až ve FE. Vzhled prózy je per scéna (`proseTexture` – kind `texture`, opakovaná pod textem; `proseTextColor` light/dark)
+  a nová scéna ho dědí od předchozí. Do Obsidian vaultu se próza exportuje jednosměrně jako markdown (`vault/proseMarkdown.ts`).
+  API: `GET/PUT /api/games/:game/scenes/:scene/prose`.
 
 ### 3.2 Entita (shared typ, orientačně)
 ```ts

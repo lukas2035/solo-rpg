@@ -23,9 +23,10 @@ import {
   AiSuggestionRejectRequestSchema,
   BriefPatchSchema,
   BriefRequestSchema,
+  ProseDocSchema,
   isValidGameName,
 } from '@solo-rpg/shared'
-import type { AiSuggestion, AiSuggestionAcceptResponse, AiSuggestionState, DirectorState, NarrativeBrief, RulesPromptResponse, SceneContextSuggestionResponse } from '@solo-rpg/shared'
+import type { SceneProse, AiSuggestion, AiSuggestionAcceptResponse, AiSuggestionState, DirectorState, NarrativeBrief, RulesPromptResponse, SceneContextSuggestionResponse } from '@solo-rpg/shared'
 import { ConflictError, NotFoundError, ValidationError } from '../vault/StorageProvider.js'
 import type { VaultManager } from '../vault/VaultManager.js'
 import { backupGameFolder } from '../vault/backup.js'
@@ -299,6 +300,21 @@ export async function registerGameRoutes(app: FastifyInstance, vault: VaultManag
     const { game, scene } = SceneParams.parse(request.params)
     await vault.storage.deleteScene(game, scene)
     suggestions.forget(game, scene)
+    return reply.code(204).send()
+  })
+
+  // ---------- próza (textový editor) ----------
+
+  /** Dokument prózy (TipTap JSON); `doc: null` = scéna zatím nic nemá */
+  app.get('/api/games/:game/scenes/:scene/prose', async (request): Promise<SceneProse> => {
+    const { game, scene } = SceneParams.parse(request.params)
+    return { doc: await vault.storage.getSceneDocument(game, scene) }
+  })
+
+  app.put('/api/games/:game/scenes/:scene/prose', async (request, reply) => {
+    const { game, scene } = SceneParams.parse(request.params)
+    const { doc } = z.object({ doc: ProseDocSchema }).parse(request.body)
+    await vault.storage.saveSceneDocument(game, scene, doc)
     return reply.code(204).send()
   })
 

@@ -1,10 +1,11 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { AiReview, AiSuggestion, BriefPatch, Character, CharacterInput, DirectorState, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, PulseOverride, Quest, QuestInput, QuestProposal, QuestStatus, RollOutcome, RulesSystem, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
+import type { AiReview, AiSuggestion, BriefPatch, Character, CharacterInput, DirectorState, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, ProseDoc, ProseTextColor, PulseOverride, Quest, QuestInput, QuestProposal, QuestStatus, RollOutcome, RulesSystem, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
 import { OPEN_THREAD_STATUSES, locationPath } from '@solo-rpg/shared'
 import CharacterBar from '../components/CharacterBar'
 import StoryPanel from '../components/StoryPanel'
 import InputArea from '../components/InputArea'
+import ProseEditor from '../components/ProseEditor'
 import PortraitModal from '../components/PortraitModal'
 import FloatingPortrait from '../components/FloatingPortrait'
 import NarratorPickerModal from '../components/NarratorPickerModal'
@@ -177,6 +178,45 @@ export default function StoryEditor() {
   const currentScene = useMemo(() => scenes.find(s => s.id === currentSceneId) ?? null, [scenes, currentSceneId])
   /** Ztmavené pozadí aktuální scény (per scéna, dědí se do nové; false = původní jas obrázku) */
   const darkBackground = currentScene?.darkBackground ?? false
+  /** Scéna v režimu prózy: místo replik a AI se zobrazí textový editor */
+  const isProse = currentScene?.mode === 'prose'
+  // Dokument prózy aktuální scény (načítá se při přepnutí na prózovou scénu)
+  const [proseDoc, setProseDoc] = useState<{ sceneId: string; doc: ProseDoc | null } | null>(null)
+  useEffect(() => {
+    if (!isProse || !currentSceneId) return
+    if (proseDoc?.sceneId === currentSceneId) return
+    let cancelled = false
+    api.getSceneProse(gameName, currentSceneId)
+      .then(result => { if (!cancelled) setProseDoc({ sceneId: currentSceneId, doc: result.doc }) })
+      .catch(error => { if (!cancelled) setLoadError(error instanceof Error ? error.message : 'Načtení textu scény selhalo.') })
+    return () => { cancelled = true }
+  }, [isProse, currentSceneId, gameName, proseDoc?.sceneId])
+
+  const handleProseSave = useCallback(async (sceneId: string, doc: ProseDoc) => {
+    await api.saveSceneProse(gameName, sceneId, doc)
+    setProseDoc(prev => (prev?.sceneId === sceneId ? { sceneId, doc } : prev))
+  }, [gameName])
+
+  const handleProseUploadImage = useCallback(
+    (image: File | string) => api.storeImage(gameName, 'illustration', image, currentScene?.title),
+    [gameName, currentScene?.title]
+  )
+
+  /** Uloží vzhled prózy (textura / barva písma) do scény */
+  const handleProseAppearance = async (patch: { proseTexture?: ImageRef; proseTextColor?: ProseTextColor }) => {
+    if (!currentScene) return
+    try {
+      const saved = await api.updateScene(gameName, currentScene.id, { title: currentScene.title, ...patch })
+      setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Vzhled scény se nepodařilo uložit.')
+    }
+  }
+  const handleProseTextureChange = async (image: File | string | null) => {
+    if (!currentScene) return
+    const ref = image === null ? null : await api.storeImage(gameName, 'texture', image, currentScene.title)
+    await handleProseAppearance({ proseTexture: ref })
+  }
   // V pásu a při psaní jen postavy aktuální scény (+ dočasní mluvčí, kteří v ní mluví); AI postavy označené
   const displayCharacters = useMemo(() => {
     const inScene = new Set(currentScene?.characters ?? [])
@@ -1159,16 +1199,28 @@ export default function StoryEditor() {
   /** Submit dialogu scény: vytvoří/aktualizuje soubor scény a uloží její obrázek pod jejím názvem */
   const handleSceneSubmit = async (values: SceneFormValues) => {
     const editing = editingScene
-    const base: SceneInput = { title: values.title, description: values.description, summary: values.summary, characters: values.characters, location: values.location, order: values.order, contextScenes: values.contextScenes }
+    const base: SceneInput = {
+      title: values.title,
+      description: values.description,
+      summary: values.summary,
+      characters: values.characters,
+      location: values.location,
+      order: values.order,
+      contextScenes: values.contextScenes,
+      mode: values.mode,
+      proseTextColor: values.proseTextColor,
+    }
 
-    // Nejdřív scéna (kontrola duplicitního názvu), teprve pak obrázek pojmenovaný podle ní
+    // Nejdřív scéna (kontrola duplicitního názvu), teprve pak obrázky pojmenované podle ní
     let saved = editing
-      ? await api.updateScene(gameName, editing.id, { ...base, image: values.image === null ? null : undefined })
+      ? await api.updateScene(gameName, editing.id, { ...base, image: values.image === null ? null : undefined, proseTexture: values.proseTexture === null ? null : undefined })
       : await api.createScene(gameName, base)
 
-    if (values.image) {
-      const ref = await api.storeImage(gameName, 'scene', values.image, saved.title)
-      saved = await api.updateScene(gameName, saved.id, { ...base, image: ref })
+    if (values.image || values.proseTexture) {
+      const patch: SceneInput = { ...base }
+      if (values.image) patch.image = await api.storeImage(gameName, 'scene', values.image, saved.title)
+      if (values.proseTexture) patch.proseTexture = await api.storeImage(gameName, 'texture', values.proseTexture, saved.title)
+      saved = await api.updateScene(gameName, saved.id, patch)
     }
 
     // Vložení/přesun přečísluje i ostatní scény → načíst aktuální seznam z BE
@@ -1608,6 +1660,20 @@ export default function StoryEditor() {
       <div className="flex-1 flex overflow-hidden relative">
         {/* Obsah */}
         <div className="relative flex-1 min-w-0 flex flex-col">
+          {isProse && currentScene ? (
+            <ProseEditor
+              game={gameName}
+              sceneId={currentScene.id}
+              doc={proseDoc?.sceneId === currentScene.id ? proseDoc.doc : undefined}
+              texture={currentScene.proseTexture}
+              textColor={currentScene.proseTextColor}
+              onSave={handleProseSave}
+              onUploadImage={handleProseUploadImage}
+              onTextureChange={handleProseTextureChange}
+              onTextColorChange={color => handleProseAppearance({ proseTextColor: color })}
+            />
+          ) : (
+          <>
           <StoryPanel
             entries={displayEntries}
             allEntries={storyEntries}
@@ -1701,6 +1767,8 @@ export default function StoryEditor() {
             darkBackground={darkBackground}
             onDarkBackgroundChange={currentScene ? value => void handleDarkBackgroundChange(value) : undefined}
           />
+          </>
+          )}
         </div>
 
         {/* Postranní panel kampaně: dějové nitě | frakce | questy | lokace | lore */}
@@ -1974,6 +2042,8 @@ export default function StoryEditor() {
           scene={editingScene}
           scenes={scenes}
           image={editingScene ? assetUrl(gameName, editingScene.image, assetVersion) : null}
+          proseTexture={assetUrl(gameName, (editingScene ?? scenes[scenes.length - 1])?.proseTexture ?? null, assetVersion)}
+          defaultMode={scenes.length > 0 ? scenes[scenes.length - 1].mode : 'play'}
           defaultTitle={`Scéna ${scenes.length + 1}`}
           defaultCharacters={scenes.length > 0 ? scenes[scenes.length - 1].characters : sceneCharacterOptions.map(c => c.name)}
           defaultLocation={scenes.length > 0 ? scenes[scenes.length - 1].location : null}

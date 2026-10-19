@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { SceneMeta, StoryLocation } from '@solo-rpg/shared'
+import type { ProseTextColor, SceneMeta, SceneMode, StoryLocation } from '@solo-rpg/shared'
 import ImageDropField from './ImageDropField'
 import CharacterModal, { type CharacterFormValues } from './CharacterModal'
 import { inputClass, selectAll } from '../utils/forms'
@@ -20,6 +20,12 @@ export interface SceneFormValues {
   order: number
   /** Názvy scén, jejichž shrnutí dostane AI vypravěč jako kontext (prázdné = všechny předchozí) */
   contextScenes: string[]
+  /** Režim scény: hraná (repliky postav) nebo próza (textový editor) */
+  mode: SceneMode
+  /** Textura pod textem prózy; stejná sémantika jako `image` */
+  proseTexture: string | null | undefined
+  /** Barva písma prózy (světlé pro tmavé pozadí, tmavé pro světlou texturu) */
+  proseTextColor: ProseTextColor
 }
 
 /** Postava hry nabízená v checklistu */
@@ -37,6 +43,10 @@ interface SceneModalProps {
   scenes: SceneMeta[]
   /** Aktuální obrázek scény jako URL použitelná v <img> */
   image: string | null
+  /** Aktuální textura prózy jako URL použitelná v <img> */
+  proseTexture?: string | null
+  /** Výchozí režim nové scény (typicky režim poslední scény) */
+  defaultMode?: SceneMode
   /** Navržený název pro novou scénu */
   defaultTitle?: string
   /** Předvybrané postavy pro novou scénu (typicky postavy poslední scény) */
@@ -62,13 +72,18 @@ interface SceneModalProps {
 }
 
 /** Dialog pro vytvoření a úpravu scény (název, pozice, obrázek = pozadí scény, markdown popis, shrnutí děje, přítomné postavy) */
-export default function SceneModal({ scene, scenes, image, defaultTitle = '', defaultCharacters = [], defaultLocation = null, allCharacters, allLocations = [], required = false, onSubmit, onCreateCharacter, onSummarize, onSuggestContextScenes, onDelete, onClose }: SceneModalProps) {
+export default function SceneModal({ scene, scenes, image, proseTexture = null, defaultMode = 'play', defaultTitle = '', defaultCharacters = [], defaultLocation = null, allCharacters, allLocations = [], required = false, onSubmit, onCreateCharacter, onSummarize, onSuggestContextScenes, onDelete, onClose }: SceneModalProps) {
   const isEdit = scene !== null
   const sorted = [...scenes].sort((a, b) => a.order - b.order)
   // Pozice podle indexu v seřazeném seznamu (soubory ve vaultu mohou mít mezery v číslování)
   const currentPosition = scene ? Math.max(0, sorted.findIndex(s => s.id === scene.id)) + 1 : sorted.length + 1
   const positionCount = isEdit ? sorted.length : sorted.length + 1
   const [title, setTitle] = useState(scene?.title ?? defaultTitle)
+  const [mode, setMode] = useState<SceneMode>(scene?.mode ?? defaultMode)
+  const [proseTextColor, setProseTextColor] = useState<ProseTextColor>(scene?.proseTextColor ?? 'light')
+  const [editTexture, setEditTexture] = useState<string | null>(proseTexture)
+  const [textureChanged, setTextureChanged] = useState(false)
+  const isProse = mode === 'prose'
   const [order, setOrder] = useState(currentPosition)
   const [description, setDescription] = useState(scene?.description ?? '')
   const [summary, setSummary] = useState(scene?.summary ?? '')
@@ -161,6 +176,9 @@ export default function SceneModal({ scene, scenes, image, defaultTitle = '', de
         location: location && allLocations.some(l => l.title === location) ? location : null,
         order,
         contextScenes: contextSelected.map(s => s.title),
+        mode,
+        proseTexture: textureChanged ? editTexture : undefined,
+        proseTextColor,
       })
       onClose()
     } catch (err) {
@@ -212,6 +230,26 @@ export default function SceneModal({ scene, scenes, image, defaultTitle = '', de
                 className={inputClass}
               />
             </label>
+            <fieldset className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">
+              <legend className="mb-1">Režim scény</legend>
+              <div className="flex gap-2">
+                {([
+                  ['play', '🎲 Hra', 'Repliky postav, hody kostkou a AI vypravěč'],
+                  ['prose', '✍️ Próza', 'Textový editor – souvislý text s nadpisy a obrázky, bez postav'],
+                ] as const).map(([value, label, hint]) => (
+                  <label
+                    key={value}
+                    title={hint}
+                    className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border cursor-pointer select-none transition-colors ${
+                      mode === value ? 'border-[var(--accent)] bg-[var(--accent)]/15' : 'border-[var(--accent)]/30 opacity-70 hover:opacity-100'
+                    }`}
+                  >
+                    <input type="radio" name="scene-mode" value={value} checked={mode === value} onChange={() => setMode(value)} className="accent-[var(--accent)]" />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
             {positionCount > 1 && (
               <label className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">
                 Pozice v příběhu <span className="opacity-60">(následující scény se přečíslují)</span>
@@ -259,13 +297,31 @@ export default function SceneModal({ scene, scenes, image, defaultTitle = '', de
             </label>
           </div>
 
-          <ImageDropField
-            label="Obrázek scény (pozadí)"
-            value={editImage}
-            onChange={handleImageChange}
-            removeLabel="Odebrat obrázek"
-            className="sm:w-56"
-          />
+          <div className="flex flex-col gap-3 sm:w-56">
+            <ImageDropField
+              label="Obrázek scény (pozadí)"
+              value={editImage}
+              onChange={handleImageChange}
+              removeLabel="Odebrat obrázek"
+            />
+            {isProse && (
+              <>
+                <ImageDropField
+                  label="Textura pod textem (opakuje se)"
+                  value={editTexture}
+                  onChange={(next) => { setEditTexture(next); setTextureChanged(true) }}
+                  removeLabel="Odebrat texturu"
+                />
+                <label className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">
+                  Barva písma
+                  <select value={proseTextColor} onChange={(e) => setProseTextColor(e.target.value as ProseTextColor)} className={inputClass}>
+                    <option value="light">Světlé (na tmavé pozadí)</option>
+                    <option value="dark">Tmavé (na světlou texturu)</option>
+                  </select>
+                </label>
+              </>
+            )}
+          </div>
         </div>
 
         <label className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">
@@ -305,6 +361,7 @@ export default function SceneModal({ scene, scenes, image, defaultTitle = '', de
           />
         </label>
 
+        {!isProse && (
         <fieldset className="flex flex-col gap-2 text-left text-sm text-[var(--text)]">
           <legend className="mb-1 flex items-center gap-3 w-full">
             <span>
@@ -349,8 +406,9 @@ export default function SceneModal({ scene, scenes, image, defaultTitle = '', de
             </div>
           )}
         </fieldset>
+        )}
 
-        {otherScenes.length > 0 && (
+        {!isProse && otherScenes.length > 0 && (
           <fieldset className="flex flex-col gap-2 text-left text-sm text-[var(--text)]">
             <legend className="mb-1 flex items-center gap-3 w-full">
               <span>

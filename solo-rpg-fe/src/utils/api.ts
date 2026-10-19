@@ -16,8 +16,10 @@ import type {
   ImageRef,
   Narrator,
   NarratorInput,
+  ProseDoc,
   SceneInput,
   SceneMeta,
+  SceneProse,
   SceneSummaryResponse,
   SceneContextSuggestionResponse,
   SceneImportRequest,
@@ -121,6 +123,10 @@ export const pickSaveFile = (options: { title?: string; fileName: string; initia
 /** Zabalí celou složku hry do zipu na dané absolutní cestě */
 export const backupGame = (game: string, targetPath: string) =>
   request<BackupGameResponse>('POST', `${gamePath(game)}/backup`, { targetPath })
+
+/** Vyexportuje hru do Obsidian vaultu (aktuální exportní složka); vrací cestu ke složce hry */
+export const exportGameToVault = (game: string) =>
+  request<{ path: string }>('POST', `${gamePath(game)}/export`).then(r => r.path)
 
 // ---------- hry ----------
 
@@ -227,6 +233,12 @@ export const saveSceneEntries = (game: string, sceneId: string, entries: StoryEn
   request<void>('PUT', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}`, entries)
 export const deleteScene = (game: string, sceneId: string) =>
   request<void>('DELETE', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}`)
+
+/** Próza (textový editor): dokument TipTap JSON, `doc: null` = zatím prázdná scéna */
+export const getSceneProse = (game: string, sceneId: string) =>
+  request<SceneProse>('GET', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/prose`)
+export const saveSceneProse = (game: string, sceneId: string, doc: ProseDoc) =>
+  request<void>('PUT', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/prose`, { doc } satisfies SceneProse)
 
 /** Import odehraného přepisu (`**Jméno**: text`) – BE ho rozdělí na záznamy podle mluvčích a připíše na konec scény */
 export const importSceneTranscript = (game: string, sceneId: string, text: string, resolutions?: Record<string, string>) =>

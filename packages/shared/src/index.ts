@@ -128,6 +128,55 @@ export type AiMode = z.infer<typeof AiModeSchema>
 export const AiReviewSchema = z.enum(['panel', 'inline', 'auto'])
 export type AiReview = z.infer<typeof AiReviewSchema>
 
+/**
+ * Režim scény:
+ * - `play` – hraná scéna: repliky postav a vypravěče, AI vypravěč, kostky
+ * - `prose` – próza: scéna je souvislý text (WYSIWYG markdown editor s obrázky), bez postav a AI
+ */
+export const SceneModeSchema = z.enum(['play', 'prose'])
+export type SceneMode = z.infer<typeof SceneModeSchema>
+
+/** Barva písma prózy – světlé písmo na tmavém podkladu (výchozí) nebo tmavé písmo (např. na světlé textuře papíru) */
+export const ProseTextColorSchema = z.enum(['light', 'dark'])
+export type ProseTextColor = z.infer<typeof ProseTextColorSchema>
+
+/** Rozložení obrázku v próze: přes celou šířku stránky, nebo půlka stránky s textem obtékajícím zprava/zleva */
+export const ProseImageLayoutSchema = z.enum(['full', 'left', 'right'])
+export type ProseImageLayout = z.infer<typeof ProseImageLayoutSchema>
+
+/**
+ * Dokument prózy = strom bloků ve formátu ProseMirror/TipTap JSON (kořen `type: 'doc'`).
+ * Uzly: paragraph, heading (attrs.level), bulletList/orderedList/listItem, blockquote, horizontalRule, codeBlock,
+ * image (attrs.src = ImageRef, attrs.layout = ProseImageLayout, attrs.alt). Značky: bold, italic, strike, code.
+ * Ukládá se celý najednou (JSONB v tabulce `scene_documents`), do Obsidianu se exportuje jako markdown.
+ */
+export interface ProseNode {
+  type: string
+  attrs?: Record<string, unknown>
+  content?: ProseNode[]
+  marks?: { type: string; attrs?: Record<string, unknown> }[]
+  text?: string
+}
+export const ProseNodeSchema: z.ZodType<ProseNode> = z.lazy(() =>
+  z.object({
+    type: z.string().min(1),
+    attrs: z.record(z.string(), z.unknown()).optional(),
+    content: z.array(ProseNodeSchema).optional(),
+    marks: z.array(z.object({ type: z.string().min(1), attrs: z.record(z.string(), z.unknown()).optional() })).optional(),
+    text: z.string().optional(),
+  }),
+)
+export const ProseDocSchema = z.object({
+  type: z.literal('doc'),
+  attrs: z.record(z.string(), z.unknown()).optional(),
+  content: z.array(ProseNodeSchema).optional(),
+})
+export type ProseDoc = z.infer<typeof ProseDocSchema>
+
+/** Odpověď `GET …/scenes/:scene/prose` a tělo `PUT` – dokument prózy; null = scéna zatím nemá žádný text */
+export const SceneProseSchema = z.object({ doc: ProseDocSchema.nullable() })
+export type SceneProse = z.infer<typeof SceneProseSchema>
+
 export const SceneMetaSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -156,6 +205,12 @@ export const SceneMetaSchema = z.object({
   aiReview: AiReviewSchema,
   /** Ztmavený obrázek na pozadí při přehrávání scény (frontmatter `darkBackground`; dědí se do nové scény). Výchozí false = původní jas */
   darkBackground: z.boolean(),
+  /** Režim scény (frontmatter `mode`); výchozí `play`. Prózu (`prose`) tvoří dokument editoru místo replik */
+  mode: SceneModeSchema,
+  /** Textura (opakující se obrázek, např. papír) pod textem prózy (frontmatter `proseTexture`; dědí se do nové scény); null = jednolité tmavé pozadí */
+  proseTexture: ImageRefSchema,
+  /** Barva písma prózy (frontmatter `proseTextColor`; dědí se do nové scény); výchozí `light` */
+  proseTextColor: ProseTextColorSchema,
   /** Celkové zhodnocení / shrnutí děje scény (markdown; tělo souboru za značkou `<!-- summary -->`) – rychlý kontext pro hráče i AI */
   summary: z.string(),
   /** Shrnutí je zastaralé – od jeho posledního uložení se změnily záznamy nebo popis scény (frontmatter `summaryStale`) */
@@ -193,6 +248,11 @@ export const SceneInputSchema = z.object({
   rulesInAi: z.boolean().optional(),
   aiReview: AiReviewSchema.optional(),
   darkBackground: z.boolean().optional(),
+  /** Režim scény; při vytvoření undefined = `play` */
+  mode: SceneModeSchema.optional(),
+  /** Textura prózy; null = bez textury; undefined při vytvoření = převzít ze sousední scény */
+  proseTexture: ImageRefSchema.optional(),
+  proseTextColor: ProseTextColorSchema.optional(),
   summary: z.string().max(20000).optional(),
   contextScenes: z.array(z.string().trim().min(1)).max(50).optional(),
 })
@@ -642,7 +702,8 @@ export type RenameGameRequest = z.infer<typeof RenameGameRequestSchema>
 export const CreateSceneRequestSchema = SceneInputSchema
 export type CreateSceneRequest = SceneInput
 
-export const AssetKindSchema = z.enum(['portrait', 'background', 'narrator', 'scene', 'faction', 'location'])
+/** Druh obrázku; `illustration` = obrázek v textu prózy, `texture` = textura pod textem prózy */
+export const AssetKindSchema = z.enum(['portrait', 'background', 'narrator', 'scene', 'faction', 'location', 'illustration', 'texture'])
 export type AssetKind = z.infer<typeof AssetKindSchema>
 
 export const AssetFromUrlRequestSchema = z.object({

@@ -16,6 +16,7 @@ import type {
   LoreInput,
   Narrator,
   NarratorInput,
+  ProseDoc,
   Quest,
   QuestInput,
   QuestObjective,
@@ -34,7 +35,7 @@ import { assetKey, sha256, type AssetStore } from './AssetStore.js'
 import type { Db } from './db.js'
 import { ENTITY_KINDS, newId, type EntityKind } from './ids.js'
 import { currentVersion, FactionRelationData, parseFields, type FieldsOf } from './kinds.js'
-import { assets, DEFAULT_TENANT, entities, events, games, links, sceneEntries, type EntityRow, type GameRow, type LinkRow } from './schema.js'
+import { assets, DEFAULT_TENANT, entities, events, games, links, sceneDocuments, sceneEntries, type EntityRow, type GameRow, type LinkRow } from './schema.js'
 
 /** Veřejná cesta lokálního obrázku (`ImageRef`) – FE ji skládá do URL `/vault/<hra>/assets/<id><ext>` */
 export const ASSET_PATH_PREFIX = 'assets/'
@@ -402,6 +403,9 @@ export class PostgresProvider implements StorageProvider {
       rulesInAi: e.fields.rulesInAi,
       aiReview: e.fields.aiReview,
       darkBackground: e.fields.darkBackground,
+      mode: e.fields.mode,
+      proseTexture: e.fields.proseTexture,
+      proseTextColor: e.fields.proseTextColor,
       summary: e.fields.summary,
       summaryStale: e.fields.summaryStale,
       entryCount: snap.entryCounts.get(e.row.id) ?? 0,
@@ -793,6 +797,10 @@ export class PostgresProvider implements StorageProvider {
       // Ztmavení pozadí se také dědí; první scéna má původní jas
       const darkBackground = input.darkBackground ?? neighbor?.fields.darkBackground ?? false
       const aiReview = input.aiReview ?? neighbor?.fields.aiReview ?? 'panel'
+      // Režim scény se nedědí (výchozí hraná scéna); vzhled prózy (textura, barva písma) ano
+      const mode = input.mode ?? 'play'
+      const proseTexture = input.proseTexture !== undefined ? input.proseTexture : (neighbor?.fields.proseTexture ?? null)
+      const proseTextColor = input.proseTextColor ?? neighbor?.fields.proseTextColor ?? 'light'
       // Vypravěč scény se dědí ze sousední; explicitní null = scéna bez vypravěče
       const narratorId = input.narrator !== undefined ? snap.requireOne('narrator', input.narrator) : neighbor ? (snap.one(neighbor, 'narrator')?.row.id ?? null) : null
       const aiCandidates = input.aiCharacters ? snap.resolveMany('character', input.aiCharacters) : neighbor ? snap.many(neighbor, 'aiCharacters').map(c => c.row.id) : []
@@ -801,7 +809,7 @@ export class PostgresProvider implements StorageProvider {
       const id = await this.insertEntity(tx, snap.game.id, 'scene', {
         name: title,
         // Doplňující popis situace (aiPrompt) je specifický pro scénu – nedědí se
-        fields: { description: input.description ?? '', ai, aiPrompt: input.aiPrompt ?? '', aiMode, rulesInAi, aiReview, darkBackground, summary: input.summary ?? '', summaryStale: false, director: null },
+        fields: { description: input.description ?? '', ai, aiPrompt: input.aiPrompt ?? '', aiMode, rulesInAi, aiReview, darkBackground, mode, proseTexture, proseTextColor, summary: input.summary ?? '', summaryStale: false, director: null },
         sortOrder: position,
         image: this.imageColumns(input.image ?? null, paths),
       })
@@ -850,6 +858,9 @@ export class PostgresProvider implements StorageProvider {
           rulesInAi: input.rulesInAi ?? current.fields.rulesInAi,
           aiReview: input.aiReview ?? current.fields.aiReview,
           darkBackground: input.darkBackground ?? current.fields.darkBackground,
+          mode: input.mode ?? current.fields.mode,
+          proseTexture: input.proseTexture !== undefined ? input.proseTexture : current.fields.proseTexture,
+          proseTextColor: input.proseTextColor ?? current.fields.proseTextColor,
         },
         image: this.imageColumns(input.image, paths, current.row),
       })
@@ -941,6 +952,25 @@ export class PostgresProvider implements StorageProvider {
         tx,
         snap.list('scene').filter(s => s.row.id !== sceneId),
       )
+    })
+  }
+
+  async getSceneDocument(name: string, sceneId: string): Promise<ProseDoc | null> {
+    const snap = await this.snapshot(this.db, name)
+    snap.require('scene', sceneId)
+    const rows = await this.db.select({ doc: sceneDocuments.doc }).from(sceneDocuments).where(eq(sceneDocuments.sceneId, sceneId)).limit(1)
+    return rows[0] ? (rows[0].doc as ProseDoc) : null
+  }
+
+  async saveSceneDocument(name: string, sceneId: string, doc: ProseDoc): Promise<void> {
+    await this.mutate(name, async (tx, snap) => {
+      snap.require('scene', sceneId)
+      const now = new Date()
+      await tx
+        .insert(sceneDocuments)
+        .values({ sceneId, gameId: snap.game.id, doc, updatedAt: now })
+        .onConflictDoUpdate({ target: sceneDocuments.sceneId, set: { doc, updatedAt: now } })
+      await tx.update(entities).set({ updatedAt: now }).where(eq(entities.id, sceneId))
     })
   }
 

@@ -127,6 +127,18 @@ export const sceneEntries = pgTable(
   table => [uniqueIndex('scene_entries_scene_id_idx').on(table.sceneId, table.id), index('scene_entries_scene_pos_idx').on(table.sceneId, table.position)],
 )
 
+/** Dokument prózy (scéna v režimu `prose`): celý TipTap/ProseMirror JSON strom bloků, jeden řádek na scénu */
+export const sceneDocuments = pgTable('scene_documents', {
+  sceneId: text('scene_id')
+    .primaryKey()
+    .references(() => entities.id, { onDelete: 'cascade' }),
+  gameId: text('game_id')
+    .notNull()
+    .references(() => games.id, { onDelete: 'cascade' }),
+  doc: jsonb('doc').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+})
+
 export const assets = pgTable(
   'assets',
   {
@@ -170,4 +182,5 @@ export type GameRow = typeof games.$inferSelect
 export type EntityRow = typeof entities.$inferSelect
 export type LinkRow = typeof links.$inferSelect
 export type SceneEntryRow = typeof sceneEntries.$inferSelect
+export type SceneDocumentRow = typeof sceneDocuments.$inferSelect
 export type AssetRow = typeof assets.$inferSelect

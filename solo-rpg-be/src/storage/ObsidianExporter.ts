@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import type { GameDetail } from '@solo-rpg/shared'
+import type { GameDetail, ProseDoc, ProseNode } from '@solo-rpg/shared'
 import { ObsidianVaultProvider } from '../vault/ObsidianVaultProvider.js'
 import type { StorageProvider } from '../vault/StorageProvider.js'
 import { ASSET_PATH_PREFIX, type PostgresProvider } from './PostgresProvider.js'
@@ -62,7 +62,12 @@ export class ObsidianExporter {
     const sceneIds = new Map<string, string>()
     for (const scene of [...detail.scenes].sort((a, b) => a.order - b.order)) {
       await tick()
-      const created = await target.createScene(game, { ...scene, order: undefined, image: await image(scene.image, 'scene', scene.title) })
+      const created = await target.createScene(game, {
+        ...scene,
+        order: undefined,
+        image: await image(scene.image, 'scene', scene.title),
+        proseTexture: await image(scene.proseTexture, 'texture', scene.title),
+      })
       sceneIds.set(scene.id, created.id)
     }
     for (const t of detail.threads) {
@@ -78,9 +83,15 @@ export class ObsidianExporter {
       await target.createLore(game, l)
     }
     for (const scene of detail.scenes) {
-      const entries = await this.source.getSceneEntries(sourceName, scene.id)
       const targetId = sceneIds.get(scene.id)
-      if (entries && entries.length > 0 && targetId) await target.saveSceneEntries(game, targetId, entries)
+      if (!targetId) continue
+      if (scene.mode === 'prose') {
+        const doc = await this.source.getSceneDocument(sourceName, scene.id)
+        if (doc) await target.saveSceneDocument(game, targetId, await this.copyProseImages(doc, sourceName, target, game, scene.title))
+        continue
+      }
+      const entries = await this.source.getSceneEntries(sourceName, scene.id)
+      if (entries && entries.length > 0) await target.saveSceneEntries(game, targetId, entries)
     }
     for (const s of [...(await this.source.listSessions(sourceName))].sort((a, b) => a.startedAt - b.startedAt)) {
       await target.createSession(game, s)
@@ -91,6 +102,31 @@ export class ObsidianExporter {
       rulesSystem: detail.setup.rulesSystem,
       pulseOverride: detail.setup.pulseOverride,
     })
+  }
+
+  /** Zkopíruje obrázky z textu prózy do vaultu a přepíše jejich `src` na nové cesty (nenalezené vynechá) */
+  private async copyProseImages(doc: ProseDoc, sourceName: string, target: StorageProvider, game: string, ownerName: string): Promise<ProseDoc> {
+    const walk = async (node: ProseNode): Promise<ProseNode | null> => {
+      if (node.type === 'image') {
+        const src = typeof node.attrs?.src === 'string' ? node.attrs.src : null
+        const copied = await this.copyImage(sourceName, src, target, game, 'illustration', ownerName)
+        if (!copied) return null
+        return { ...node, attrs: { ...node.attrs, src: copied } }
+      }
+      if (!node.content) return node
+      const content: ProseNode[] = []
+      for (const child of node.content) {
+        const mapped = await walk(child)
+        if (mapped) content.push(mapped)
+      }
+      return { ...node, content }
+    }
+    const content: ProseNode[] = []
+    for (const child of doc.content ?? []) {
+      const mapped = await walk(child)
+      if (mapped) content.push(mapped)
+    }
+    return { ...doc, content }
   }
 
   /** Lokální asset zkopíruje do vaultu a vrátí novou cestu; vzdálené URL a null projdou beze změny */

@@ -1,4 +1,4 @@
-import type { Character, CharacterInput, Faction, FactionInput, GameDetail, GameMeta, GameSession, GameSessionInput, GameSettings, GameSetup, LocationInput, LoreEntry, LoreInput, Narrator, NarratorInput, Quest, QuestInput, SceneDirector, SceneInput, SceneMeta, StoryEntry, StoryLocation, StoryThread, ThreadInput, AssetKind } from '@solo-rpg/shared'
+import type { Character, CharacterInput, Faction, FactionInput, GameDetail, GameMeta, GameSession, GameSessionInput, GameSettings, GameSetup, LocationInput, LoreEntry, LoreInput, Narrator, NarratorInput, ProseDoc, Quest, QuestInput, SceneDirector, SceneInput, SceneMeta, StoryEntry, StoryLocation, StoryThread, ThreadInput, AssetKind } from '@solo-rpg/shared'
 
 export interface AssetInput {
   kind: AssetKind
@@ -38,6 +38,9 @@ export interface StorageProvider {
   updateScene(name: string, sceneId: string, input: SceneInput): Promise<SceneMeta>
   getSceneEntries(name: string, sceneId: string): Promise<StoryEntry[] | null>
   saveSceneEntries(name: string, sceneId: string, entries: StoryEntry[]): Promise<void>
+  /** Dokument prózy scény (režim `prose`); null = scéna zatím žádný text nemá. Neexistující scéna → NotFoundError */
+  getSceneDocument(name: string, sceneId: string): Promise<ProseDoc | null>
+  saveSceneDocument(name: string, sceneId: string, doc: ProseDoc): Promise<void>
   deleteScene(name: string, sceneId: string): Promise<void>
 
   listThreads(name: string): Promise<StoryThread[]>

@@ -3,6 +3,8 @@ import path from 'node:path'
 import matter from 'gray-matter'
 import {
   AiReviewSchema,
+  ProseTextColorSchema,
+  SceneModeSchema,
   fullName,
   isValidGameName,
   isRemoteImage,
@@ -22,6 +24,7 @@ import {
   type LoreInput,
   type Narrator,
   type NarratorInput,
+  type ProseDoc,
   type Quest,
   type QuestInput,
   type QuestObjective,
@@ -71,6 +74,7 @@ import {
   writeFileAtomic,
 } from './fsUtils.js'
 import { parseEntries, renameSpeaker, serializeEntries } from './sceneMarkdown.js'
+import { proseDocToMarkdown } from './proseMarkdown.js'
 import { parseSessions, serializeSessions, sessionId } from './sessionsMarkdown.js'
 
 const GAME_FILE = 'game.md'
@@ -93,6 +97,9 @@ const LOCATION_DIR = 'locations'
 /** Obrázky lokací odděleně od portrétů postav */
 const LOCATION_IMAGE_DIR = `${PORTRAIT_DIR}/locations`
 const LORE_DIR = 'lore'
+/** Obrázky v textu prózy a textury pod ní */
+const ILLUSTRATION_DIR = 'illustrations'
+const TEXTURE_DIR = 'textures'
 /** Odděluje markdown popis scény (před) od záznamů příběhu (za) */
 const ENTRIES_MARKER = /<!--\s*entries\s*-->/
 /** Odděluje popis scény (před) od jejího shrnutí děje (za); leží před `<!-- entries -->` */
@@ -958,6 +965,16 @@ export class ObsidianVaultProvider implements StorageProvider {
         relPath = await this.uniquePath(dir, BACKGROUND_DIR, original, ext)
         break
       }
+      case 'illustration': {
+        const original = safeFileName(path.basename(asset.filename, path.extname(asset.filename)), 'obrazek')
+        relPath = await this.uniquePath(dir, ILLUSTRATION_DIR, original, ext)
+        break
+      }
+      case 'texture': {
+        const original = safeFileName(path.basename(asset.filename, path.extname(asset.filename)), 'textura')
+        relPath = await this.uniquePath(dir, TEXTURE_DIR, original, ext)
+        break
+      }
     }
 
     const target = path.join(dir, relPath)
@@ -1056,6 +1073,9 @@ export class ObsidianVaultProvider implements StorageProvider {
           rulesInAi: typeof data.rulesInAi === 'boolean' ? data.rulesInAi : (gameRulesInAi ?? false),
           aiReview: AiReviewSchema.catch('panel').parse(data.aiReview ?? 'panel'),
           darkBackground: typeof data.darkBackground === 'boolean' ? data.darkBackground : (gameDarkBackground ?? false),
+          mode: SceneModeSchema.catch('play').parse(data.mode ?? 'play'),
+          proseTexture: stringOrNull(data.proseTexture),
+          proseTextColor: ProseTextColorSchema.catch('light').parse(data.proseTextColor ?? 'light'),
           contextScenes: parseCharacterLinks(data.contextScenes),
           createdAt: toTimestamp(data.createdAt, stat.birthtimeMs),
           updatedAt: toTimestamp(data.updatedAt, stat.mtimeMs),
@@ -1114,6 +1134,10 @@ export class ObsidianVaultProvider implements StorageProvider {
       // Výchozí hodnoty (panel, původní jas) se do frontmatteru nezapisují
       aiReview: meta.aiReview === 'panel' ? null : meta.aiReview,
       darkBackground: meta.darkBackground ? true : null,
+      // Próza: režim a vzhled (výchozí hraná scéna, světlé písmo bez textury se nezapisují)
+      mode: meta.mode === 'prose' ? 'prose' : null,
+      proseTexture: meta.proseTexture,
+      proseTextColor: meta.proseTextColor === 'dark' ? 'dark' : null,
       summaryStale: meta.summaryStale ? true : null,
       contextScenes: meta.contextScenes.length ? toCharacterLinks(meta.contextScenes) : null,
       createdAt: toIso(meta.createdAt),
@@ -1179,6 +1203,9 @@ export class ObsidianVaultProvider implements StorageProvider {
     const rulesInAi = input.rulesInAi ?? neighbor?.meta.rulesInAi ?? false
     const darkBackground = input.darkBackground ?? neighbor?.meta.darkBackground ?? false
     const aiReview = input.aiReview ?? neighbor?.meta.aiReview ?? 'panel'
+    const mode = input.mode ?? 'play'
+    const proseTexture = input.proseTexture !== undefined ? input.proseTexture : (neighbor?.meta.proseTexture ?? null)
+    const proseTextColor = input.proseTextColor ?? neighbor?.meta.proseTextColor ?? 'light'
     const narrator = await this.normalizeNarratorRef(dir, input.narrator === undefined ? (neighbor?.meta.narrator ?? null) : input.narrator)
     const aiCharacters = (input.aiCharacters ?? neighbor?.meta.aiCharacters ?? []).filter(n => characters.includes(n))
     const now = Date.now()
@@ -1200,6 +1227,9 @@ export class ObsidianVaultProvider implements StorageProvider {
       rulesInAi,
       aiReview,
       darkBackground,
+      mode,
+      proseTexture,
+      proseTextColor,
       aiCharacters: await this.normalizeSceneCharacters(dir, aiCharacters),
       // Doplňující popis situace je specifický pro scénu – nedědí se
       aiPrompt: input.aiPrompt ?? '',
@@ -1261,6 +1291,9 @@ export class ObsidianVaultProvider implements StorageProvider {
       rulesInAi: input.rulesInAi ?? previous.rulesInAi,
       aiReview: input.aiReview ?? previous.aiReview,
       darkBackground: input.darkBackground ?? previous.darkBackground,
+      mode: input.mode ?? previous.mode,
+      proseTexture: input.proseTexture !== undefined ? input.proseTexture : previous.proseTexture,
+      proseTextColor: input.proseTextColor ?? previous.proseTextColor,
       // AI může hrát jen postavy, které ve scéně jsou
       aiCharacters: aiCharacters.filter(n => characters.includes(n)),
       aiPrompt: input.aiPrompt ?? previous.aiPrompt,
@@ -1307,6 +1340,23 @@ export class ObsidianVaultProvider implements StorageProvider {
 
     const meta: SceneMeta = { ...scene.meta, summaryStale: true, entryCount: entries.length, updatedAt: Date.now() }
     await this.writeSceneFile(dir, meta, serializeEntries(entries, nicknames), scene.data)
+    await this.touchGame(dir)
+  }
+
+  /** Vault drží prózu jen jako markdown (export) – zpět do editoru se nenačítá */
+  async getSceneDocument(name: string, sceneId: string): Promise<ProseDoc | null> {
+    const dir = await this.requireGameDir(name)
+    if (!(await this.findScene(dir, sceneId))) throw new NotFoundError(`Scéna „${sceneId}“ neexistuje.`)
+    return null
+  }
+
+  /** Zapíše prózu jako markdown do těla souboru scény (za značku entries); cesty obrázků už musí být vaultové */
+  async saveSceneDocument(name: string, sceneId: string, doc: ProseDoc): Promise<void> {
+    const dir = await this.requireGameDir(name)
+    const scene = await this.findScene(dir, sceneId)
+    if (!scene) throw new NotFoundError(`Scéna „${sceneId}“ neexistuje.`)
+    const meta: SceneMeta = { ...scene.meta, updatedAt: Date.now() }
+    await this.writeSceneFile(dir, meta, proseDocToMarkdown(doc), scene.data)
     await this.touchGame(dir)
   }
 

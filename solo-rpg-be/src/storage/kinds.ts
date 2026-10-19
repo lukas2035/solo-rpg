@@ -10,10 +10,12 @@ import {
   LoreKnowledgeSchema,
   LoreTruthSchema,
   LoreTypeSchema,
+  ProseTextColorSchema,
   QuestObjectiveSchema,
   QuestStatusSchema,
   QuestTypeSchema,
   SceneDirectorSchema,
+  SceneModeSchema,
   ThreadCertaintySchema,
   ThreadClockSchema,
   ThreadHorizonSchema,
@@ -50,6 +52,12 @@ export const SceneFields = z.object({
   aiReview: AiReviewSchema,
   /** Ztmavený obrázek na pozadí scény (výchozí false = původní jas) */
   darkBackground: z.boolean(),
+  /** Režim scény: hraná (repliky) / próza (dokument editoru v `scene_documents`) */
+  mode: SceneModeSchema,
+  /** Textura pod textem prózy (ImageRef: `assets/<id><ext>` nebo URL); null = jednolité pozadí */
+  proseTexture: z.string().nullable(),
+  /** Barva písma prózy */
+  proseTextColor: ProseTextColorSchema,
   summary: z.string(),
   summaryStale: z.boolean(),
   /** Stav Directoru (rozpracovaný brief + probíhající událost); null = nic rozehraného */
@@ -128,14 +136,16 @@ export const KIND_VERSIONS: Record<EntityKind, { current: number; migrations: Re
   //     SQL migrace 0002 ho do scén překopírovala, proto mají přednost už přítomné klíče)
   // v5: ztmavení pozadí per scéna (dřív `games.bright_background`; SQL migrace 0004 ho do scén překopírovala jako negaci)
   // v6: způsob schvalování textů od AI (panel = dosavadní chování)
+  // v7: režim scény (play = dosavadní chování) + vzhled prózy (textura, barva písma)
   scene: {
-    current: 6,
+    current: 7,
     migrations: {
       1: old => ({ ...(old as object), summaryStale: false }),
       2: old => ({ ...(old as object), director: null }),
       3: old => ({ aiMode: 'advanced', rulesInAi: false, ...(old as object) }),
       4: old => ({ darkBackground: false, ...(old as object) }),
       5: old => ({ ...(old as object), aiReview: 'panel' }),
+      6: old => ({ ...(old as object), mode: 'play', proseTexture: null, proseTextColor: 'light' }),
     },
   },
   thread: { current: 1, migrations: {} },
