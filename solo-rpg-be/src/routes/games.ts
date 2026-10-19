@@ -24,9 +24,10 @@ import {
   BriefPatchSchema,
   BriefRequestSchema,
   ProseDocSchema,
+  ProseAiRequestSchema,
   isValidGameName,
 } from '@solo-rpg/shared'
-import type { SceneProse, AiSuggestion, AiSuggestionAcceptResponse, AiSuggestionState, DirectorState, NarrativeBrief, RulesPromptResponse, SceneContextSuggestionResponse } from '@solo-rpg/shared'
+import type { SceneProse, ProseAiResponse, AiSuggestion, AiSuggestionAcceptResponse, AiSuggestionState, DirectorState, NarrativeBrief, RulesPromptResponse, SceneContextSuggestionResponse } from '@solo-rpg/shared'
 import { ConflictError, NotFoundError, ValidationError } from '../vault/StorageProvider.js'
 import type { VaultManager } from '../vault/VaultManager.js'
 import { backupGameFolder } from '../vault/backup.js'
@@ -37,6 +38,7 @@ import { AiError } from '../ai/types.js'
 import { SuggestionService } from '../narrative/suggestions.js'
 import { DirectorService } from '../director/directorService.js'
 import { summarizeScene } from '../ai/sceneSummary.js'
+import { continueProse } from '../ai/proseAi.js'
 import { suggestContextScenes } from '../ai/sceneContextScenes.js'
 import { buildRulesSection } from '../ai/rulesPrompt.js'
 import { importSceneTranscript } from '../vault/sceneImport.js'
@@ -316,6 +318,13 @@ export async function registerGameRoutes(app: FastifyInstance, vault: VaultManag
     const { doc } = z.object({ doc: ProseDocSchema }).parse(request.body)
     await vault.storage.saveSceneDocument(game, scene, doc)
     return reply.code(204).send()
+  })
+
+  /** AI pokračování prózy: pošle pokyn + dosavadní text (bez obrázků) modelu, pokyn uloží do historie scény. Text se neukládá – FE ho připíše do editoru. */
+  app.post('/api/games/:game/scenes/:scene/prose/ai', async (request): Promise<ProseAiResponse> => {
+    const { game, scene } = SceneParams.parse(request.params)
+    const { prompt } = ProseAiRequestSchema.parse(request.body)
+    return continueProse(vault.storage, config, game, scene, prompt, request.log)
   })
 
   /** Import odehraného přepisu (`**Jméno**: text`, např. z Notionu) – rozdělí na záznamy podle mluvčích a připíše na konec scény */

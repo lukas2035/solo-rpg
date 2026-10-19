@@ -1076,6 +1076,7 @@ export class ObsidianVaultProvider implements StorageProvider {
           mode: SceneModeSchema.catch('play').parse(data.mode ?? 'play'),
           proseTexture: stringOrNull(data.proseTexture),
           proseTextColor: ProseTextColorSchema.catch('light').parse(data.proseTextColor ?? 'light'),
+          prosePrompts: Array.isArray(data.prosePrompts) ? data.prosePrompts.filter((p): p is string => typeof p === 'string' && p.trim() !== '') : [],
           contextScenes: parseCharacterLinks(data.contextScenes),
           createdAt: toTimestamp(data.createdAt, stat.birthtimeMs),
           updatedAt: toTimestamp(data.updatedAt, stat.mtimeMs),
@@ -1138,6 +1139,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       mode: meta.mode === 'prose' ? 'prose' : null,
       proseTexture: meta.proseTexture,
       proseTextColor: meta.proseTextColor === 'dark' ? 'dark' : null,
+      prosePrompts: meta.prosePrompts.length ? meta.prosePrompts : null,
       summaryStale: meta.summaryStale ? true : null,
       contextScenes: meta.contextScenes.length ? toCharacterLinks(meta.contextScenes) : null,
       createdAt: toIso(meta.createdAt),
@@ -1230,6 +1232,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       mode,
       proseTexture,
       proseTextColor,
+      prosePrompts: input.prosePrompts ?? [],
       aiCharacters: await this.normalizeSceneCharacters(dir, aiCharacters),
       // Doplňující popis situace je specifický pro scénu – nedědí se
       aiPrompt: input.aiPrompt ?? '',
@@ -1294,6 +1297,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       mode: input.mode ?? previous.mode,
       proseTexture: input.proseTexture !== undefined ? input.proseTexture : previous.proseTexture,
       proseTextColor: input.proseTextColor ?? previous.proseTextColor,
+      prosePrompts: input.prosePrompts ?? previous.prosePrompts,
       // AI může hrát jen postavy, které ve scéně jsou
       aiCharacters: aiCharacters.filter(n => characters.includes(n)),
       aiPrompt: input.aiPrompt ?? previous.aiPrompt,

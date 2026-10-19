@@ -3,8 +3,10 @@ import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type 
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import { Placeholder } from '@tiptap/extensions'
+import { Markdown } from '@tiptap/markdown'
 import type { ImageRef, ProseDoc, ProseImageLayout, ProseTextColor } from '@solo-rpg/shared'
 import { assetUrl, useAssetVersion } from '../utils/api'
+import ProseAiModal from './ProseAiModal'
 
 /**
  * Textový editor pro scény v režimu „próza“ (WYSIWYG markdown přes TipTap/ProseMirror).
@@ -27,6 +29,11 @@ interface ProseEditorProps {
   onUploadImage: (image: File | string) => Promise<ImageRef>
   onTextureChange: (image: File | string | null) => Promise<void>
   onTextColorChange: (color: ProseTextColor) => Promise<void>
+  /** Historie promptů pro AI (nejnovější první) */
+  aiPrompts: string[]
+  /** Pošle pokyn AI a vrátí markdown pokračování (editor ho připíše na konec) */
+  onGenerateAi: (prompt: string) => Promise<string>
+  onDeleteAiPrompt: (prompt: string) => Promise<void>
 }
 
 const SAVE_DELAY_MS = 1000
@@ -152,10 +159,11 @@ function imageUrlFromTransfer(data: DataTransfer): string | null {
   return /^https?:.*\.(png|jpe?g|gif|webp|avif)(\?.*)?$/i.test(url) || /^data:image\//i.test(url) ? url : null
 }
 
-export default function ProseEditor({ game, sceneId, doc, texture, textColor, onSave, onUploadImage, onTextureChange, onTextColorChange }: ProseEditorProps) {
+export default function ProseEditor({ game, sceneId, doc, texture, textColor, onSave, onUploadImage, onTextureChange, onTextColorChange, aiPrompts, onGenerateAi, onDeleteAiPrompt }: ProseEditorProps) {
   const version = useAssetVersion()
   const [status, setStatus] = useState<'saved' | 'dirty' | 'saving' | 'error'>('saved')
   const [uploading, setUploading] = useState(0)
+  const [aiOpen, setAiOpen] = useState(false)
   const timerRef = useRef<number | null>(null)
   const dirtyRef = useRef(false)
   const textureInputRef = useRef<HTMLInputElement | null>(null)
@@ -202,6 +210,8 @@ export default function ProseEditor({ game, sceneId, doc, texture, textColor, on
       StarterKit.configure({ link: false }),
       ProseImage,
       Placeholder.configure({ placeholder: 'Začni psát… „# “ pro nadpis, „- “ pro seznam, „> “ pro citaci' }),
+      // Parsování markdownu z AI při vkládání (insertContentAt s contentType: 'markdown')
+      Markdown,
     ],
     content: doc ?? EMPTY_DOC,
     editable: doc !== undefined,
@@ -300,6 +310,17 @@ export default function ProseEditor({ game, sceneId, doc, texture, textColor, on
   const textureUrl = texture ? assetUrl(game, texture, version) : null
   const dark = textColor === 'dark'
 
+  /** Pošle pokyn AI a vrácený markdown připíše na konec dokumentu (vyvolá onUpdate → autosave) */
+  const generateAi = async (prompt: string) => {
+    const ed = editorRef.current
+    if (!ed) throw new Error('Editor není připraven.')
+    const text = (await onGenerateAi(prompt)).trim()
+    if (!text) throw new Error('AI vrátila prázdný text.')
+    const end = ed.state.doc.content.size
+    ed.chain().focus('end').insertContentAt(end, text, { contentType: 'markdown' }).run()
+    window.setTimeout(() => ed.commands.scrollIntoView(), 0)
+  }
+
   const pickImage = () => {
     const input = document.createElement('input')
     input.type = 'file'
@@ -337,6 +358,8 @@ export default function ProseEditor({ game, sceneId, doc, texture, textColor, on
         <button type="button" title="Oddělovač (---)" onClick={() => editor?.chain().focus().setHorizontalRule().run()} className={toolButton}>―</button>
         <span className="w-px h-5 bg-white/20 mx-1" />
         <button type="button" title="Vložit obrázek (nebo přetáhni / vlož ze schránky)" onClick={pickImage} className={toolButton}>🖼 Obrázek</button>
+        <span className="w-px h-5 bg-white/20 mx-1" />
+        <button type="button" title="Nechat AI pokračovat v příběhu" disabled={doc === undefined} onClick={() => setAiOpen(true)} className={`${toolButton} text-cyan-300`}>🤖 AI</button>
         <span className="w-px h-5 bg-white/20 mx-1" />
         <button type="button" title={texture ? 'Změnit texturu pozadí' : 'Přidat texturu pozadí (např. papír)'} onClick={() => textureInputRef.current?.click()} className={toolButton}>
           {texture ? '🧻 Textura' : '🧻 Přidat texturu'}
@@ -382,6 +405,10 @@ export default function ProseEditor({ game, sceneId, doc, texture, textColor, on
           </ProseImageContext.Provider>
         </div>
       </div>
+
+      {aiOpen && (
+        <ProseAiModal prompts={aiPrompts} onSubmit={generateAi} onDeletePrompt={onDeleteAiPrompt} onClose={() => setAiOpen(false)} />
+      )}
     </div>
   )
 }

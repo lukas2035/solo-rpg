@@ -406,6 +406,7 @@ export class PostgresProvider implements StorageProvider {
       mode: e.fields.mode,
       proseTexture: e.fields.proseTexture,
       proseTextColor: e.fields.proseTextColor,
+      prosePrompts: e.fields.prosePrompts,
       summary: e.fields.summary,
       summaryStale: e.fields.summaryStale,
       entryCount: snap.entryCounts.get(e.row.id) ?? 0,
@@ -809,7 +810,7 @@ export class PostgresProvider implements StorageProvider {
       const id = await this.insertEntity(tx, snap.game.id, 'scene', {
         name: title,
         // Doplňující popis situace (aiPrompt) je specifický pro scénu – nedědí se
-        fields: { description: input.description ?? '', ai, aiPrompt: input.aiPrompt ?? '', aiMode, rulesInAi, aiReview, darkBackground, mode, proseTexture, proseTextColor, summary: input.summary ?? '', summaryStale: false, director: null },
+        fields: { description: input.description ?? '', ai, aiPrompt: input.aiPrompt ?? '', aiMode, rulesInAi, aiReview, darkBackground, mode, proseTexture, proseTextColor, prosePrompts: input.prosePrompts ?? [], summary: input.summary ?? '', summaryStale: false, director: null },
         sortOrder: position,
         image: this.imageColumns(input.image ?? null, paths),
       })
@@ -861,6 +862,7 @@ export class PostgresProvider implements StorageProvider {
           mode: input.mode ?? current.fields.mode,
           proseTexture: input.proseTexture !== undefined ? input.proseTexture : current.fields.proseTexture,
           proseTextColor: input.proseTextColor ?? current.fields.proseTextColor,
+          prosePrompts: input.prosePrompts ?? current.fields.prosePrompts,
         },
         image: this.imageColumns(input.image, paths, current.row),
       })

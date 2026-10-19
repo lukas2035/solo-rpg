@@ -130,6 +130,9 @@ scene_documents ( scene_id PK, game_id, doc jsonb, updated_at )  -- próza: text
   překládají až ve FE. Vzhled prózy je per scéna (`proseTexture` – kind `texture`, opakovaná pod textem; `proseTextColor` light/dark)
   a nová scéna ho dědí od předchozí. Do Obsidian vaultu se próza exportuje jednosměrně jako markdown (`vault/proseMarkdown.ts`).
   API: `GET/PUT /api/games/:game/scenes/:scene/prose`.
+  AI pokračování: `POST …/prose/ai` (`ai/proseAi.ts`, prompt `prompts/prose-prompt.md`) dostane pokyn autora + celý dosavadní text
+  bez obrázků (ořez zepředu na `AI_TRANSCRIPT_TOKENS`), vrátí markdown, který FE připíše na konec editoru (`@tiptap/markdown`).
+  Pokyny se ukládají do historie scény `prosePrompts` (nejnovější první, max 50; FE: kopírovat / znovu použít / smazat).
 
 ### 3.2 Entita (shared typ, orientačně)
 ```ts

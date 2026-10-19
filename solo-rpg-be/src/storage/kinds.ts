@@ -58,6 +58,8 @@ export const SceneFields = z.object({
   proseTexture: z.string().nullable(),
   /** Barva písma prózy */
   proseTextColor: ProseTextColorSchema,
+  /** Historie promptů pro AI pokračování prózy (nejnovější první) */
+  prosePrompts: z.array(z.string()),
   summary: z.string(),
   summaryStale: z.boolean(),
   /** Stav Directoru (rozpracovaný brief + probíhající událost); null = nic rozehraného */
@@ -137,8 +139,9 @@ export const KIND_VERSIONS: Record<EntityKind, { current: number; migrations: Re
   // v5: ztmavení pozadí per scéna (dřív `games.bright_background`; SQL migrace 0004 ho do scén překopírovala jako negaci)
   // v6: způsob schvalování textů od AI (panel = dosavadní chování)
   // v7: režim scény (play = dosavadní chování) + vzhled prózy (textura, barva písma)
+  // v8: historie promptů pro AI pokračování prózy
   scene: {
-    current: 7,
+    current: 8,
     migrations: {
       1: old => ({ ...(old as object), summaryStale: false }),
       2: old => ({ ...(old as object), director: null }),
@@ -146,6 +149,7 @@ export const KIND_VERSIONS: Record<EntityKind, { current: number; migrations: Re
       4: old => ({ darkBackground: false, ...(old as object) }),
       5: old => ({ ...(old as object), aiReview: 'panel' }),
       6: old => ({ ...(old as object), mode: 'play', proseTexture: null, proseTextColor: 'light' }),
+      7: old => ({ ...(old as object), prosePrompts: [] }),
     },
   },
   thread: { current: 1, migrations: {} },

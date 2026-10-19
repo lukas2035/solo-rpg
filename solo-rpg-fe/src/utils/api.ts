@@ -17,6 +17,8 @@ import type {
   Narrator,
   NarratorInput,
   ProseDoc,
+  ProseAiRequest,
+  ProseAiResponse,
   SceneInput,
   SceneMeta,
   SceneProse,
@@ -239,6 +241,9 @@ export const getSceneProse = (game: string, sceneId: string) =>
   request<SceneProse>('GET', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/prose`)
 export const saveSceneProse = (game: string, sceneId: string, doc: ProseDoc) =>
   request<void>('PUT', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/prose`, { doc } satisfies SceneProse)
+/** AI pokračování prózy – vrátí markdown k připsání na konec a aktualizovanou historii promptů scény */
+export const continueProse = (game: string, sceneId: string, prompt: string) =>
+  request<ProseAiResponse>('POST', `${gamePath(game)}/scenes/${encodeURIComponent(sceneId)}/prose/ai`, { prompt } satisfies ProseAiRequest)
 
 /** Import odehraného přepisu (`**Jméno**: text`) – BE ho rozdělí na záznamy podle mluvčích a připíše na konec scény */
 export const importSceneTranscript = (game: string, sceneId: string, text: string, resolutions?: Record<string, string>) =>

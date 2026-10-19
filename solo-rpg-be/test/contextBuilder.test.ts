@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { Faction, GameDetail, LoreEntry, Quest, SceneMeta, StoryLocation, StoryThread } from '@solo-rpg/shared'
 import { buildSceneContext, estimateTokens, transcriptCutoff } from '../src/narrative/contextBuilder.js'
 import { buildMessages } from '../src/ai/scenePrompt.js'
@@ -9,7 +9,7 @@ const DAY = 86_400_000
 
 const character = (id: string, name: string, notes = '') => ({ id, name, firstName: name.split(' ')[0], lastName: name.split(' ')[1] ?? '', nickname: name.split(' ')[0], image: null, notes })
 const scene = (p: Partial<SceneMeta> & { id: string; title: string; order: number }): SceneMeta => ({
-  description: '', image: null, characters: [], location: null, narrator: null, ai: true, aiCharacters: [], aiPrompt: '', aiMode: 'advanced', rulesInAi: false, aiReview: 'panel', darkBackground: false, mode: 'play', proseTexture: null, proseTextColor: 'light', summary: '', summaryStale: false, entryCount: 0, contextScenes: [], createdAt: NOW, updatedAt: NOW, ...p,
+  description: '', image: null, characters: [], location: null, narrator: null, ai: true, aiCharacters: [], aiPrompt: '', aiMode: 'advanced', rulesInAi: false, aiReview: 'panel', darkBackground: false, mode: 'play', proseTexture: null, proseTextColor: 'light', prosePrompts: [], summary: '', summaryStale: false, entryCount: 0, contextScenes: [], createdAt: NOW, updatedAt: NOW, ...p,
 })
 const thread = (p: Partial<StoryThread> & { id: string; title: string }): StoryThread => ({
   type: 'threat', status: 'active', horizon: 'short-term', certainty: 'confirmed', revealCondition: '', clock: null,

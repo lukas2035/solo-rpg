@@ -211,6 +211,8 @@ export const SceneMetaSchema = z.object({
   proseTexture: ImageRefSchema,
   /** Barva písma prózy (frontmatter `proseTextColor`; dědí se do nové scény); výchozí `light` */
   proseTextColor: ProseTextColorSchema,
+  /** Historie promptů poslaných AI z editoru prózy (nejnovější první; frontmatter `prosePrompts`) – k opětovnému použití */
+  prosePrompts: z.array(z.string()),
   /** Celkové zhodnocení / shrnutí děje scény (markdown; tělo souboru za značkou `<!-- summary -->`) – rychlý kontext pro hráče i AI */
   summary: z.string(),
   /** Shrnutí je zastaralé – od jeho posledního uložení se změnily záznamy nebo popis scény (frontmatter `summaryStale`) */
@@ -253,6 +255,7 @@ export const SceneInputSchema = z.object({
   /** Textura prózy; null = bez textury; undefined při vytvoření = převzít ze sousední scény */
   proseTexture: ImageRefSchema.optional(),
   proseTextColor: ProseTextColorSchema.optional(),
+  prosePrompts: z.array(z.string().trim().min(1).max(20000)).max(100).optional(),
   summary: z.string().max(20000).optional(),
   contextScenes: z.array(z.string().trim().min(1)).max(50).optional(),
 })
@@ -979,6 +982,19 @@ export const SceneSummaryResponseSchema = z.object({
   raw: z.string(),
 })
 export type SceneSummaryResponse = z.infer<typeof SceneSummaryResponseSchema>
+
+/** Tělo `POST /api/games/:game/scenes/:scene/prose/ai` – pokyn autora pro AI pokračování prózy */
+export const ProseAiRequestSchema = z.object({
+  prompt: z.string().trim().min(1).max(20000),
+})
+export type ProseAiRequest = z.infer<typeof ProseAiRequestSchema>
+
+/** Odpověď – text pokračování (markdown; FE ho připíše na konec editoru) a aktualizovaná historie promptů scény */
+export const ProseAiResponseSchema = z.object({
+  text: z.string(),
+  prompts: z.array(z.string()),
+})
+export type ProseAiResponse = z.infer<typeof ProseAiResponseSchema>
 
 /** Odpověď `POST /api/games/:game/scenes/:scene/context-scenes` – AI výběr předchozích scén relevantních pro tuto scénu (neukládá se) */
 export const SceneContextSuggestionResponseSchema = z.object({

@@ -217,6 +217,24 @@ export default function StoryEditor() {
     const ref = image === null ? null : await api.storeImage(gameName, 'texture', image, currentScene.title)
     await handleProseAppearance({ proseTexture: ref })
   }
+  /** AI pokračování prózy: BE uloží prompt do historie scény, text se vrátí editoru k připsání */
+  const handleProseAi = async (prompt: string): Promise<string> => {
+    if (!currentScene) throw new Error('Není vybraná scéna.')
+    const sceneId = currentScene.id
+    const result = await api.continueProse(gameName, sceneId, prompt)
+    setScenes(prev => prev.map(s => (s.id === sceneId ? { ...s, prosePrompts: result.prompts } : s)))
+    return result.text
+  }
+  const handleProseDeletePrompt = async (prompt: string) => {
+    if (!currentScene) return
+    const prosePrompts = currentScene.prosePrompts.filter(p => p !== prompt)
+    try {
+      const saved = await api.updateScene(gameName, currentScene.id, { title: currentScene.title, prosePrompts })
+      setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Prompt se nepodařilo smazat.')
+    }
+  }
   // V pásu a při psaní jen postavy aktuální scény (+ dočasní mluvčí, kteří v ní mluví); AI postavy označené
   const displayCharacters = useMemo(() => {
     const inScene = new Set(currentScene?.characters ?? [])
@@ -1671,6 +1689,9 @@ export default function StoryEditor() {
               onUploadImage={handleProseUploadImage}
               onTextureChange={handleProseTextureChange}
               onTextColorChange={color => handleProseAppearance({ proseTextColor: color })}
+              aiPrompts={currentScene.prosePrompts}
+              onGenerateAi={handleProseAi}
+              onDeleteAiPrompt={handleProseDeletePrompt}
             />
           ) : (
           <>
