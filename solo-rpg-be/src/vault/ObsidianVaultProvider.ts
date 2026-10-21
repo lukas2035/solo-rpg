@@ -75,6 +75,7 @@ import {
 } from './fsUtils.js'
 import { parseEntries, renameSpeaker, serializeEntries } from './sceneMarkdown.js'
 import { proseDocToMarkdown } from './proseMarkdown.js'
+import { legacyProsePrompts } from '../storage/kinds.js'
 import { parseSessions, serializeSessions, sessionId } from './sessionsMarkdown.js'
 
 const GAME_FILE = 'game.md'
@@ -1076,7 +1077,7 @@ export class ObsidianVaultProvider implements StorageProvider {
           mode: SceneModeSchema.catch('play').parse(data.mode ?? 'play'),
           proseTexture: stringOrNull(data.proseTexture),
           proseTextColor: ProseTextColorSchema.catch('light').parse(data.proseTextColor ?? 'light'),
-          prosePrompts: Array.isArray(data.prosePrompts) ? data.prosePrompts.filter((p): p is string => typeof p === 'string' && p.trim() !== '') : [],
+          prosePrompts: legacyProsePrompts(data.prosePrompts),
           contextScenes: parseCharacterLinks(data.contextScenes),
           createdAt: toTimestamp(data.createdAt, stat.birthtimeMs),
           updatedAt: toTimestamp(data.updatedAt, stat.mtimeMs),

@@ -177,6 +177,21 @@ export type ProseDoc = z.infer<typeof ProseDocSchema>
 export const SceneProseSchema = z.object({ doc: ProseDocSchema.nullable() })
 export type SceneProse = z.infer<typeof SceneProseSchema>
 
+/** Režim AI v editoru prózy: `continue` = napsat pokračování na konec, `rewrite` = přepracovat označený úsek (nebo celý text) */
+export const ProseAiModeSchema = z.enum(['continue', 'rewrite'])
+export type ProseAiMode = z.infer<typeof ProseAiModeSchema>
+
+/** Položka historie AI v editoru prózy – pokyn autora spolu s odpovědí modelu (markdown), aby šly obojí znovu použít / zkopírovat */
+export const ProsePromptEntrySchema = z.object({
+  mode: ProseAiModeSchema,
+  prompt: z.string(),
+  /** Text vrácený modelem (u `rewrite` nový úsek); prázdný u položek z doby, kdy se odpovědi neukládaly */
+  response: z.string(),
+  /** Čas odeslání (ms); 0 = neznámý (starší položky) */
+  createdAt: z.number(),
+})
+export type ProsePromptEntry = z.infer<typeof ProsePromptEntrySchema>
+
 export const SceneMetaSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -211,8 +226,8 @@ export const SceneMetaSchema = z.object({
   proseTexture: ImageRefSchema,
   /** Barva písma prózy (frontmatter `proseTextColor`; dědí se do nové scény); výchozí `light` */
   proseTextColor: ProseTextColorSchema,
-  /** Historie promptů poslaných AI z editoru prózy (nejnovější první; frontmatter `prosePrompts`) – k opětovnému použití */
-  prosePrompts: z.array(z.string()),
+  /** Historie AI v editoru prózy – pokyny i odpovědi (nejnovější první; frontmatter `prosePrompts`) – k opětovnému použití */
+  prosePrompts: z.array(ProsePromptEntrySchema),
   /** Celkové zhodnocení / shrnutí děje scény (markdown; tělo souboru za značkou `<!-- summary -->`) – rychlý kontext pro hráče i AI */
   summary: z.string(),
   /** Shrnutí je zastaralé – od jeho posledního uložení se změnily záznamy nebo popis scény (frontmatter `summaryStale`) */
@@ -255,7 +270,7 @@ export const SceneInputSchema = z.object({
   /** Textura prózy; null = bez textury; undefined při vytvoření = převzít ze sousední scény */
   proseTexture: ImageRefSchema.optional(),
   proseTextColor: ProseTextColorSchema.optional(),
-  prosePrompts: z.array(z.string().trim().min(1).max(20000)).max(100).optional(),
+  prosePrompts: z.array(ProsePromptEntrySchema).max(100).optional(),
   summary: z.string().max(20000).optional(),
   contextScenes: z.array(z.string().trim().min(1)).max(50).optional(),
 })
@@ -983,16 +998,32 @@ export const SceneSummaryResponseSchema = z.object({
 })
 export type SceneSummaryResponse = z.infer<typeof SceneSummaryResponseSchema>
 
-/** Tělo `POST /api/games/:game/scenes/:scene/prose/ai` – pokyn autora pro AI pokračování prózy */
-export const ProseAiRequestSchema = z.object({
-  prompt: z.string().trim().min(1).max(20000),
-})
+/**
+ * Tělo `POST /api/games/:game/scenes/:scene/prose/ai`.
+ * `continue`: pokyn autora, BE si vezme dosavadní text scény z úložiště a model napíše pokračování.
+ * `rewrite`: FE pošle markdown upravovaného úseku (`selection`) a text před/za ním jako kontext (`before`/`after`, prázdné
+ * při úpravě celého textu); `previous` = předchozí pokus modelu, který autorovi nevyhověl (při „Přepracovat“).
+ */
+export const ProseAiRequestSchema = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('continue'),
+    prompt: z.string().trim().min(1).max(20000),
+  }),
+  z.object({
+    mode: z.literal('rewrite'),
+    prompt: z.string().trim().min(1).max(20000),
+    selection: z.string().trim().min(1).max(500000),
+    before: z.string().max(500000),
+    after: z.string().max(500000),
+    previous: z.string().max(500000).optional(),
+  }),
+])
 export type ProseAiRequest = z.infer<typeof ProseAiRequestSchema>
 
-/** Odpověď – text pokračování (markdown; FE ho připíše na konec editoru) a aktualizovaná historie promptů scény */
+/** Odpověď – text od modelu (markdown; pokračování k připsání na konec, nebo nový úsek místo `selection`) a aktualizovaná historie scény */
 export const ProseAiResponseSchema = z.object({
   text: z.string(),
-  prompts: z.array(z.string()),
+  prompts: z.array(ProsePromptEntrySchema),
 })
 export type ProseAiResponse = z.infer<typeof ProseAiResponseSchema>
 

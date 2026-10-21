@@ -130,9 +130,14 @@ scene_documents ( scene_id PK, game_id, doc jsonb, updated_at )  -- próza: text
   překládají až ve FE. Vzhled prózy je per scéna (`proseTexture` – kind `texture`, opakovaná pod textem; `proseTextColor` light/dark)
   a nová scéna ho dědí od předchozí. Do Obsidian vaultu se próza exportuje jednosměrně jako markdown (`vault/proseMarkdown.ts`).
   API: `GET/PUT /api/games/:game/scenes/:scene/prose`.
-  AI pokračování: `POST …/prose/ai` (`ai/proseAi.ts`, prompt `prompts/prose-prompt.md`) dostane pokyn autora + celý dosavadní text
-  bez obrázků (ořez zepředu na `AI_TRANSCRIPT_TOKENS`), vrátí markdown, který FE připíše na konec editoru (`@tiptap/markdown`).
-  Pokyny se ukládají do historie scény `prosePrompts` (nejnovější první, max 50; FE: kopírovat / znovu použít / smazat).
+  AI v editoru: `POST …/prose/ai` (`ai/proseAi.ts`) ve dvou režimech. `continue` (prompt `prompts/prose-prompt.md`) dostane
+  pokyn autora + celý dosavadní text bez obrázků (ořez zepředu na `AI_TRANSCRIPT_TOKENS`) a vrátí markdown, který FE připíše
+  na konec editoru (`@tiptap/markdown`). `rewrite` (prompt `prompts/prose-rewrite-prompt.md`) dostane od FE markdown označeného
+  úseku (výběr rozšířený na celé bloky; bez výběru celý text) + text před/za ním jako kontext (ořez na rozpočet) + volitelně
+  předchozí nevyhovující pokus; vrátí jen nový úsek, FE ho ukáže jako slovní diff (`diff`) a po potvrzení jím nahradí původní
+  (rozložení obrázků se podle `src` obnoví). Každé odeslání se uloží do historie scény `prosePrompts` jako
+  `ProsePromptEntry { mode, prompt, response, createdAt }` (nejnovější první, max 50; FE: kopírovat pokyn i odpověď /
+  znovu použít / smazat). Fields scény v9; staré řetězce se migrují na položky bez odpovědi (`legacyProsePrompts`, i pro vault).
 
 ### 3.2 Entita (shared typ, orientačně)
 ```ts

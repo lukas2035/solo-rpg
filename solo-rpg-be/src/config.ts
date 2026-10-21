@@ -33,6 +33,8 @@ export interface Config {
     rulesPromptPath: string
     /** Absolutní cesta k souboru se systémovým promptem pro AI pokračování prózy (režim scény „próza“) */
     prosePromptPath: string
+    /** Absolutní cesta k souboru se systémovým promptem pro AI přepracování označeného úseku prózy */
+    proseRewritePromptPath: string
     /** Limit délky odpovědi modelu (tokeny) */
     maxTokens: number
     temperature: number
@@ -65,6 +67,7 @@ export function loadConfig(): Config {
   const contextPromptPath = path.resolve(process.cwd(), process.env.AI_CONTEXT_PROMPT_PATH ?? 'prompts/scene-context-prompt.md')
   const rulesPromptPath = path.resolve(process.cwd(), process.env.AI_RULES_PROMPT_PATH ?? 'prompts/rules-prompt.md')
   const prosePromptPath = path.resolve(process.cwd(), process.env.AI_PROSE_PROMPT_PATH ?? 'prompts/prose-prompt.md')
+  const proseRewritePromptPath = path.resolve(process.cwd(), process.env.AI_PROSE_REWRITE_PROMPT_PATH ?? 'prompts/prose-rewrite-prompt.md')
   const maxTokens = Number(process.env.AI_MAX_TOKENS ?? 1500)
   const temperature = Number(process.env.AI_TEMPERATURE ?? 0.9)
   const contextTokens = Number(process.env.AI_CONTEXT_TOKENS ?? 12000)
@@ -75,6 +78,6 @@ export function loadConfig(): Config {
     port,
     databaseUrl,
     dataDir,
-    ai: { provider, apiKey, model, promptPath, summaryPromptPath, contextPromptPath, rulesPromptPath, prosePromptPath, maxTokens, temperature, contextTokens, transcriptTokens, debug },
+    ai: { provider, apiKey, model, promptPath, summaryPromptPath, contextPromptPath, rulesPromptPath, prosePromptPath, proseRewritePromptPath, maxTokens, temperature, contextTokens, transcriptTokens, debug },
   }
 }

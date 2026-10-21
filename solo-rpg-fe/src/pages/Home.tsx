@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { isValidGameName } from '@solo-rpg/shared'
 import type { GameMeta } from '@solo-rpg/shared'
-import { ApiError, listGames, deleteGame, createGame, pickSaveFile, backupGame } from '../utils/api'
+import { ApiError, listGames, deleteGame, createGame, pickSaveFile, backupGame, exportGameToVault } from '../utils/api'
 import { useVaultPath } from '../utils/vaultPath'
 import VaultSetup from '../components/VaultSetup'
 
@@ -25,11 +25,14 @@ export default function Home() {
   const [showNewGame, setShowNewGame] = useState(false)
   const [showLoadGame, setShowLoadGame] = useState(false)
   const [showBackup, setShowBackup] = useState(false)
+  const [showExport, setShowExport] = useState(false)
   const [showVaultSetup, setShowVaultSetup] = useState(false)
   const [newGameName, setNewGameName] = useState('')
   const [nameError, setNameError] = useState<string | null>(null)
   const [backupBusy, setBackupBusy] = useState<string | null>(null)
   const [backupMessage, setBackupMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
+  const [exportBusy, setExportBusy] = useState<string | null>(null)
+  const [exportMessage, setExportMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
 
   const refreshGames = () =>
     listGames()
@@ -51,6 +54,7 @@ export default function Home() {
     setShowNewGame(false)
     setShowLoadGame(false)
     setShowBackup(false)
+    setShowExport(false)
     setShowVaultSetup(false)
   }
 
@@ -114,6 +118,21 @@ export default function Home() {
     }
   }
 
+  /** Export hry do Obsidian vaultu (Markdown + YAML) do aktuální složky s hrami */
+  const handleExportGame = async (name: string) => {
+    setExportBusy(name)
+    setExportMessage(null)
+    try {
+      const path = await exportGameToVault(name)
+      setExportMessage({ kind: 'ok', text: `Hra vyexportována do: ${path}` })
+    } catch (error) {
+      console.error('Export hry do Obsidianu selhal:', error)
+      setExportMessage({ kind: 'error', text: `Export selhal: ${error instanceof Error ? error.message : 'neznámá chyba'}` })
+    } finally {
+      setExportBusy(null)
+    }
+  }
+
   const formatDate = (timestamp: number) =>
     new Date(timestamp).toLocaleString('cs-CZ', { dateStyle: 'medium', timeStyle: 'short' })
 
@@ -159,6 +178,14 @@ export default function Home() {
               className="px-8 py-3 border-2 border-[var(--border)] text-[var(--text-h)] rounded-lg font-semibold hover:border-[var(--accent)] transition-colors"
             >
               Zálohovat hru
+            </button>
+          )}
+          {games.length > 0 && (
+            <button
+              onClick={() => { const next = !showExport; closePanels(); setShowExport(next); setExportMessage(null) }}
+              className="px-8 py-3 border-2 border-[var(--border)] text-[var(--text-h)] rounded-lg font-semibold hover:border-[var(--accent)] transition-colors"
+            >
+              Exportovat do Obsidianu
             </button>
           )}
         </div>
@@ -235,6 +262,33 @@ export default function Home() {
             ))}
             {backupMessage && (
               <div className={`text-sm break-all ${backupMessage.kind === 'ok' ? 'text-green-500' : 'text-red-400'}`}>{backupMessage.text}</div>
+            )}
+          </div>
+        )}
+
+        {/* Export do Obsidian vaultu: výběr hry → složka hry (Markdown + YAML) v aktuální složce s hrami */}
+        {showExport && (
+          <div className="flex flex-col gap-2 mb-8 w-96 max-w-full">
+            <div className="text-sm text-[var(--text)] mb-1">
+              Vyber hru, kterou chceš vyexportovat jako Obsidian vault do složky{' '}
+              <span className="font-mono text-[var(--text-h)] break-all">{vaultPath ?? '(výchozí složka projektu)'}</span>:
+            </div>
+            {games.map(game => (
+              <button
+                key={game.name}
+                onClick={() => handleExportGame(game.name)}
+                disabled={exportBusy !== null}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[var(--border)] hover:border-[var(--accent)] transition-colors text-left disabled:opacity-50"
+              >
+                <span className="flex-1 text-[var(--text)]">
+                  <span className="font-semibold">{game.name}</span>
+                  <span className="block text-xs opacity-70">{formatDate(game.updatedAt)}</span>
+                </span>
+                <span title="Exportovat">{exportBusy === game.name ? '…' : '📤'}</span>
+              </button>
+            ))}
+            {exportMessage && (
+              <div className={`text-sm break-all ${exportMessage.kind === 'ok' ? 'text-green-500' : 'text-red-400'}`}>{exportMessage.text}</div>
             )}
           </div>
         )}

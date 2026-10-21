@@ -10,6 +10,7 @@ import {
   LoreKnowledgeSchema,
   LoreTruthSchema,
   LoreTypeSchema,
+  ProsePromptEntrySchema,
   ProseTextColorSchema,
   QuestObjectiveSchema,
   QuestStatusSchema,
@@ -58,8 +59,8 @@ export const SceneFields = z.object({
   proseTexture: z.string().nullable(),
   /** Barva písma prózy */
   proseTextColor: ProseTextColorSchema,
-  /** Historie promptů pro AI pokračování prózy (nejnovější první) */
-  prosePrompts: z.array(z.string()),
+  /** Historie AI v editoru prózy – pokyn + odpověď modelu (nejnovější první) */
+  prosePrompts: z.array(ProsePromptEntrySchema),
   summary: z.string(),
   summaryStale: z.boolean(),
   /** Stav Directoru (rozpracovaný brief + probíhající událost); null = nic rozehraného */
@@ -128,6 +129,24 @@ export type FieldsOf<K extends EntityKind> = z.infer<(typeof FIELD_SCHEMAS)[K]>
 
 type Migration = (old: unknown) => unknown
 
+/**
+ * Převede historii promptů prózy ze starého tvaru (pole řetězců) na položky s odpovědí; položky, které už tvar mají,
+ * ponechá. Používá ho migrace scény v8 → v9 i čtení frontmatteru z Obsidian vaultu.
+ */
+export function legacyProsePrompts(raw: unknown): z.infer<typeof ProsePromptEntrySchema>[] {
+  if (!Array.isArray(raw)) return []
+  const result: z.infer<typeof ProsePromptEntrySchema>[] = []
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      if (item.trim()) result.push({ mode: 'continue', prompt: item, response: '', createdAt: 0 })
+      continue
+    }
+    const parsed = ProsePromptEntrySchema.safeParse(item)
+    if (parsed.success && parsed.data.prompt.trim()) result.push(parsed.data)
+  }
+  return result
+}
+
 /** Aktuální verze tvaru `fields` per kind a řetězec migrací `migrations[v]` převádí v → v+1 */
 export const KIND_VERSIONS: Record<EntityKind, { current: number; migrations: Record<number, Migration> }> = {
   character: { current: 1, migrations: {} },
@@ -140,8 +159,9 @@ export const KIND_VERSIONS: Record<EntityKind, { current: number; migrations: Re
   // v6: způsob schvalování textů od AI (panel = dosavadní chování)
   // v7: režim scény (play = dosavadní chování) + vzhled prózy (textura, barva písma)
   // v8: historie promptů pro AI pokračování prózy
+  // v9: historie prózy ukládá i odpověď modelu a režim (continue / rewrite); staré řetězce → položky bez odpovědi
   scene: {
-    current: 8,
+    current: 9,
     migrations: {
       1: old => ({ ...(old as object), summaryStale: false }),
       2: old => ({ ...(old as object), director: null }),
@@ -150,6 +170,10 @@ export const KIND_VERSIONS: Record<EntityKind, { current: number; migrations: Re
       5: old => ({ ...(old as object), aiReview: 'panel' }),
       6: old => ({ ...(old as object), mode: 'play', proseTexture: null, proseTextColor: 'light' }),
       7: old => ({ ...(old as object), prosePrompts: [] }),
+      8: old => {
+        const o = old as { prosePrompts?: unknown }
+        return { ...o, prosePrompts: legacyProsePrompts(o.prosePrompts) }
+      },
     },
   },
   thread: { current: 1, migrations: {} },

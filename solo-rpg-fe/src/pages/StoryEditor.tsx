@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { AiReview, AiSuggestion, BriefPatch, Character, CharacterInput, DirectorState, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, ProseDoc, ProseTextColor, PulseOverride, Quest, QuestInput, QuestProposal, QuestStatus, RollOutcome, RulesSystem, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
+import type { AiReview, AiSuggestion, BriefPatch, Character, CharacterInput, DirectorState, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, ProseAiRequest, ProseDoc, ProsePromptEntry, ProseTextColor, PulseOverride, Quest, QuestInput, QuestProposal, QuestStatus, RollOutcome, RulesSystem, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
 import { OPEN_THREAD_STATUSES, locationPath } from '@solo-rpg/shared'
 import CharacterBar from '../components/CharacterBar'
 import StoryPanel from '../components/StoryPanel'
@@ -217,17 +217,17 @@ export default function StoryEditor() {
     const ref = image === null ? null : await api.storeImage(gameName, 'texture', image, currentScene.title)
     await handleProseAppearance({ proseTexture: ref })
   }
-  /** AI pokračování prózy: BE uloží prompt do historie scény, text se vrátí editoru k připsání */
-  const handleProseAi = async (prompt: string): Promise<string> => {
+  /** AI v editoru prózy: BE uloží pokyn i odpověď do historie scény, text se vrátí editoru (připsání / diff k potvrzení) */
+  const handleProseAi = async (body: ProseAiRequest): Promise<string> => {
     if (!currentScene) throw new Error('Není vybraná scéna.')
     const sceneId = currentScene.id
-    const result = await api.continueProse(gameName, sceneId, prompt)
+    const result = await api.proseAi(gameName, sceneId, body)
     setScenes(prev => prev.map(s => (s.id === sceneId ? { ...s, prosePrompts: result.prompts } : s)))
     return result.text
   }
-  const handleProseDeletePrompt = async (prompt: string) => {
+  const handleProseDeletePrompt = async (entry: ProsePromptEntry) => {
     if (!currentScene) return
-    const prosePrompts = currentScene.prosePrompts.filter(p => p !== prompt)
+    const prosePrompts = currentScene.prosePrompts.filter(p => !(p.createdAt === entry.createdAt && p.prompt === entry.prompt && p.response === entry.response))
     try {
       const saved = await api.updateScene(gameName, currentScene.id, { title: currentScene.title, prosePrompts })
       setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))

@@ -1,12 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type Editor, type NodeViewProps } from '@tiptap/react'
+import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type Editor, type JSONContent, type NodeViewProps } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import { Placeholder } from '@tiptap/extensions'
 import { Markdown } from '@tiptap/markdown'
-import type { ImageRef, ProseDoc, ProseImageLayout, ProseTextColor } from '@solo-rpg/shared'
+import type { ImageRef, ProseAiRequest, ProseDoc, ProseImageLayout, ProsePromptEntry, ProseTextColor } from '@solo-rpg/shared'
 import { assetUrl, useAssetVersion } from '../utils/api'
-import ProseAiModal from './ProseAiModal'
+import ProseAiModal, { type ProseAiDraft, type ProseRewriteTarget } from './ProseAiModal'
+import FloatingPortrait from './FloatingPortrait'
+import PortraitModal from './PortraitModal'
+import { restoreMissingImages } from '../utils/proseImages'
 
 /**
  * Textový editor pro scény v režimu „próza“ (WYSIWYG markdown přes TipTap/ProseMirror).
@@ -29,11 +32,22 @@ interface ProseEditorProps {
   onUploadImage: (image: File | string) => Promise<ImageRef>
   onTextureChange: (image: File | string | null) => Promise<void>
   onTextColorChange: (color: ProseTextColor) => Promise<void>
-  /** Historie promptů pro AI (nejnovější první) */
-  aiPrompts: string[]
-  /** Pošle pokyn AI a vrátí markdown pokračování (editor ho připíše na konec) */
-  onGenerateAi: (prompt: string) => Promise<string>
-  onDeleteAiPrompt: (prompt: string) => Promise<void>
+  /** Historie AI této scény – pokyny i odpovědi (nejnovější první) */
+  aiPrompts: ProsePromptEntry[]
+  /** Pošle požadavek AI a vrátí markdown od modelu (pokračování, nebo nový úsek místo označeného) */
+  onGenerateAi: (body: ProseAiRequest) => Promise<string>
+  onDeleteAiPrompt: (entry: ProsePromptEntry) => Promise<void>
+}
+
+/** Úsek dokumentu k přepracování AI: pozice v ProseMirroru + markdown úseku a textu kolem (kontext pro model) */
+interface AiSelectionRange extends ProseRewriteTarget {
+  from: number
+  to: number
+}
+
+/** Rozpracovaný návrh úpravy: úsek, pokyn a text od AI čekající na potvrzení */
+interface AiDraft extends ProseAiDraft {
+  range: AiSelectionRange
 }
 
 const SAVE_DELAY_MS = 1000
@@ -45,8 +59,10 @@ const EMPTY_DOC: ProseDoc = { type: 'doc', content: [{ type: 'paragraph' }] }
 interface ProseImageContextValue {
   game: string
   onReplace: (pos: number, image: File | string) => void
+  /** Otevřít obrázek v plovoucím okně (dvojklik na obrázek nebo 🗗 v jeho liště) */
+  onFloat: (src: ImageRef) => void
 }
-const ProseImageContext = createContext<ProseImageContextValue>({ game: '', onReplace: () => {} })
+const ProseImageContext = createContext<ProseImageContextValue>({ game: '', onReplace: () => {}, onFloat: () => {} })
 
 /** Obrázek s rozložením: přes celou šířku / vlevo vedle textu / vpravo vedle textu */
 const ProseImage = Image.extend({
@@ -95,7 +111,14 @@ function ProseImageView({ node, updateAttributes, deleteNode, selected, editor, 
       data-drag-handle
     >
       {url ? (
-        <img src={url} alt={typeof node.attrs.alt === 'string' ? node.attrs.alt : ''} className="block w-full h-auto rounded-lg select-none" draggable={false} />
+        <img
+          src={url}
+          alt={typeof node.attrs.alt === 'string' ? node.attrs.alt : ''}
+          title="Dvojklik = otevřít v plovoucím okně"
+          onDoubleClick={e => { e.preventDefault(); if (src) storage.onFloat(src) }}
+          className="block w-full h-auto rounded-lg select-none"
+          draggable={false}
+        />
       ) : (
         <div className="w-full aspect-video rounded-lg bg-black/40 flex items-center justify-center text-sm opacity-60">Obrázek chybí</div>
       )}
@@ -119,6 +142,16 @@ function ProseImageView({ node, updateAttributes, deleteNode, selected, editor, 
             </button>
           ))}
           <span className="w-px bg-white/20 mx-0.5" />
+          <button
+            type="button"
+            title="Otevřít v plovoucím okně (nebo dvojklik na obrázek)"
+            disabled={!src}
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => { if (src) storage.onFloat(src) }}
+            className="w-7 h-7 rounded-md hover:bg-white/15 disabled:opacity-40"
+          >
+            🗗
+          </button>
           <button
             type="button"
             title="Nahradit obrázek"
@@ -151,6 +184,62 @@ function ProseImageView({ node, updateAttributes, deleteNode, selected, editor, 
 
 const isImageFile = (file: File) => file.type.startsWith('image/')
 
+/** Markdown části dokumentu mezi pozicemi (přes @tiptap/markdown; obrázky jako `![alt](src)`) */
+function rangeToMarkdown(ed: Editor, from: number, to: number): string {
+  if (to <= from) return ''
+  const content = ed.state.doc.slice(from, to).content.toJSON() as JSONContent[] | null
+  return (ed.markdown?.serialize({ type: 'doc', content: content ?? [] }) ?? '').trim()
+}
+
+/**
+ * Úsek k přepracování AI: výběr v editoru rozšířený na celé bloky nejvyšší úrovně (odstavce, seznamy, citace…),
+ * aby šel po návratu nahradit markdownem bez rozbití struktury. Bez výběru = celý dokument. Null = dokument je prázdný.
+ */
+function captureAiSelection(ed: Editor): AiSelectionRange | null {
+  const { doc, selection } = ed.state
+  let from = 0
+  let to = doc.content.size
+  let whole = true
+  if (!selection.empty) {
+    const $from = doc.resolve(selection.from)
+    const $to = doc.resolve(selection.to)
+    from = $from.depth >= 1 ? $from.before(1) : selection.from
+    // Výběr končící na začátku dalšího bloku (typicky tažením přes konec odstavce) ten blok nezahrnuje
+    const endsAtBlockStart = $to.depth >= 1 && $to.parentOffset === 0 && $to.before(1) > from
+    to = $to.depth >= 1 ? (endsAtBlockStart ? $to.before(1) : $to.after(1)) : selection.to
+    whole = false
+  }
+  const text = rangeToMarkdown(ed, from, to)
+  if (!text) return null
+  return {
+    from,
+    to,
+    whole,
+    selection: text,
+    before: whole ? '' : rangeToMarkdown(ed, 0, from),
+    after: whole ? '' : rangeToMarkdown(ed, to, doc.content.size),
+  }
+}
+
+/** Nahradí úsek markdownem od AI a obrázkům, které v něm zůstaly, vrátí původní rozložení (markdown ho nenese) */
+function replaceRangeWithMarkdown(ed: Editor, range: AiSelectionRange, markdown: string): void {
+  const layouts = new Map<string, ProseImageLayout>()
+  ed.state.doc.nodesBetween(range.from, range.to, node => {
+    if (node.type.name === 'image' && typeof node.attrs.src === 'string') layouts.set(node.attrs.src, node.attrs.layout as ProseImageLayout)
+  })
+  const sizeBefore = ed.state.doc.content.size
+  ed.chain().focus().insertContentAt({ from: range.from, to: range.to }, markdown, { contentType: 'markdown' }).run()
+  if (layouts.size === 0) return
+  const newTo = range.to + (ed.state.doc.content.size - sizeBefore)
+  const tr = ed.state.tr
+  ed.state.doc.nodesBetween(range.from, Math.min(newTo, ed.state.doc.content.size), (node, pos) => {
+    if (node.type.name !== 'image' || typeof node.attrs.src !== 'string') return
+    const layout = layouts.get(node.attrs.src)
+    if (layout && layout !== node.attrs.layout) tr.setNodeMarkup(pos, undefined, { ...node.attrs, layout })
+  })
+  if (tr.docChanged) ed.view.dispatch(tr)
+}
+
 /** Vytáhne URL obrázku z přetaženého obsahu z webu */
 function imageUrlFromTransfer(data: DataTransfer): string | null {
   const html = data.getData('text/html')
@@ -163,7 +252,15 @@ export default function ProseEditor({ game, sceneId, doc, texture, textColor, on
   const version = useAssetVersion()
   const [status, setStatus] = useState<'saved' | 'dirty' | 'saving' | 'error'>('saved')
   const [uploading, setUploading] = useState(0)
+  // AI dialog: otevřený? + úsek zachycený při otevření (null = dokument je prázdný, úprava není možná)
   const [aiOpen, setAiOpen] = useState(false)
+  const [aiRange, setAiRange] = useState<AiSelectionRange | null>(null)
+  // Nepotvrzený návrh úpravy od AI – přežije zavření dialogu, dokud ho autor nepoužije nebo nezahodí
+  const [aiDraft, setAiDraft] = useState<AiDraft | null>(null)
+  const aiDraftRef = useRef<AiDraft | null>(null)
+  // Obrázky z textu otevřené v plovoucích oknech (poslední v poli je nahoře) + obrázek na celou obrazovku
+  const [floatingImages, setFloatingImages] = useState<ImageRef[]>([])
+  const [fullscreenImage, setFullscreenImage] = useState<{ url: string; name: string } | null>(null)
   const timerRef = useRef<number | null>(null)
   const dirtyRef = useRef(false)
   const textureInputRef = useRef<HTMLInputElement | null>(null)
@@ -240,16 +337,28 @@ export default function ProseEditor({ game, sceneId, doc, texture, textColor, on
         return true
       },
     },
-    onUpdate: ({ editor: ed }) => {
+    onUpdate: ({ editor: ed, transaction }) => {
       dirtyRef.current = true
       setStatus('dirty')
       if (timerRef.current) window.clearTimeout(timerRef.current)
       timerRef.current = window.setTimeout(() => void flush(ed, latest.current.sceneId), SAVE_DELAY_MS)
+      // Pozice čekajícího návrhu úpravy posunout podle změn v dokumentu, aby po potvrzení nahradil správný úsek
+      const draft = aiDraftRef.current
+      if (draft && transaction.docChanged) {
+        const from = transaction.mapping.map(draft.range.from, -1)
+        const to = Math.max(from, transaction.mapping.map(draft.range.to, 1))
+        if (from !== draft.range.from || to !== draft.range.to) {
+          const next = { ...draft, range: { ...draft.range, from, to } }
+          aiDraftRef.current = next
+          setAiDraft(next)
+        }
+      }
     },
   })
   useEffect(() => {
     latest.current = { sceneId, onSave, onUploadImage }
     editorRef.current = editor
+    aiDraftRef.current = aiDraft
   })
 
   // Hra pro překlad odkazů v NodeView + náhrada obrázku z jeho lišty
@@ -273,7 +382,16 @@ export default function ProseEditor({ game, sceneId, doc, texture, textColor, on
         }
       })()
     },
+    onFloat: src => setFloatingImages(prev => [...prev.filter(s => s !== src), src]),
   }), [game])
+
+  const floatingWindows = useMemo(
+    () => floatingImages.flatMap((src, i) => {
+      const url = assetUrl(game, src, version)
+      return url ? [{ src, url, name: `Ilustrace ${i + 1}` }] : []
+    }),
+    [floatingImages, game, version]
+  )
 
   // Přepnutí scény: uložit předchozí a načíst nový dokument (bez vyvolání onUpdate)
   const loadedFor = useRef<string | null>(null)
@@ -283,6 +401,12 @@ export default function ProseEditor({ game, sceneId, doc, texture, textColor, on
     if (loadedFor.current !== null && loadedFor.current !== sceneId) {
       void flush(editor, loadedFor.current)
       loadedFor.current = null
+      // Návrh úpravy patří k dokumentu předchozí scény
+      aiDraftRef.current = null
+      setAiDraft(null)
+      setAiOpen(false)
+      setFloatingImages([])
+      setFullscreenImage(null)
     }
     if (doc === undefined) {
       editor.setEditable(false)
@@ -310,14 +434,55 @@ export default function ProseEditor({ game, sceneId, doc, texture, textColor, on
   const textureUrl = texture ? assetUrl(game, texture, version) : null
   const dark = textColor === 'dark'
 
+  /** Otevře AI dialog; výběr v editoru se zachytí teď (po otevření dialogu editor ztratí fokus). Čekající návrh má přednost. */
+  const openAi = () => {
+    const ed = editorRef.current
+    if (!ed) return
+    setAiRange(aiDraft ? aiDraft.range : captureAiSelection(ed))
+    setAiOpen(true)
+  }
+
+  /** Dialog hlásí stav návrhu: text od AI k potvrzení, nebo null po použití / zahození */
+  const handleDraftChange = (draft: ProseAiDraft | null) => {
+    if (!draft || !aiRange) {
+      aiDraftRef.current = null
+      setAiDraft(null)
+      return
+    }
+    const next = { ...draft, range: aiRange }
+    aiDraftRef.current = next
+    setAiDraft(next)
+  }
+
   /** Pošle pokyn AI a vrácený markdown připíše na konec dokumentu (vyvolá onUpdate → autosave) */
-  const generateAi = async (prompt: string) => {
+  const continueAi = async (prompt: string) => {
     const ed = editorRef.current
     if (!ed) throw new Error('Editor není připraven.')
-    const text = (await onGenerateAi(prompt)).trim()
+    // Dosavadní text si BE bere z úložiště – rozpracované změny napřed uložit
+    await flush(ed, latest.current.sceneId)
+    const text = (await onGenerateAi({ mode: 'continue', prompt })).trim()
     if (!text) throw new Error('AI vrátila prázdný text.')
     const end = ed.state.doc.content.size
     ed.chain().focus('end').insertContentAt(end, text, { contentType: 'markdown' }).run()
+    window.setTimeout(() => ed.commands.scrollIntoView(), 0)
+  }
+
+  /** Nechá AI přepracovat zachycený úsek; vrátí nový markdown (dialog ho ukáže jako diff k potvrzení).
+   *  Obrázky, které model z úseku vynechal, se do výsledku vrátí (viz restoreMissingImages). */
+  const rewriteAi = async (prompt: string, previous?: string) => {
+    if (!aiRange) throw new Error('Není co upravovat.')
+    const text = (await onGenerateAi({ mode: 'rewrite', prompt, selection: aiRange.selection, before: aiRange.before, after: aiRange.after, previous })).trim()
+    if (!text) throw new Error('AI vrátila prázdný text.')
+    const fixed = restoreMissingImages(aiRange.selection, text)
+    return { text: fixed.text, restoredImages: fixed.restored }
+  }
+
+  /** Potvrzený výsledek úpravy: nahradí původní úsek v editoru (pozice případně posunuté podle mezitím provedených změn) */
+  const applyRewrite = (text: string) => {
+    const ed = editorRef.current
+    const range = aiDraft?.range ?? aiRange
+    if (!ed || !range) return
+    replaceRangeWithMarkdown(ed, range, text)
     window.setTimeout(() => ed.commands.scrollIntoView(), 0)
   }
 
@@ -359,7 +524,15 @@ export default function ProseEditor({ game, sceneId, doc, texture, textColor, on
         <span className="w-px h-5 bg-white/20 mx-1" />
         <button type="button" title="Vložit obrázek (nebo přetáhni / vlož ze schránky)" onClick={pickImage} className={toolButton}>🖼 Obrázek</button>
         <span className="w-px h-5 bg-white/20 mx-1" />
-        <button type="button" title="Nechat AI pokračovat v příběhu" disabled={doc === undefined} onClick={() => setAiOpen(true)} className={`${toolButton} text-cyan-300`}>🤖 AI</button>
+        <button
+          type="button"
+          title={aiDraft ? 'AI: čeká návrh úpravy k potvrzení – otevřít' : 'AI: pokračovat v příběhu, nebo přepracovat označený text'}
+          disabled={doc === undefined}
+          onClick={openAi}
+          className={`${toolButton} text-cyan-300 ${aiDraft ? 'bg-cyan-500/25 ring-1 ring-cyan-400/60' : ''}`}
+        >
+          🤖 AI{aiDraft ? ' ●' : ''}
+        </button>
         <span className="w-px h-5 bg-white/20 mx-1" />
         <button type="button" title={texture ? 'Změnit texturu pozadí' : 'Přidat texturu pozadí (např. papír)'} onClick={() => textureInputRef.current?.click()} className={toolButton}>
           {texture ? '🧻 Textura' : '🧻 Přidat texturu'}
@@ -407,7 +580,33 @@ export default function ProseEditor({ game, sceneId, doc, texture, textColor, on
       </div>
 
       {aiOpen && (
-        <ProseAiModal prompts={aiPrompts} onSubmit={generateAi} onDeletePrompt={onDeleteAiPrompt} onClose={() => setAiOpen(false)} />
+        <ProseAiModal
+          prompts={aiPrompts}
+          rewriteTarget={aiRange}
+          draft={aiDraft}
+          onDraftChange={handleDraftChange}
+          onContinue={continueAi}
+          onRewrite={rewriteAi}
+          onApplyRewrite={applyRewrite}
+          onDeletePrompt={onDeleteAiPrompt}
+          onClose={() => setAiOpen(false)}
+        />
+      )}
+
+      {floatingWindows.map((w, i) => (
+        <FloatingPortrait
+          key={w.src}
+          image={w.url}
+          name={w.name}
+          index={i}
+          active={i === floatingWindows.length - 1}
+          onFocus={() => setFloatingImages(prev => [...prev.filter(s => s !== w.src), w.src])}
+          onClose={() => setFloatingImages(prev => prev.filter(s => s !== w.src))}
+          onFullscreen={() => setFullscreenImage({ url: w.url, name: w.name })}
+        />
+      ))}
+      {fullscreenImage && (
+        <PortraitModal image={fullscreenImage.url} character={fullscreenImage.name} onClose={() => setFullscreenImage(null)} />
       )}
     </div>
   )

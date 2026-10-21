@@ -38,7 +38,7 @@ import { AiError } from '../ai/types.js'
 import { SuggestionService } from '../narrative/suggestions.js'
 import { DirectorService } from '../director/directorService.js'
 import { summarizeScene } from '../ai/sceneSummary.js'
-import { continueProse } from '../ai/proseAi.js'
+import { runProseAi } from '../ai/proseAi.js'
 import { suggestContextScenes } from '../ai/sceneContextScenes.js'
 import { buildRulesSection } from '../ai/rulesPrompt.js'
 import { importSceneTranscript } from '../vault/sceneImport.js'
@@ -320,11 +320,11 @@ export async function registerGameRoutes(app: FastifyInstance, vault: VaultManag
     return reply.code(204).send()
   })
 
-  /** AI pokračování prózy: pošle pokyn + dosavadní text (bez obrázků) modelu, pokyn uloží do historie scény. Text se neukládá – FE ho připíše do editoru. */
+  /** AI v editoru prózy: `continue` = pokračování na konec (BE si vezme dosavadní text), `rewrite` = nový úsek místo označeného. Pokyn i odpověď se uloží do historie scény; text se do dokumentu nezapisuje – to dělá FE. */
   app.post('/api/games/:game/scenes/:scene/prose/ai', async (request): Promise<ProseAiResponse> => {
     const { game, scene } = SceneParams.parse(request.params)
-    const { prompt } = ProseAiRequestSchema.parse(request.body)
-    return continueProse(vault.storage, config, game, scene, prompt, request.log)
+    const body = ProseAiRequestSchema.parse(request.body)
+    return runProseAi(vault.storage, config, game, scene, body, request.log)
   })
 
   /** Import odehraného přepisu (`**Jméno**: text`, např. z Notionu) – rozdělí na záznamy podle mluvčích a připíše na konec scény */
