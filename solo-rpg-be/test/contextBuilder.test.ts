@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_PROSE_BACKGROUND, PROSE_FONT_LIGHT } from '@solo-rpg/shared'
 import type { Faction, GameDetail, LoreEntry, Quest, SceneMeta, StoryLocation, StoryThread } from '@solo-rpg/shared'
 import { buildSceneContext, estimateTokens, transcriptCutoff } from '../src/narrative/contextBuilder.js'
 import { buildMessages } from '../src/ai/scenePrompt.js'
@@ -9,7 +10,7 @@ const DAY = 86_400_000
 
 const character = (id: string, name: string, notes = '') => ({ id, name, firstName: name.split(' ')[0], lastName: name.split(' ')[1] ?? '', nickname: name.split(' ')[0], image: null, notes })
 const scene = (p: Partial<SceneMeta> & { id: string; title: string; order: number }): SceneMeta => ({
-  description: '', image: null, characters: [], location: null, narrator: null, ai: true, aiCharacters: [], aiPrompt: '', aiMode: 'advanced', rulesInAi: false, aiReview: 'panel', darkBackground: false, mode: 'play', proseTexture: null, proseTextColor: 'light', prosePrompts: [], summary: '', summaryStale: false, entryCount: 0, contextScenes: [], createdAt: NOW, updatedAt: NOW, ...p,
+  description: '', image: null, characters: [], location: null, narrator: null, ai: true, aiCharacters: [], aiPrompt: '', aiMode: 'advanced', rulesInAi: false, aiReview: 'panel', darkBackground: false, mode: 'play', proseBackground: DEFAULT_PROSE_BACKGROUND, proseFont: PROSE_FONT_LIGHT, prosePrompts: [], summary: '', summaryStale: false, entryCount: 0, contextScenes: [], createdAt: NOW, updatedAt: NOW, ...p,
 })
 const thread = (p: Partial<StoryThread> & { id: string; title: string }): StoryThread => ({
   type: 'threat', status: 'active', horizon: 'short-term', certainty: 'confirmed', revealCondition: '', clock: null,
@@ -39,7 +40,7 @@ function campaign(): GameDetail {
     setup: {
       characters: [character('chr_klara', 'Klára Nováková'), character('chr_julia', 'Julia Kreuzová'), character('chr_marek', 'Marek Horák', 'Starý přítel Kláry.')],
       narrators: [narrator],
-      backgroundImage: null, rules: '', rulesSystem: 'none', pulseOverride: { tension: null, phase: null },
+      backgroundImage: null, rules: '', rulesSystem: 'none', pulseOverride: { tension: null, phase: null }, proseFonts: [],
     },
     scenes: [
       scene({ id: 'scn_1', title: 'Úvod', order: 1, summary: 'Klára přijela do Prahy.' }),

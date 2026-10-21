@@ -86,6 +86,96 @@ export const PulseOverrideSchema = z.object({
 })
 export type PulseOverride = z.infer<typeof PulseOverrideSchema>
 
+/** Barva písma prózy ve starém tvaru (do v9 fields / starý frontmatter `proseTextColor`); dnes nahrazena `ProseFont` */
+export const ProseTextColorSchema = z.enum(['light', 'dark'])
+export type ProseTextColor = z.infer<typeof ProseTextColorSchema>
+
+/** CSS barva `#rrggbb` */
+export const HexColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Barva musí být ve tvaru #rrggbb')
+
+/**
+ * Způsob vykreslení obrázku pozadí prózy:
+ * - `repeat` / `repeat-x` / `repeat-y` – dlaždice v původní velikosti (textura papíru apod.)
+ * - `original` – jednou, v původní velikosti, nahoře uprostřed
+ * - `fit-width` / `fit-height` – roztažený na šířku / výšku stránky se zachováním poměru stran (přesah se ořízne)
+ */
+export const ProseBackgroundModeSchema = z.enum(['repeat', 'repeat-x', 'repeat-y', 'original', 'fit-width', 'fit-height'])
+export type ProseBackgroundMode = z.infer<typeof ProseBackgroundModeSchema>
+
+/** Pozadí stránky prózy: obrázek (null = jen barva), způsob vykreslení a barva podkladu pod ním */
+export const ProseBackgroundSchema = z.object({
+  image: ImageRefSchema,
+  mode: ProseBackgroundModeSchema,
+  color: HexColorSchema,
+})
+export type ProseBackground = z.infer<typeof ProseBackgroundSchema>
+
+/** Barvy podkladu odpovídající dřívějšímu přepínači světlé / tmavé písmo */
+export const PROSE_BACKGROUND_DARK_COLOR = '#1a1a1a'
+export const PROSE_BACKGROUND_LIGHT_COLOR = '#e9e4d8'
+export const DEFAULT_PROSE_BACKGROUND: ProseBackground = { image: null, mode: 'repeat', color: PROSE_BACKGROUND_DARK_COLOR }
+
+/** Stín písma (CSS `text-shadow`); null = bez stínu */
+export const ProseFontShadowSchema = z.object({
+  color: HexColorSchema,
+  /** Rozostření v px */
+  blur: z.number().min(0).max(40),
+  /** Posun v px */
+  x: z.number().min(-20).max(20),
+  y: z.number().min(-20).max(20),
+})
+export type ProseFontShadow = z.infer<typeof ProseFontShadowSchema>
+
+/** Písmo prózy – jedno pro celou scénu: rodina (CSS `font-family`), základní velikost v px, barva a volitelný stín */
+export const ProseFontSchema = z.object({
+  family: z.string().trim().min(1).max(200),
+  size: z.number().min(10).max(72),
+  color: HexColorSchema,
+  shadow: ProseFontShadowSchema.nullable(),
+})
+export type ProseFont = z.infer<typeof ProseFontSchema>
+
+export const PROSE_FONT_DEFAULT_FAMILY = "Georgia, 'Times New Roman', serif"
+/** Výchozí světlé písmo (na tmavém podkladu) – odpovídá dřívějšímu `proseTextColor: 'light'` */
+export const PROSE_FONT_LIGHT: ProseFont = { family: PROSE_FONT_DEFAULT_FAMILY, size: 19, color: '#ece6d9', shadow: null }
+/** Výchozí tmavé písmo (na světlém podkladu) – odpovídá dřívějšímu `proseTextColor: 'dark'` */
+export const PROSE_FONT_DARK: ProseFont = { family: PROSE_FONT_DEFAULT_FAMILY, size: 19, color: '#1f1a14', shadow: null }
+
+/** Převod starého přepínače barvy písma na vzhled prózy (migrace fields, starý frontmatter) */
+export function proseAppearanceFromLegacy(texture: ImageRef, textColor: ProseTextColor): { proseBackground: ProseBackground; proseFont: ProseFont } {
+  const dark = textColor === 'dark'
+  return {
+    proseBackground: { image: texture, mode: 'repeat', color: dark ? PROSE_BACKGROUND_LIGHT_COLOR : PROSE_BACKGROUND_DARK_COLOR },
+    proseFont: dark ? PROSE_FONT_DARK : PROSE_FONT_LIGHT,
+  }
+}
+
+/** Písmo uložené v knihovně kampaně (GameSettings.proseFonts) – pojmenované, znovu použitelné v libovolné scéně */
+export const ProseFontPresetSchema = ProseFontSchema.extend({
+  id: z.string().min(1),
+  name: z.string().trim().min(1).max(60),
+})
+export type ProseFontPreset = z.infer<typeof ProseFontPresetSchema>
+
+/**
+ * Položka knihovny obrázků prózy (`GET …/prose-images`) – lokální asset druhu `illustration` nebo `texture`.
+ * `usage` = kolikrát na něj kampaň odkazuje (obrázky v textech všech scén + pozadí scén).
+ */
+export const ProseImageSchema = z.object({
+  /** ImageRef (`assets/<id><ext>`) – stejný řetězec jako `src` obrázku v textu / `proseBackground.image` */
+  path: z.string().min(1),
+  /** Původní název souboru (informativně) */
+  name: z.string(),
+  size: z.number().int().nonnegative(),
+  createdAt: z.number(),
+  usage: z.number().int().nonnegative(),
+})
+export type ProseImage = z.infer<typeof ProseImageSchema>
+
+/** Odpověď `DELETE …/prose-images/:asset` – kolik odkazů v textech a pozadích scén bylo odstraněno */
+export const ProseImageDeleteResponseSchema = z.object({ removedReferences: z.number().int().nonnegative() })
+export type ProseImageDeleteResponse = z.infer<typeof ProseImageDeleteResponseSchema>
+
 /** Nastavení hry bez postav a vypravěčů (ti mají vlastní CRUD endpointy) */
 export const GameSettingsSchema = z.object({
   backgroundImage: ImageRefSchema,
@@ -95,6 +185,8 @@ export const GameSettingsSchema = z.object({
   rulesSystem: RulesSystemSchema,
   /** Ruční korekce pulsu kampaně (napětí / fáze); frontmatter `pulseTension`, `pulsePhase` */
   pulseOverride: PulseOverrideSchema,
+  /** Knihovna písem prózy kampaně (frontmatter `proseFonts`) – pojmenovaná nastavení k použití v libovolné scéně */
+  proseFonts: z.array(ProseFontPresetSchema).max(100),
 })
 export type GameSettings = z.infer<typeof GameSettingsSchema>
 
@@ -136,9 +228,6 @@ export type AiReview = z.infer<typeof AiReviewSchema>
 export const SceneModeSchema = z.enum(['play', 'prose'])
 export type SceneMode = z.infer<typeof SceneModeSchema>
 
-/** Barva písma prózy – světlé písmo na tmavém podkladu (výchozí) nebo tmavé písmo (např. na světlé textuře papíru) */
-export const ProseTextColorSchema = z.enum(['light', 'dark'])
-export type ProseTextColor = z.infer<typeof ProseTextColorSchema>
 
 /** Rozložení obrázku v próze: přes celou šířku stránky, nebo půlka stránky s textem obtékajícím zprava/zleva */
 export const ProseImageLayoutSchema = z.enum(['full', 'left', 'right'])
@@ -176,6 +265,39 @@ export type ProseDoc = z.infer<typeof ProseDocSchema>
 /** Odpověď `GET …/scenes/:scene/prose` a tělo `PUT` – dokument prózy; null = scéna zatím nemá žádný text */
 export const SceneProseSchema = z.object({ doc: ProseDocSchema.nullable() })
 export type SceneProse = z.infer<typeof SceneProseSchema>
+
+/** Odkazy (`attrs.src`) všech obrázků v dokumentu prózy v pořadí výskytu, včetně duplicit */
+export function proseImageRefs(doc: ProseDoc): string[] {
+  const out: string[] = []
+  const walk = (node: ProseNode) => {
+    if (node.type === 'image' && typeof node.attrs?.src === 'string') out.push(node.attrs.src)
+    node.content?.forEach(walk)
+  }
+  doc.content?.forEach(walk)
+  return out
+}
+
+/**
+ * Přepíše odkazy obrázků v dokumentu podle `map` (starý src → nový src; null = obrázek z textu odstranit).
+ * Vrací nový dokument a počet zasažených obrázků; dokument beze změny vrací jako tentýž objekt.
+ */
+export function remapProseImages(doc: ProseDoc, map: ReadonlyMap<string, string | null>): { doc: ProseDoc; changed: number } {
+  let changed = 0
+  const walk = (node: ProseNode): ProseNode | null => {
+    if (node.type === 'image') {
+      const src = typeof node.attrs?.src === 'string' ? node.attrs.src : null
+      if (src === null || !map.has(src)) return node
+      changed++
+      const next = map.get(src)
+      return next === null || next === undefined ? null : { ...node, attrs: { ...node.attrs, src: next } }
+    }
+    if (!node.content) return node
+    const content = node.content.map(walk).filter((n): n is ProseNode => n !== null)
+    return { ...node, content }
+  }
+  const content = (doc.content ?? []).map(walk).filter((n): n is ProseNode => n !== null)
+  return changed === 0 ? { doc, changed: 0 } : { doc: { ...doc, content }, changed }
+}
 
 /** Režim AI v editoru prózy: `continue` = napsat pokračování na konec, `rewrite` = přepracovat označený úsek (nebo celý text) */
 export const ProseAiModeSchema = z.enum(['continue', 'rewrite'])
@@ -222,10 +344,10 @@ export const SceneMetaSchema = z.object({
   darkBackground: z.boolean(),
   /** Režim scény (frontmatter `mode`); výchozí `play`. Prózu (`prose`) tvoří dokument editoru místo replik */
   mode: SceneModeSchema,
-  /** Textura (opakující se obrázek, např. papír) pod textem prózy (frontmatter `proseTexture`; dědí se do nové scény); null = jednolité tmavé pozadí */
-  proseTexture: ImageRefSchema,
-  /** Barva písma prózy (frontmatter `proseTextColor`; dědí se do nové scény); výchozí `light` */
-  proseTextColor: ProseTextColorSchema,
+  /** Pozadí stránky prózy – obrázek, způsob vykreslení, barva podkladu (frontmatter `proseBackground`; dědí se do nové scény) */
+  proseBackground: ProseBackgroundSchema,
+  /** Písmo prózy – stejné pro celou scénu (frontmatter `proseFont`; dědí se do nové scény) */
+  proseFont: ProseFontSchema,
   /** Historie AI v editoru prózy – pokyny i odpovědi (nejnovější první; frontmatter `prosePrompts`) – k opětovnému použití */
   prosePrompts: z.array(ProsePromptEntrySchema),
   /** Celkové zhodnocení / shrnutí děje scény (markdown; tělo souboru za značkou `<!-- summary -->`) – rychlý kontext pro hráče i AI */
@@ -267,9 +389,10 @@ export const SceneInputSchema = z.object({
   darkBackground: z.boolean().optional(),
   /** Režim scény; při vytvoření undefined = `play` */
   mode: SceneModeSchema.optional(),
-  /** Textura prózy; null = bez textury; undefined při vytvoření = převzít ze sousední scény */
-  proseTexture: ImageRefSchema.optional(),
-  proseTextColor: ProseTextColorSchema.optional(),
+  /** Pozadí prózy; undefined při vytvoření = převzít ze sousední scény */
+  proseBackground: ProseBackgroundSchema.optional(),
+  /** Písmo prózy; undefined při vytvoření = převzít ze sousední scény */
+  proseFont: ProseFontSchema.optional(),
   prosePrompts: z.array(ProsePromptEntrySchema).max(100).optional(),
   summary: z.string().max(20000).optional(),
   contextScenes: z.array(z.string().trim().min(1)).max(50).optional(),

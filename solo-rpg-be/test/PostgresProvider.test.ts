@@ -161,7 +161,7 @@ describe('postavy a scény', () => {
     await storage.saveSceneEntries(G, scene.id, [{ ...entries[0], text: 'Zase jiný' }])
     expect(await find()).toMatchObject({ summaryStale: true })
     const [row] = await database.db.execute(sql`SELECT schema_version FROM entities WHERE id = ${scene.id}`).then(r => r.rows as { schema_version: number }[])
-    expect(row.schema_version).toBe(9)
+    expect(row.schema_version).toBe(10)
 
     // Režim AI, přepínač pravidel a ztmavení pozadí: default basic/false/false, dědí se do nové sousední scény, PATCH bez nich hodnoty zachová
     expect(await find()).toMatchObject({ aiMode: 'basic', rulesInAi: false, darkBackground: false, aiReview: 'panel' })
@@ -206,12 +206,12 @@ describe('vypravěči a setup', () => {
     expect((await storage.listScenes(G)).find(s => s.id === inherited.id)!.narrator).toBe('Vypravěčka')
 
     const noPulse = { tension: null, phase: null }
-    const setup = await storage.saveSetup(G, { backgroundImage: 'https://x/bg.png', rules: 'VtM', rulesSystem: 'vtm5e', pulseOverride: { tension: 7, phase: null } })
+    const setup = await storage.saveSetup(G, { backgroundImage: 'https://x/bg.png', rules: 'VtM', rulesSystem: 'vtm5e', pulseOverride: { tension: 7, phase: null }, proseFonts: [] })
     expect(setup.backgroundImage).toBe('https://x/bg.png')
     expect(setup.rules).toBe('VtM')
     expect(setup.rulesSystem).toBe('vtm5e')
     expect(setup.pulseOverride).toEqual({ tension: 7, phase: null })
-    await storage.saveSetup(G, { backgroundImage: null, rules: '', rulesSystem: 'none', pulseOverride: noPulse })
+    await storage.saveSetup(G, { backgroundImage: null, rules: '', rulesSystem: 'none', pulseOverride: noPulse, proseFonts: [] })
 
     await storage.deleteNarrator(G, n.id)
     expect((await storage.listScenes(G)).filter(s => s.narrator !== null)).toEqual([])

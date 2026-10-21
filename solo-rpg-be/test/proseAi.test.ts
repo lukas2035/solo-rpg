@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { PROSE_BACKGROUND_LIGHT_COLOR, PROSE_FONT_DARK, type ProsePromptEntry } from '@solo-rpg/shared'
 import { MAX_PROSE_PROMPTS, addEntry, trimToBudget, trimToBudgetEnd } from '../src/ai/proseAi.js'
 import { legacyProsePrompts, parseFields } from '../src/storage/kinds.js'
 
@@ -23,9 +24,20 @@ describe('historie AI prózy', () => {
     ])
   })
 
+  it('migrace scény v9 → v10 převede texturu a barvu písma na pozadí a písmo', () => {
+    const v9 = {
+      description: '', ai: false, aiPrompt: '', aiMode: 'basic', rulesInAi: false, aiReview: 'panel', darkBackground: false,
+      mode: 'prose', proseTexture: 'assets/abc.png', proseTextColor: 'dark', prosePrompts: [], summary: '', summaryStale: false, director: null,
+    }
+    const fields = parseFields('scene', v9, 9)
+    expect(fields.proseBackground).toEqual({ image: 'assets/abc.png', mode: 'repeat', color: PROSE_BACKGROUND_LIGHT_COLOR })
+    expect(fields.proseFont).toEqual(PROSE_FONT_DARK)
+    expect('proseTexture' in fields).toBe(false)
+  })
+
   it('addEntry přidá na začátek každé odeslání zvlášť a drží limit', () => {
     const mk = (i: number) => ({ mode: 'continue' as const, prompt: `p${i}`, response: `r${i}`, createdAt: i })
-    let history = [] as ReturnType<typeof mk>[]
+    let history = [] as ProsePromptEntry[]
     for (let i = 0; i < MAX_PROSE_PROMPTS + 5; i++) history = addEntry(history, mk(i))
     expect(history).toHaveLength(MAX_PROSE_PROMPTS)
     expect(history[0].prompt).toBe(`p${MAX_PROSE_PROMPTS + 4}`)

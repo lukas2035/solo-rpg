@@ -1,13 +1,20 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import matter from 'gray-matter'
+import { z } from 'zod'
 import {
   AiReviewSchema,
+  DEFAULT_PROSE_BACKGROUND,
+  PROSE_FONT_LIGHT,
+  ProseBackgroundSchema,
+  ProseFontPresetSchema,
+  ProseFontSchema,
   ProseTextColorSchema,
   SceneModeSchema,
   fullName,
   isValidGameName,
   isRemoteImage,
+  proseAppearanceFromLegacy,
   type Character,
   type CharacterInput,
   type Faction,
@@ -25,6 +32,7 @@ import {
   type Narrator,
   type NarratorInput,
   type ProseDoc,
+  type ProseImage,
   type Quest,
   type QuestInput,
   type QuestObjective,
@@ -191,6 +199,18 @@ function toIso(ts: number): string {
 
 function stringOrNull(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+/**
+ * Vzhled prózy z frontmatteru scény: nové klíče `proseBackground` / `proseFont`; starší soubory mají jen
+ * `proseTexture` + `proseTextColor`, z nichž se vzhled odvodí.
+ */
+function readProseAppearance(data: Frontmatter): Pick<SceneMeta, 'proseBackground' | 'proseFont'> {
+  const legacy = proseAppearanceFromLegacy(stringOrNull(data.proseTexture), ProseTextColorSchema.catch('light').parse(data.proseTextColor ?? 'light'))
+  return {
+    proseBackground: ProseBackgroundSchema.catch(legacy.proseBackground).parse(data.proseBackground ?? legacy.proseBackground),
+    proseFont: ProseFontSchema.catch(legacy.proseFont).parse(data.proseFont ?? legacy.proseFont),
+  }
 }
 
 /** Rozdělí staré jednoduché `name` na křestní jméno a příjmení (poslední slovo). */
@@ -395,6 +415,7 @@ export class ObsidianVaultProvider implements StorageProvider {
         tension: typeof file.data.pulseTension === 'number' ? file.data.pulseTension : null,
         phase: file.data.pulsePhase ?? null,
       }),
+      proseFonts: z.array(ProseFontPresetSchema).catch([]).parse(file.data.proseFonts ?? []),
     }
   }
 
@@ -914,6 +935,9 @@ export class ObsidianVaultProvider implements StorageProvider {
       else file.data.pulseTension = settings.pulseOverride.tension
       if (settings.pulseOverride.phase === null) delete file.data.pulsePhase
       else file.data.pulsePhase = settings.pulseOverride.phase
+      // Knihovna písem prózy – prázdná se nezapisuje
+      if (settings.proseFonts.length === 0) delete file.data.proseFonts
+      else file.data.proseFonts = settings.proseFonts
       // Poznámky hráče v těle zůstávají, mění se jen sekce pravidel
       file.body = joinGameBody(splitGameBody(file.body).notes, settings.rules)
     })
@@ -983,6 +1007,19 @@ export class ObsidianVaultProvider implements StorageProvider {
     await writeFileAtomic(target, asset.data)
     await this.touchGame(dir)
     return relPath.replace(/\\/g, '/')
+  }
+
+  // Knihovna obrázků prózy je funkce databázového úložiště; vault slouží jen k exportu / importu
+  async listProseImages(): Promise<ProseImage[]> {
+    return []
+  }
+
+  async replaceProseImage(): Promise<string> {
+    throw new ValidationError('Knihovna obrázků není v Obsidian vaultu podporována.')
+  }
+
+  async deleteProseImage(): Promise<number> {
+    throw new ValidationError('Knihovna obrázků není v Obsidian vaultu podporována.')
   }
 
   private async removeSiblingsWithOtherExt(folder: string, base: string, keepExt: string): Promise<void> {
@@ -1075,8 +1112,7 @@ export class ObsidianVaultProvider implements StorageProvider {
           aiReview: AiReviewSchema.catch('panel').parse(data.aiReview ?? 'panel'),
           darkBackground: typeof data.darkBackground === 'boolean' ? data.darkBackground : (gameDarkBackground ?? false),
           mode: SceneModeSchema.catch('play').parse(data.mode ?? 'play'),
-          proseTexture: stringOrNull(data.proseTexture),
-          proseTextColor: ProseTextColorSchema.catch('light').parse(data.proseTextColor ?? 'light'),
+          ...readProseAppearance(data),
           prosePrompts: legacyProsePrompts(data.prosePrompts),
           contextScenes: parseCharacterLinks(data.contextScenes),
           createdAt: toTimestamp(data.createdAt, stat.birthtimeMs),
@@ -1136,10 +1172,13 @@ export class ObsidianVaultProvider implements StorageProvider {
       // Výchozí hodnoty (panel, původní jas) se do frontmatteru nezapisují
       aiReview: meta.aiReview === 'panel' ? null : meta.aiReview,
       darkBackground: meta.darkBackground ? true : null,
-      // Próza: režim a vzhled (výchozí hraná scéna, světlé písmo bez textury se nezapisují)
+      // Próza: režim a vzhled (výchozí hraná scéna se nezapisuje; pozadí a písmo jen u prózy)
       mode: meta.mode === 'prose' ? 'prose' : null,
-      proseTexture: meta.proseTexture,
-      proseTextColor: meta.proseTextColor === 'dark' ? 'dark' : null,
+      // Starší klíče (textura + barva písma) nahrazeny `proseBackground` / `proseFont`
+      proseTexture: null,
+      proseTextColor: null,
+      proseBackground: meta.mode === 'prose' ? meta.proseBackground : null,
+      proseFont: meta.mode === 'prose' ? meta.proseFont : null,
       prosePrompts: meta.prosePrompts.length ? meta.prosePrompts : null,
       summaryStale: meta.summaryStale ? true : null,
       contextScenes: meta.contextScenes.length ? toCharacterLinks(meta.contextScenes) : null,
@@ -1207,8 +1246,8 @@ export class ObsidianVaultProvider implements StorageProvider {
     const darkBackground = input.darkBackground ?? neighbor?.meta.darkBackground ?? false
     const aiReview = input.aiReview ?? neighbor?.meta.aiReview ?? 'panel'
     const mode = input.mode ?? 'play'
-    const proseTexture = input.proseTexture !== undefined ? input.proseTexture : (neighbor?.meta.proseTexture ?? null)
-    const proseTextColor = input.proseTextColor ?? neighbor?.meta.proseTextColor ?? 'light'
+    const proseBackground = input.proseBackground ?? neighbor?.meta.proseBackground ?? DEFAULT_PROSE_BACKGROUND
+    const proseFont = input.proseFont ?? neighbor?.meta.proseFont ?? PROSE_FONT_LIGHT
     const narrator = await this.normalizeNarratorRef(dir, input.narrator === undefined ? (neighbor?.meta.narrator ?? null) : input.narrator)
     const aiCharacters = (input.aiCharacters ?? neighbor?.meta.aiCharacters ?? []).filter(n => characters.includes(n))
     const now = Date.now()
@@ -1231,8 +1270,8 @@ export class ObsidianVaultProvider implements StorageProvider {
       aiReview,
       darkBackground,
       mode,
-      proseTexture,
-      proseTextColor,
+      proseBackground,
+      proseFont,
       prosePrompts: input.prosePrompts ?? [],
       aiCharacters: await this.normalizeSceneCharacters(dir, aiCharacters),
       // Doplňující popis situace je specifický pro scénu – nedědí se
@@ -1296,8 +1335,8 @@ export class ObsidianVaultProvider implements StorageProvider {
       aiReview: input.aiReview ?? previous.aiReview,
       darkBackground: input.darkBackground ?? previous.darkBackground,
       mode: input.mode ?? previous.mode,
-      proseTexture: input.proseTexture !== undefined ? input.proseTexture : previous.proseTexture,
-      proseTextColor: input.proseTextColor ?? previous.proseTextColor,
+      proseBackground: input.proseBackground ?? previous.proseBackground,
+      proseFont: input.proseFont ?? previous.proseFont,
       prosePrompts: input.prosePrompts ?? previous.prosePrompts,
       // AI může hrát jen postavy, které ve scéně jsou
       aiCharacters: aiCharacters.filter(n => characters.includes(n)),

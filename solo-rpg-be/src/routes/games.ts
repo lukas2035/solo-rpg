@@ -58,6 +58,7 @@ const LocationParams = GameParams.extend({ location: z.string().min(1) })
 const LoreParams = GameParams.extend({ lore: z.string().min(1) })
 const SessionParams = GameParams.extend({ session: z.string().min(1) })
 const SuggestionParams = SceneParams.extend({ suggestion: z.string().min(1) })
+const AssetParams = GameParams.extend({ asset: z.string().min(1) })
 
 function sendError(reply: FastifyReply, error: unknown): FastifyReply {
   if (error instanceof z.ZodError) return reply.code(400).send({ error: z.prettifyError(error) })
@@ -263,6 +264,31 @@ export async function registerGameRoutes(app: FastifyInstance, vault: VaultManag
       request.log.warn({ err: error, url: body.url }, 'Stažení obrázku z URL selhalo, ukládám odkaz')
       return { path: body.url }
     }
+  })
+
+  // ---------- knihovna obrázků prózy ----------
+
+  app.get('/api/games/:game/prose-images', async (request) => {
+    const { game } = GameParams.parse(request.params)
+    return vault.storage.listProseImages(game)
+  })
+
+  app.put('/api/games/:game/prose-images/:asset', async (request) => {
+    const { game, asset } = AssetParams.parse(request.params)
+    const file = await request.file({ limits: { fileSize: MAX_IMAGE_BYTES } })
+    if (!file) throw new ValidationError('Chybí soubor s obrázkem.')
+    const data = await file.toBuffer()
+    if (!file.mimetype.startsWith('image/') && !/\.(png|jpe?g|jfif|gif|webp|avif|bmp|svg)$/i.test(file.filename)) {
+      throw new ValidationError('Soubor není obrázek.')
+    }
+    const path = await vault.storage.replaceProseImage(game, asset, { kind: 'illustration', filename: file.filename, mimeType: file.mimetype, data })
+    return { path }
+  })
+
+  app.delete('/api/games/:game/prose-images/:asset', async (request) => {
+    const { game, asset } = AssetParams.parse(request.params)
+    const removedReferences = await vault.storage.deleteProseImage(game, asset)
+    return { removedReferences }
   })
 
   // ---------- scény ----------

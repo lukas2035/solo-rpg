@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ProseTextColor, SceneMeta, SceneMode, StoryLocation } from '@solo-rpg/shared'
+import type { SceneMeta, SceneMode, StoryLocation } from '@solo-rpg/shared'
 import ImageDropField from './ImageDropField'
 import CharacterModal, { type CharacterFormValues } from './CharacterModal'
 import { inputClass, selectAll } from '../utils/forms'
@@ -20,12 +20,8 @@ export interface SceneFormValues {
   order: number
   /** Názvy scén, jejichž shrnutí dostane AI vypravěč jako kontext (prázdné = všechny předchozí) */
   contextScenes: string[]
-  /** Režim scény: hraná (repliky postav) nebo próza (textový editor) */
+  /** Režim scény: hraná (repliky postav) nebo próza (textový editor); vzhled prózy (pozadí, písmo) se nastavuje v editoru */
   mode: SceneMode
-  /** Textura pod textem prózy; stejná sémantika jako `image` */
-  proseTexture: string | null | undefined
-  /** Barva písma prózy (světlé pro tmavé pozadí, tmavé pro světlou texturu) */
-  proseTextColor: ProseTextColor
 }
 
 /** Postava hry nabízená v checklistu */
@@ -43,8 +39,6 @@ interface SceneModalProps {
   scenes: SceneMeta[]
   /** Aktuální obrázek scény jako URL použitelná v <img> */
   image: string | null
-  /** Aktuální textura prózy jako URL použitelná v <img> */
-  proseTexture?: string | null
   /** Výchozí režim nové scény (typicky režim poslední scény) */
   defaultMode?: SceneMode
   /** Navržený název pro novou scénu */
@@ -72,7 +66,7 @@ interface SceneModalProps {
 }
 
 /** Dialog pro vytvoření a úpravu scény (název, pozice, obrázek = pozadí scény, markdown popis, shrnutí děje, přítomné postavy) */
-export default function SceneModal({ scene, scenes, image, proseTexture = null, defaultMode = 'play', defaultTitle = '', defaultCharacters = [], defaultLocation = null, allCharacters, allLocations = [], required = false, onSubmit, onCreateCharacter, onSummarize, onSuggestContextScenes, onDelete, onClose }: SceneModalProps) {
+export default function SceneModal({ scene, scenes, image, defaultMode = 'play', defaultTitle = '', defaultCharacters = [], defaultLocation = null, allCharacters, allLocations = [], required = false, onSubmit, onCreateCharacter, onSummarize, onSuggestContextScenes, onDelete, onClose }: SceneModalProps) {
   const isEdit = scene !== null
   const sorted = [...scenes].sort((a, b) => a.order - b.order)
   // Pozice podle indexu v seřazeném seznamu (soubory ve vaultu mohou mít mezery v číslování)
@@ -80,9 +74,6 @@ export default function SceneModal({ scene, scenes, image, proseTexture = null, 
   const positionCount = isEdit ? sorted.length : sorted.length + 1
   const [title, setTitle] = useState(scene?.title ?? defaultTitle)
   const [mode, setMode] = useState<SceneMode>(scene?.mode ?? defaultMode)
-  const [proseTextColor, setProseTextColor] = useState<ProseTextColor>(scene?.proseTextColor ?? 'light')
-  const [editTexture, setEditTexture] = useState<string | null>(proseTexture)
-  const [textureChanged, setTextureChanged] = useState(false)
   const isProse = mode === 'prose'
   const [order, setOrder] = useState(currentPosition)
   const [description, setDescription] = useState(scene?.description ?? '')
@@ -177,8 +168,6 @@ export default function SceneModal({ scene, scenes, image, proseTexture = null, 
         order,
         contextScenes: contextSelected.map(s => s.title),
         mode,
-        proseTexture: textureChanged ? editTexture : undefined,
-        proseTextColor,
       })
       onClose()
     } catch (err) {
@@ -304,23 +293,6 @@ export default function SceneModal({ scene, scenes, image, proseTexture = null, 
               onChange={handleImageChange}
               removeLabel="Odebrat obrázek"
             />
-            {isProse && (
-              <>
-                <ImageDropField
-                  label="Textura pod textem (opakuje se)"
-                  value={editTexture}
-                  onChange={(next) => { setEditTexture(next); setTextureChanged(true) }}
-                  removeLabel="Odebrat texturu"
-                />
-                <label className="flex flex-col gap-1 text-left text-sm text-[var(--text)]">
-                  Barva písma
-                  <select value={proseTextColor} onChange={(e) => setProseTextColor(e.target.value as ProseTextColor)} className={inputClass}>
-                    <option value="light">Světlé (na tmavé pozadí)</option>
-                    <option value="dark">Tmavé (na světlou texturu)</option>
-                  </select>
-                </label>
-              </>
-            )}
           </div>
         </div>
 

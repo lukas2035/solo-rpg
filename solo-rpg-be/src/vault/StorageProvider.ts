@@ -1,4 +1,4 @@
-import type { Character, CharacterInput, Faction, FactionInput, GameDetail, GameMeta, GameSession, GameSessionInput, GameSettings, GameSetup, LocationInput, LoreEntry, LoreInput, Narrator, NarratorInput, ProseDoc, Quest, QuestInput, SceneDirector, SceneInput, SceneMeta, StoryEntry, StoryLocation, StoryThread, ThreadInput, AssetKind } from '@solo-rpg/shared'
+import type { Character, CharacterInput, Faction, FactionInput, GameDetail, GameMeta, GameSession, GameSessionInput, GameSettings, GameSetup, LocationInput, LoreEntry, LoreInput, Narrator, NarratorInput, ProseDoc, ProseImage, Quest, QuestInput, SceneDirector, SceneInput, SceneMeta, StoryEntry, StoryLocation, StoryThread, ThreadInput, AssetKind } from '@solo-rpg/shared'
 
 export interface AssetInput {
   kind: AssetKind
@@ -32,6 +32,16 @@ export interface StorageProvider {
   deleteNarrator(name: string, narratorId: string): Promise<void>
 
   saveAsset(name: string, asset: AssetInput): Promise<string>
+
+  /**
+   * Knihovna obrázků prózy (per kampaň): lokální assety druhu `illustration` / `texture` s počtem odkazů
+   * (obrázky v textech scén + pozadí scén). Vrácené pole je seřazené od nejnovějšího.
+   */
+  listProseImages(name: string): Promise<ProseImage[]>
+  /** Nahradí obrázek novým souborem: uloží nový asset, přepíše všechny odkazy v kampani a starý asset smaže. Vrací nový ImageRef */
+  replaceProseImage(name: string, assetId: string, asset: AssetInput): Promise<string>
+  /** Smaže obrázek z knihovny včetně všech odkazů (uzly v textech scén, pozadí scén). Vrací počet odstraněných odkazů */
+  deleteProseImage(name: string, assetId: string): Promise<number>
 
   listScenes(name: string): Promise<SceneMeta[]>
   createScene(name: string, input: SceneInput): Promise<SceneMeta>

@@ -128,20 +128,17 @@ code {
 }
 
 /* ---------- Próza: stránka textového editoru (TipTap) ---------- */
+/* Písmo, barva a stín přicházejí inline ze scény (proseFontStyle); tlumené odstíny se odvozují z --prose-fg */
 .prose-page {
   --prose-fg: #ece6d9;
-  --prose-muted: rgba(236, 230, 217, 0.45);
-  --prose-rule: rgba(236, 230, 217, 0.25);
+  --prose-shadow: none;
+  --prose-muted: color-mix(in srgb, var(--prose-fg) 45%, transparent);
+  --prose-rule: color-mix(in srgb, var(--prose-fg) 25%, transparent);
   color: var(--prose-fg);
   font-family: Georgia, 'Times New Roman', serif;
   font-size: 19px;
   line-height: 1.65;
   text-align: left;
-}
-.prose-page-dark {
-  --prose-fg: #1f1a14;
-  --prose-muted: rgba(31, 26, 20, 0.45);
-  --prose-rule: rgba(31, 26, 20, 0.25);
 }
 .prose-content > * + * {
   margin-top: 0.75em;
@@ -149,7 +146,7 @@ code {
 .prose-content h1,
 .prose-content h2,
 .prose-content h3 {
-  font-family: Georgia, 'Times New Roman', serif;
+  font-family: inherit;
   color: var(--prose-fg);
   font-weight: 700;
   line-height: 1.2;

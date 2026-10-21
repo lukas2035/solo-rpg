@@ -127,8 +127,12 @@ scene_documents ( scene_id PK, game_id, doc jsonb, updated_at )  -- próza: text
 - **Režim scény** (`fields.mode`): `play` = repliky v `scene_entries` + AI vypravěč; `prose` = souvislý text psaný jako v Notionu
   (TipTap/ProseMirror), uložený jako JSON strom v `scene_documents.doc` (`ProseDoc` ve shared). Obrázky v textu nesou v `attrs.src`
   odkaz do vaultu (`assets/<id>.<ext>`, kind `illustration`) a `attrs.layout` (`full` | `left` | `right` – obtékání textem); na URL se
-  překládají až ve FE. Vzhled prózy je per scéna (`proseTexture` – kind `texture`, opakovaná pod textem; `proseTextColor` light/dark)
-  a nová scéna ho dědí od předchozí. Do Obsidian vaultu se próza exportuje jednosměrně jako markdown (`vault/proseMarkdown.ts`).
+  překládají až ve FE. Vzhled prózy je per scéna: `proseBackground` (obrázek kind `texture` + režim `repeat`/`repeat-x`/`repeat-y`/
+  `original`/`fit-width`/`fit-height` + barva podkladu) a `proseFont` (web-safe rodina, velikost, barva, volitelný stín);
+  nová scéna ho dědí od předchozí (starší `proseTexture`/`proseTextColor` převádí migrace fields v10). Pojmenované fonty kampaně
+  jsou v `games.prose_fonts` (`GameSettings.proseFonts`). Knihovna obrázků prózy je per kampaň nad `assets` kind `illustration`/`texture`:
+  `GET/PUT/DELETE /api/games/:game/prose-images[/:asset]` (nahrazení přemapuje odkazy ve scénách i dokumentech, smazání je odstraní);
+  v Obsidian vaultu není knihovna podporována. Do Obsidian vaultu se próza exportuje jednosměrně jako markdown (`vault/proseMarkdown.ts`).
   API: `GET/PUT /api/games/:game/scenes/:scene/prose`.
   AI v editoru: `POST …/prose/ai` (`ai/proseAi.ts`) ve dvou režimech. `continue` (prompt `prompts/prose-prompt.md`) dostane
   pokyn autora + celý dosavadní text bez obrázků (ořez zepředu na `AI_TRANSCRIPT_TOKENS`) a vrátí markdown, který FE připíše

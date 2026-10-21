@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
+import { z } from 'zod'
 import type {
   Character,
   CharacterInput,
@@ -17,6 +18,7 @@ import type {
   Narrator,
   NarratorInput,
   ProseDoc,
+  ProseImage,
   Quest,
   QuestInput,
   QuestObjective,
@@ -28,7 +30,7 @@ import type {
   StoryThread,
   ThreadInput,
 } from '@solo-rpg/shared'
-import { fullName, isRemoteImage, isValidGameName, PulseOverrideSchema, RulesSystemSchema } from '@solo-rpg/shared'
+import { DEFAULT_PROSE_BACKGROUND, fullName, isRemoteImage, isValidGameName, PROSE_FONT_LIGHT, ProseFontPresetSchema, proseImageRefs, PulseOverrideSchema, remapProseImages, RulesSystemSchema } from '@solo-rpg/shared'
 import { ConflictError, NotFoundError, ValidationError, type AssetInput, type GameEvent, type GameEventInput, type StorageProvider } from '../vault/StorageProvider.js'
 import { imageExtension, safeFileName } from '../vault/fsUtils.js'
 import { assetKey, sha256, type AssetStore } from './AssetStore.js'
@@ -324,16 +326,23 @@ export class PostgresProvider implements StorageProvider {
 
   async saveAsset(name: string, asset: AssetInput): Promise<string> {
     const game = await this.requireGameRow(this.db, name)
+    const path = await this.insertAsset(this.db, game.id, asset)
+    await this.touchGame(this.db, game.id)
+    return path
+  }
+
+  /** Uloží data do AssetStore a založí řádek v `assets`; vrací veřejnou cestu `assets/<id><ext>` */
+  private async insertAsset(exec: Executor, gameId: string, asset: AssetInput): Promise<string> {
     const ext = imageExtension(asset.filename, asset.mimeType)
     const hash = sha256(asset.data)
     const key = assetKey(hash, ext)
     const mime = asset.mimeType ?? 'application/octet-stream'
     await this.assetStore.put(key, asset.data, { contentType: mime })
     const id = newId('asset')
-    await this.db.insert(assets).values({
+    await exec.insert(assets).values({
       id,
       tenantId: this.tenantId,
-      gameId: game.id,
+      gameId,
       kind: asset.kind,
       mime,
       ext,
@@ -342,8 +351,14 @@ export class PostgresProvider implements StorageProvider {
       storageKey: key,
       originalName: asset.filename,
     })
-    await this.touchGame(this.db, game.id)
     return `${ASSET_PATH_PREFIX}${id}${ext}`
+  }
+
+  /** Smaže řádek assetu; soubor v AssetStore jen pokud stejný obsah nepoužívá jiný asset (klíč = hash obsahu) */
+  private async deleteAssetRow(exec: Executor, assetId: string, storageKey: string): Promise<void> {
+    await exec.delete(assets).where(eq(assets.id, assetId))
+    const stillUsed = await exec.select({ id: assets.id }).from(assets).where(eq(assets.storageKey, storageKey)).limit(1)
+    if (stillUsed.length === 0) await this.assetStore.delete(storageKey)
   }
 
   /** Metadata assetu podle veřejného názvu souboru `<id><ext>` (pro servírování přes HTTP) */
@@ -366,6 +381,89 @@ export class PostgresProvider implements StorageProvider {
     if (!game) return null
     const rows = await this.db.select({ ext: assets.ext }).from(assets).where(and(eq(assets.gameId, game.id), eq(assets.id, assetId))).limit(1)
     return rows[0] ? `${ASSET_PATH_PREFIX}${assetId}${rows[0].ext}` : null
+  }
+
+  // ---------- knihovna obrázků prózy ----------
+
+  /** Druhy assetů, které tvoří knihovnu obrázků prózy */
+  private static readonly PROSE_ASSET_KINDS = ['illustration', 'texture'] as const
+
+  /** Odkazy na obrázky z textů všech scén hry + pozadí scén (včetně duplicit) – pro počítání použití */
+  private async proseReferences(exec: Executor, snap: Snapshot): Promise<string[]> {
+    const docs = await exec.select({ doc: sceneDocuments.doc }).from(sceneDocuments).where(eq(sceneDocuments.gameId, snap.game.id))
+    const refs = docs.flatMap(d => proseImageRefs(d.doc as ProseDoc))
+    for (const scene of snap.list('scene')) {
+      if (scene.fields.proseBackground.image) refs.push(scene.fields.proseBackground.image)
+    }
+    return refs
+  }
+
+  async listProseImages(name: string): Promise<ProseImage[]> {
+    const snap = await this.snapshot(this.db, name)
+    const rows = await this.db
+      .select({ id: assets.id, ext: assets.ext, size: assets.size, originalName: assets.originalName, createdAt: assets.createdAt })
+      .from(assets)
+      .where(and(eq(assets.gameId, snap.game.id), inArray(assets.kind, [...PostgresProvider.PROSE_ASSET_KINDS])))
+      .orderBy(desc(assets.createdAt))
+    const usage = new Map<string, number>()
+    for (const ref of await this.proseReferences(this.db, snap)) usage.set(ref, (usage.get(ref) ?? 0) + 1)
+    return rows.map(r => {
+      const path = `${ASSET_PATH_PREFIX}${r.id}${r.ext}`
+      return { path, name: r.originalName ?? `${r.id}${r.ext}`, size: r.size, createdAt: ms(r.createdAt), usage: usage.get(path) ?? 0 }
+    })
+  }
+
+  /**
+   * Přepíše odkazy na obrázky v celé hře podle `map` (starý ImageRef → nový; null = odstranit): uzly v dokumentech
+   * prózy i pozadí scén. Vrací počet zasažených odkazů.
+   */
+  private async remapProseReferences(tx: Tx, snap: Snapshot, map: ReadonlyMap<string, string | null>): Promise<number> {
+    let changed = 0
+    const now = new Date()
+    const docs = await tx.select({ sceneId: sceneDocuments.sceneId, doc: sceneDocuments.doc }).from(sceneDocuments).where(eq(sceneDocuments.gameId, snap.game.id))
+    for (const row of docs) {
+      const result = remapProseImages(row.doc as ProseDoc, map)
+      if (result.changed === 0) continue
+      changed += result.changed
+      await tx.update(sceneDocuments).set({ doc: result.doc, updatedAt: now }).where(eq(sceneDocuments.sceneId, row.sceneId))
+      await tx.update(entities).set({ updatedAt: now }).where(eq(entities.id, row.sceneId))
+    }
+    for (const scene of snap.list('scene')) {
+      const image = scene.fields.proseBackground.image
+      if (!image || !map.has(image)) continue
+      changed++
+      await this.updateEntity(tx, scene.row.id, { fields: { ...scene.fields, proseBackground: { ...scene.fields.proseBackground, image: map.get(image) ?? null } } })
+    }
+    return changed
+  }
+
+  private async requireProseAsset(exec: Executor, gameId: string, assetId: string) {
+    const rows = await exec
+      .select({ id: assets.id, ext: assets.ext, storageKey: assets.storageKey })
+      .from(assets)
+      .where(and(eq(assets.gameId, gameId), eq(assets.id, assetId), inArray(assets.kind, [...PostgresProvider.PROSE_ASSET_KINDS])))
+      .limit(1)
+    if (!rows[0]) throw new NotFoundError(`Obrázek „${assetId}“ v knihovně není.`)
+    return rows[0]
+  }
+
+  async replaceProseImage(name: string, assetId: string, asset: AssetInput): Promise<string> {
+    return this.mutate(name, async (tx, snap) => {
+      const old = await this.requireProseAsset(tx, snap.game.id, assetId)
+      const next = await this.insertAsset(tx, snap.game.id, asset)
+      await this.remapProseReferences(tx, snap, new Map([[`${ASSET_PATH_PREFIX}${old.id}${old.ext}`, next]]))
+      await this.deleteAssetRow(tx, old.id, old.storageKey)
+      return next
+    })
+  }
+
+  async deleteProseImage(name: string, assetId: string): Promise<number> {
+    return this.mutate(name, async (tx, snap) => {
+      const old = await this.requireProseAsset(tx, snap.game.id, assetId)
+      const removed = await this.remapProseReferences(tx, snap, new Map([[`${ASSET_PATH_PREFIX}${old.id}${old.ext}`, null]]))
+      await this.deleteAssetRow(tx, old.id, old.storageKey)
+      return removed
+    })
   }
 
   // ---------- mapování entit → API ----------
@@ -404,8 +502,8 @@ export class PostgresProvider implements StorageProvider {
       aiReview: e.fields.aiReview,
       darkBackground: e.fields.darkBackground,
       mode: e.fields.mode,
-      proseTexture: e.fields.proseTexture,
-      proseTextColor: e.fields.proseTextColor,
+      proseBackground: e.fields.proseBackground,
+      proseFont: e.fields.proseFont,
       prosePrompts: e.fields.prosePrompts,
       summary: e.fields.summary,
       summaryStale: e.fields.summaryStale,
@@ -542,6 +640,7 @@ export class PostgresProvider implements StorageProvider {
       rules: g.rules,
       rulesSystem: RulesSystemSchema.catch('none').parse(g.rulesSystem),
       pulseOverride: PulseOverrideSchema.catch({ tension: null, phase: null }).parse(g.pulseOverride),
+      proseFonts: z.array(ProseFontPresetSchema).catch([]).parse(g.proseFonts),
     }
   }
 
@@ -673,6 +772,7 @@ export class PostgresProvider implements StorageProvider {
           rules: settings.rules,
           rulesSystem: settings.rulesSystem,
           pulseOverride: settings.pulseOverride,
+          proseFonts: settings.proseFonts,
         })
         .where(eq(games.id, snap.game.id))
         .returning()
@@ -798,10 +898,10 @@ export class PostgresProvider implements StorageProvider {
       // Ztmavení pozadí se také dědí; první scéna má původní jas
       const darkBackground = input.darkBackground ?? neighbor?.fields.darkBackground ?? false
       const aiReview = input.aiReview ?? neighbor?.fields.aiReview ?? 'panel'
-      // Režim scény se nedědí (výchozí hraná scéna); vzhled prózy (textura, barva písma) ano
+      // Režim scény se nedědí (výchozí hraná scéna); vzhled prózy (pozadí, písmo) ano
       const mode = input.mode ?? 'play'
-      const proseTexture = input.proseTexture !== undefined ? input.proseTexture : (neighbor?.fields.proseTexture ?? null)
-      const proseTextColor = input.proseTextColor ?? neighbor?.fields.proseTextColor ?? 'light'
+      const proseBackground = input.proseBackground ?? neighbor?.fields.proseBackground ?? DEFAULT_PROSE_BACKGROUND
+      const proseFont = input.proseFont ?? neighbor?.fields.proseFont ?? PROSE_FONT_LIGHT
       // Vypravěč scény se dědí ze sousední; explicitní null = scéna bez vypravěče
       const narratorId = input.narrator !== undefined ? snap.requireOne('narrator', input.narrator) : neighbor ? (snap.one(neighbor, 'narrator')?.row.id ?? null) : null
       const aiCandidates = input.aiCharacters ? snap.resolveMany('character', input.aiCharacters) : neighbor ? snap.many(neighbor, 'aiCharacters').map(c => c.row.id) : []
@@ -810,7 +910,7 @@ export class PostgresProvider implements StorageProvider {
       const id = await this.insertEntity(tx, snap.game.id, 'scene', {
         name: title,
         // Doplňující popis situace (aiPrompt) je specifický pro scénu – nedědí se
-        fields: { description: input.description ?? '', ai, aiPrompt: input.aiPrompt ?? '', aiMode, rulesInAi, aiReview, darkBackground, mode, proseTexture, proseTextColor, prosePrompts: input.prosePrompts ?? [], summary: input.summary ?? '', summaryStale: false, director: null },
+        fields: { description: input.description ?? '', ai, aiPrompt: input.aiPrompt ?? '', aiMode, rulesInAi, aiReview, darkBackground, mode, proseBackground, proseFont, prosePrompts: input.prosePrompts ?? [], summary: input.summary ?? '', summaryStale: false, director: null },
         sortOrder: position,
         image: this.imageColumns(input.image ?? null, paths),
       })
@@ -860,8 +960,8 @@ export class PostgresProvider implements StorageProvider {
           aiReview: input.aiReview ?? current.fields.aiReview,
           darkBackground: input.darkBackground ?? current.fields.darkBackground,
           mode: input.mode ?? current.fields.mode,
-          proseTexture: input.proseTexture !== undefined ? input.proseTexture : current.fields.proseTexture,
-          proseTextColor: input.proseTextColor ?? current.fields.proseTextColor,
+          proseBackground: input.proseBackground ?? current.fields.proseBackground,
+          proseFont: input.proseFont ?? current.fields.proseFont,
           prosePrompts: input.prosePrompts ?? current.fields.prosePrompts,
         },
         image: this.imageColumns(input.image, paths, current.row),

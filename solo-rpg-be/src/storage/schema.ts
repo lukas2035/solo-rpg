@@ -31,6 +31,8 @@ export const games = pgTable(
     rulesSystem: text('rules_system').notNull().default('none'),
     /** Ruční korekce pulsu kampaně (GameSettings.pulseOverride) */
     pulseOverride: jsonb('pulse_override').notNull().default({ tension: null, phase: null }),
+    /** Knihovna písem prózy kampaně (GameSettings.proseFonts – pole ProseFontPreset) */
+    proseFonts: jsonb('prose_fonts').notNull().default([]),
     /** Pozadí hry: buď lokální asset, nebo vzdálená URL (nejvýš jedno) */
     backgroundAssetId: text('background_asset_id'),
     backgroundUrl: text('background_url'),

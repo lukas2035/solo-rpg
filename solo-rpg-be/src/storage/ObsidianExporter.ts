@@ -66,7 +66,7 @@ export class ObsidianExporter {
         ...scene,
         order: undefined,
         image: await image(scene.image, 'scene', scene.title),
-        proseTexture: await image(scene.proseTexture, 'texture', scene.title),
+        proseBackground: { ...scene.proseBackground, image: await image(scene.proseBackground.image, 'texture', scene.title) },
       })
       sceneIds.set(scene.id, created.id)
     }
@@ -101,6 +101,7 @@ export class ObsidianExporter {
       rules: detail.setup.rules,
       rulesSystem: detail.setup.rulesSystem,
       pulseOverride: detail.setup.pulseOverride,
+      proseFonts: detail.setup.proseFonts,
     })
   }
 

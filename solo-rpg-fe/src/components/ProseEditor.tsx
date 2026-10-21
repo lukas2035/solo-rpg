@@ -4,9 +4,13 @@ import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import { Placeholder } from '@tiptap/extensions'
 import { Markdown } from '@tiptap/markdown'
-import type { ImageRef, ProseAiRequest, ProseDoc, ProseImageLayout, ProsePromptEntry, ProseTextColor } from '@solo-rpg/shared'
+import type { ImageRef, ProseAiRequest, ProseBackground, ProseDoc, ProseFont, ProseFontPreset, ProseImageLayout, ProsePromptEntry } from '@solo-rpg/shared'
 import { assetUrl, useAssetVersion } from '../utils/api'
+import { proseBackgroundStyle, proseFontStyle } from '../utils/proseStyle'
 import ProseAiModal, { type ProseAiDraft, type ProseRewriteTarget } from './ProseAiModal'
+import ProseBackgroundModal, { type ProseBackgroundDraft } from './ProseBackgroundModal'
+import ProseFontModal from './ProseFontModal'
+import ProseImageLibraryModal from './ProseImageLibraryModal'
 import FloatingPortrait from './FloatingPortrait'
 import PortraitModal from './PortraitModal'
 import { restoreMissingImages } from '../utils/proseImages'
@@ -25,13 +29,20 @@ interface ProseEditorProps {
   sceneId: string
   /** Načtený dokument; null = nová prázdná scéna, undefined = ještě se načítá (editor je zatím jen pro čtení) */
   doc: ProseDoc | null | undefined
-  texture: ImageRef
-  textColor: ProseTextColor
+  /** Vzhled stránky (per scéna): pozadí a písmo */
+  background: ProseBackground
+  font: ProseFont
+  /** Knihovna písem kampaně (GameSettings.proseFonts) */
+  fontPresets: ProseFontPreset[]
   onSave: (sceneId: string, doc: ProseDoc) => Promise<void>
   /** Uloží obrázek (soubor nebo URL) do vaultu a vrátí odkaz pro `src` */
   onUploadImage: (image: File | string) => Promise<ImageRef>
-  onTextureChange: (image: File | string | null) => Promise<void>
-  onTextColorChange: (color: ProseTextColor) => Promise<void>
+  /** Uloží pozadí scény; nový soubor / URL v `image` rodič nejdřív nahraje */
+  onBackgroundChange: (draft: ProseBackgroundDraft) => Promise<void>
+  onFontChange: (font: ProseFont) => Promise<void>
+  onFontPresetsChange: (presets: ProseFontPreset[]) => Promise<void>
+  /** Knihovna obrázků změnila odkazy (nahrazení / smazání) – rodič znovu načte scény a dokument */
+  onLibraryChanged: () => Promise<void>
   /** Historie AI této scény – pokyny i odpovědi (nejnovější první) */
   aiPrompts: ProsePromptEntry[]
   /** Pošle požadavek AI a vrátí markdown od modelu (pokračování, nebo nový úsek místo označeného) */
@@ -248,10 +259,14 @@ function imageUrlFromTransfer(data: DataTransfer): string | null {
   return /^https?:.*\.(png|jpe?g|gif|webp|avif)(\?.*)?$/i.test(url) || /^data:image\//i.test(url) ? url : null
 }
 
-export default function ProseEditor({ game, sceneId, doc, texture, textColor, onSave, onUploadImage, onTextureChange, onTextColorChange, aiPrompts, onGenerateAi, onDeleteAiPrompt }: ProseEditorProps) {
+export default function ProseEditor({ game, sceneId, doc, background, font, fontPresets, onSave, onUploadImage, onBackgroundChange, onFontChange, onFontPresetsChange, onLibraryChanged, aiPrompts, onGenerateAi, onDeleteAiPrompt }: ProseEditorProps) {
   const version = useAssetVersion()
   const [status, setStatus] = useState<'saved' | 'dirty' | 'saving' | 'error'>('saved')
   const [uploading, setUploading] = useState(0)
+  // Dialogy vzhledu a knihovny; `library: 'insert'` = výběr obrázku k vložení do textu, `'browse'` = správa knihovny
+  const [backgroundOpen, setBackgroundOpen] = useState(false)
+  const [fontOpen, setFontOpen] = useState(false)
+  const [library, setLibrary] = useState<'insert' | 'browse' | null>(null)
   // AI dialog: otevřený? + úsek zachycený při otevření (null = dokument je prázdný, úprava není možná)
   const [aiOpen, setAiOpen] = useState(false)
   const [aiRange, setAiRange] = useState<AiSelectionRange | null>(null)
@@ -263,7 +278,6 @@ export default function ProseEditor({ game, sceneId, doc, texture, textColor, on
   const [fullscreenImage, setFullscreenImage] = useState<{ url: string; name: string } | null>(null)
   const timerRef = useRef<number | null>(null)
   const dirtyRef = useRef(false)
-  const textureInputRef = useRef<HTMLInputElement | null>(null)
   // Aktuální hodnoty pro callbacky z TipTapu (ty se registrují jednou)
   const latest = useRef({ sceneId, onSave, onUploadImage })
   const editorRef = useRef<Editor | null>(null)
@@ -431,8 +445,7 @@ export default function ProseEditor({ game, sceneId, doc, texture, textColor, on
     }
   }, [editor, flush])
 
-  const textureUrl = texture ? assetUrl(game, texture, version) : null
-  const dark = textColor === 'dark'
+  const backgroundUrl = background.image ? assetUrl(game, background.image, version) : null
 
   /** Otevře AI dialog; výběr v editoru se zachytí teď (po otevření dialogu editor ztratí fokus). Čekající návrh má přednost. */
   const openAi = () => {
@@ -498,6 +511,22 @@ export default function ProseEditor({ game, sceneId, doc, texture, textColor, on
     input.click()
   }
 
+  /** Vloží do textu obrázek vybraný z knihovny (bez nahrávání – odkaz už existuje) */
+  const insertFromLibrary = (path: ImageRef) => {
+    setLibrary(null)
+    if (editor && path) editor.chain().focus().insertContent({ type: 'image', attrs: { src: path, layout: 'full' } }).run()
+  }
+
+  /** Po změně knihovny: odkazy v dokumentu se mohly změnit na BE → rozpracované změny uložit a nechat rodiče znovu načíst */
+  const handleLibraryChanged = async () => {
+    const ed = editorRef.current
+    if (ed && loadedFor.current) {
+      await flush(ed, loadedFor.current)
+      loadedFor.current = null
+    }
+    await onLibraryChanged()
+  }
+
   const statusLabel = uploading > 0
     ? `Nahrávám obrázek${uploading > 1 ? ` (${uploading})` : ''}…`
     : doc === undefined ? 'Načítám…' : status === 'saving' ? 'Ukládám…' : status === 'dirty' ? 'Neuloženo' : status === 'error' ? '⚠️ Uložení selhalo' : 'Uloženo'
@@ -522,7 +551,8 @@ export default function ProseEditor({ game, sceneId, doc, texture, textColor, on
         <button type="button" title="Citace" onClick={() => editor?.chain().focus().toggleBlockquote().run()} className={`${toolButton} ${active('blockquote')}`}>❝</button>
         <button type="button" title="Oddělovač (---)" onClick={() => editor?.chain().focus().setHorizontalRule().run()} className={toolButton}>―</button>
         <span className="w-px h-5 bg-white/20 mx-1" />
-        <button type="button" title="Vložit obrázek (nebo přetáhni / vlož ze schránky)" onClick={pickImage} className={toolButton}>🖼 Obrázek</button>
+        <button type="button" title="Vložit nový obrázek (nebo přetáhni / vlož ze schránky)" onClick={pickImage} className={toolButton}>🖼 Obrázek</button>
+        <button type="button" title="Vložit obrázek z knihovny kampaně" disabled={doc === undefined} onClick={() => setLibrary('insert')} className={toolButton}>📚 Z knihovny</button>
         <span className="w-px h-5 bg-white/20 mx-1" />
         <button
           type="button"
@@ -534,42 +564,22 @@ export default function ProseEditor({ game, sceneId, doc, texture, textColor, on
           🤖 AI{aiDraft ? ' ●' : ''}
         </button>
         <span className="w-px h-5 bg-white/20 mx-1" />
-        <button type="button" title={texture ? 'Změnit texturu pozadí' : 'Přidat texturu pozadí (např. papír)'} onClick={() => textureInputRef.current?.click()} className={toolButton}>
-          {texture ? '🧻 Textura' : '🧻 Přidat texturu'}
+        <button type="button" title="Pozadí stránky: obrázek, způsob vykreslení, barva podkladu" onClick={() => setBackgroundOpen(true)} className={toolButton}>
+          🧻 Pozadí
         </button>
-        {texture && (
-          <button type="button" title="Odebrat texturu" onClick={() => void onTextureChange(null)} className={toolButton}>✕</button>
-        )}
-        <input
-          ref={textureInputRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={e => {
-            const file = e.target.files?.[0]
-            e.target.value = ''
-            if (file) void onTextureChange(file)
-          }}
-        />
-        <button
-          type="button"
-          title={dark ? 'Přepnout na světlé písmo' : 'Přepnout na tmavé písmo'}
-          onClick={() => void onTextColorChange(dark ? 'light' : 'dark')}
-          className={toolButton}
-        >
-          {dark ? '🌙 Světlé písmo' : '☀️ Tmavé písmo'}
+        <button type="button" title="Písmo scény: rodina, velikost, barva, stín; knihovna písem kampaně" onClick={() => setFontOpen(true)} className={toolButton}>
+          🔤 Písmo
+        </button>
+        <button type="button" title="Knihovna obrázků kampaně: náhledy, nahrazení, mazání" onClick={() => setLibrary('browse')} className={toolButton}>
+          🗂 Knihovna
         </button>
         <span className={`ml-auto text-xs ${status === 'error' ? 'text-red-300' : 'opacity-60'}`}>{statusLabel}</span>
       </div>
 
       {/* Stránka */}
       <div
-        className={`prose-page flex-1 min-h-0 overflow-y-auto ${dark ? 'prose-page-dark' : 'prose-page-light'}`}
-        style={{
-          backgroundColor: dark ? '#e9e4d8' : '#1a1a1a',
-          backgroundImage: textureUrl ? `url('${textureUrl}')` : undefined,
-          backgroundRepeat: 'repeat',
-        }}
+        className="prose-page flex-1 min-h-0 overflow-y-auto"
+        style={{ ...proseBackgroundStyle(background, backgroundUrl), ...proseFontStyle(font) }}
         onClick={e => { if (e.target === e.currentTarget) editor?.commands.focus('end') }}
       >
         <div className="max-w-3xl mx-auto px-10 py-10 min-h-full cursor-text" onClick={e => { if (e.target === e.currentTarget) editor?.commands.focus('end') }}>
@@ -590,6 +600,33 @@ export default function ProseEditor({ game, sceneId, doc, texture, textColor, on
           onApplyRewrite={applyRewrite}
           onDeletePrompt={onDeleteAiPrompt}
           onClose={() => setAiOpen(false)}
+        />
+      )}
+      {backgroundOpen && (
+        <ProseBackgroundModal
+          game={game}
+          value={background}
+          onSave={onBackgroundChange}
+          onLibraryChanged={handleLibraryChanged}
+          onClose={() => setBackgroundOpen(false)}
+        />
+      )}
+      {fontOpen && (
+        <ProseFontModal
+          value={font}
+          presets={fontPresets}
+          onSave={onFontChange}
+          onPresetsChange={onFontPresetsChange}
+          onClose={() => setFontOpen(false)}
+        />
+      )}
+      {library && (
+        <ProseImageLibraryModal
+          game={game}
+          title={library === 'insert' ? 'Vlož obrázek z knihovny' : undefined}
+          onSelect={library === 'insert' ? insertFromLibrary : undefined}
+          onChanged={handleLibraryChanged}
+          onClose={() => setLibrary(null)}
         />
       )}
 

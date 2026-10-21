@@ -1,0 +1,1 @@
+ALTER TABLE "games" ADD COLUMN "prose_fonts" jsonb DEFAULT '[]'::jsonb NOT NULL;

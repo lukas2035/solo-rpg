@@ -56,23 +56,26 @@ export class VaultImporter {
     const gameNotes = await readGameNotes(gameDir)
 
     // Obrázky: každý lokální soubor jednou (více entit může sdílet cestu)
-    const imageCache = new Map<string, { imageAssetId: string | null; imageUrl: string | null }>()
-    const image = async (ref: string | null, kind: string): Promise<{ imageAssetId: string | null; imageUrl: string | null }> => {
-      if (!ref) return { imageAssetId: null, imageUrl: null }
-      if (isRemoteImage(ref)) return { imageAssetId: null, imageUrl: ref }
+    const imageCache = new Map<string, { columns: { imageAssetId: string | null; imageUrl: string | null }; path: string | null }>()
+    const importImage = async (ref: string | null, kind: string) => {
+      if (!ref) return { columns: { imageAssetId: null, imageUrl: null }, path: null }
+      if (isRemoteImage(ref)) return { columns: { imageAssetId: null, imageUrl: ref }, path: ref }
       const cached = imageCache.get(ref)
       if (cached) return cached
-      let columns = { imageAssetId: null as string | null, imageUrl: null as string | null }
+      let result = { columns: { imageAssetId: null as string | null, imageUrl: null as string | null }, path: null as string | null }
       try {
         const data = await fs.readFile(path.join(gameDir, ref))
-        columns = (await this.target.importAsset(gameId, kind, path.basename(ref), data)).columns
+        result = await this.target.importAsset(gameId, kind, path.basename(ref), data)
         report.assets++
       } catch {
         report.missingAssets.push(ref)
       }
-      imageCache.set(ref, columns)
-      return columns
+      imageCache.set(ref, result)
+      return result
     }
+    const image = async (ref: string | null, kind: string) => (await importImage(ref, kind)).columns
+    /** Odkaz na obrázek uvnitř JSON polí (pozadí prózy) – veřejná cesta assetu nebo URL */
+    const imageRef = async (ref: string | null, kind: string) => (await importImage(ref, kind)).path
 
     const gameId = await this.target.importGame({
       name: detail.meta.name,
@@ -160,7 +163,22 @@ export class VaultImporter {
     for (const s of [...detail.scenes].sort((a, b) => a.order - b.order)) {
       await add('scene', s.title, {
         name: s.title,
-        fields: { description: s.description, ai: s.ai, aiPrompt: s.aiPrompt, aiMode: s.aiMode, rulesInAi: s.rulesInAi, aiReview: s.aiReview, darkBackground: s.darkBackground, mode: s.mode, proseTexture: s.proseTexture, proseTextColor: s.proseTextColor, prosePrompts: s.prosePrompts, summary: s.summary, summaryStale: s.summaryStale, director: null },
+        fields: {
+          description: s.description,
+          ai: s.ai,
+          aiPrompt: s.aiPrompt,
+          aiMode: s.aiMode,
+          rulesInAi: s.rulesInAi,
+          aiReview: s.aiReview,
+          darkBackground: s.darkBackground,
+          mode: s.mode,
+          proseBackground: { ...s.proseBackground, image: await imageRef(s.proseBackground.image, 'texture') },
+          proseFont: s.proseFont,
+          prosePrompts: s.prosePrompts,
+          summary: s.summary,
+          summaryStale: s.summaryStale,
+          director: null,
+        },
         sortOrder: s.order,
         image: await image(s.image, 'scene'),
         createdAt: s.createdAt,
@@ -275,6 +293,7 @@ export class VaultImporter {
       rules: detail.setup.rules,
       rulesSystem: detail.setup.rulesSystem,
       pulseOverride: detail.setup.pulseOverride,
+      proseFonts: detail.setup.proseFonts,
     })
     log(`Hotovo: ${report.entities} entit, ${report.links} vazeb, ${report.entries} replik, ${report.assets} obrázků${report.missingAssets.length ? `, chybí ${report.missingAssets.length} obrázků` : ''}`)
     return report

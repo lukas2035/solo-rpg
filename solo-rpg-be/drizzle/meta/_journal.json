@@ -50,6 +50,13 @@
       "when": 1792449841543,
       "tag": "0006_scene_documents",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792586814612,
+      "tag": "0007_prose_fonts",
+      "breakpoints": true
     }
   ]
 }

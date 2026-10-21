@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { AiReview, AiSuggestion, BriefPatch, Character, CharacterInput, DirectorState, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, ProseAiRequest, ProseDoc, ProsePromptEntry, ProseTextColor, PulseOverride, Quest, QuestInput, QuestProposal, QuestStatus, RollOutcome, RulesSystem, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
+import type { AiReview, AiSuggestion, BriefPatch, Character, CharacterInput, DirectorState, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, ProseAiRequest, ProseBackground, ProseDoc, ProseFont, ProseFontPreset, ProsePromptEntry, PulseOverride, Quest, QuestInput, QuestProposal, QuestStatus, RollOutcome, RulesSystem, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
 import { OPEN_THREAD_STATUSES, locationPath } from '@solo-rpg/shared'
 import CharacterBar from '../components/CharacterBar'
 import StoryPanel from '../components/StoryPanel'
@@ -22,6 +22,7 @@ import SessionModal from '../components/SessionModal'
 import { useSessionTimer } from '../hooks/useSessionTimer'
 import CharacterModal, { type CharacterFormValues } from '../components/CharacterModal'
 import SceneModal, { type SceneFormValues } from '../components/SceneModal'
+import type { ProseBackgroundDraft } from '../components/ProseBackgroundModal'
 import SceneBar from '../components/SceneBar'
 import { needsSummary } from '../utils/scenes'
 import ThreadsPanel from '../components/ThreadsPanel'
@@ -117,6 +118,7 @@ export default function StoryEditor() {
   /** Systém pravidel pro překlad obtížnosti v režii a ruční korekce pulsu kampaně – součást nastavení hry */
   const [rulesSystem, setRulesSystem] = useState<RulesSystem>('none')
   const [pulseOverride, setPulseOverride] = useState<PulseOverride>({ tension: null, phase: null })
+  const [proseFonts, setProseFonts] = useState<ProseFontPreset[]>([])
   /** Director: puls kampaně + rozpracovaný brief, klíčované scénou (po přepnutí scény se stav předchozí nezobrazí) */
   const [directorBySceneId, setDirectorBySceneId] = useState<{ sceneId: string; state: DirectorState } | null>(null)
   const [directorBusy, setDirectorBusy] = useState(false)
@@ -202,20 +204,31 @@ export default function StoryEditor() {
     [gameName, currentScene?.title]
   )
 
-  /** Uloží vzhled prózy (textura / barva písma) do scény */
-  const handleProseAppearance = async (patch: { proseTexture?: ImageRef; proseTextColor?: ProseTextColor }) => {
-    if (!currentScene) return
-    try {
-      const saved = await api.updateScene(gameName, currentScene.id, { title: currentScene.title, ...patch })
-      setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))
-    } catch (error) {
-      setLoadError(error instanceof Error ? error.message : 'Vzhled scény se nepodařilo uložit.')
-    }
+  /** Uloží vzhled prózy (pozadí / písmo) do scény */
+  const handleProseAppearance = async (patch: { proseBackground?: ProseBackground; proseFont?: ProseFont }) => {
+    if (!currentScene) throw new Error('Není vybraná scéna.')
+    const saved = await api.updateScene(gameName, currentScene.id, { title: currentScene.title, ...patch })
+    setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))
   }
-  const handleProseTextureChange = async (image: File | string | null) => {
-    if (!currentScene) return
-    const ref = image === null ? null : await api.storeImage(gameName, 'texture', image, currentScene.title)
-    await handleProseAppearance({ proseTexture: ref })
+  /** Pozadí z dialogu: nový soubor / URL nejdřív nahrát do knihovny (druh `texture`), odkaz z knihovny se použije rovnou */
+  const handleProseBackgroundChange = async (draft: ProseBackgroundDraft) => {
+    if (!currentScene) throw new Error('Není vybraná scéna.')
+    const image = draft.image instanceof File || (typeof draft.image === 'string' && /^https?:/i.test(draft.image))
+      ? await api.storeImage(gameName, 'texture', draft.image, currentScene.title)
+      : draft.image
+    await handleProseAppearance({ proseBackground: { image, mode: draft.mode, color: draft.color } })
+  }
+  const handleProseFontPresets = async (presets: ProseFontPreset[]) => {
+    const next: GameSettings = { ...currentSettings, proseFonts: presets }
+    await api.saveSetup(gameName, next)
+    lastSavedSetupRef.current = JSON.stringify(next)
+    setProseFonts(presets)
+  }
+  /** Knihovna obrázků změnila odkazy (nahrazení / smazání) → znovu načíst scény i text aktuální scény */
+  const handleProseLibraryChanged = async () => {
+    api.bumpAssetVersion()
+    setScenes(await api.listScenes(gameName))
+    setProseDoc(null)
   }
   /** AI v editoru prózy: BE uloží pokyn i odpověď do historie scény, text se vrátí editoru (připsání / diff k potvrzení) */
   const handleProseAi = async (body: ProseAiRequest): Promise<string> => {
@@ -413,7 +426,8 @@ export default function StoryEditor() {
     setRules(setup.rules)
     setRulesSystem(setup.rulesSystem)
     setPulseOverride(setup.pulseOverride)
-    const settings: GameSettings = { backgroundImage: setup.backgroundImage, rules: setup.rules, rulesSystem: setup.rulesSystem, pulseOverride: setup.pulseOverride }
+    setProseFonts(setup.proseFonts)
+    const settings: GameSettings = { backgroundImage: setup.backgroundImage, rules: setup.rules, rulesSystem: setup.rulesSystem, pulseOverride: setup.pulseOverride, proseFonts: setup.proseFonts }
     lastSavedSetupRef.current = JSON.stringify(settings)
   }, [])
 
@@ -453,8 +467,8 @@ export default function StoryEditor() {
   }, [gameName, resolveEntries, applySetup])
 
   const currentSettings = useMemo<GameSettings>(
-    () => ({ backgroundImage, rules, rulesSystem, pulseOverride }),
-    [backgroundImage, rules, rulesSystem, pulseOverride]
+    () => ({ backgroundImage, rules, rulesSystem, pulseOverride, proseFonts }),
+    [backgroundImage, rules, rulesSystem, pulseOverride, proseFonts]
   )
 
   // Automatické ukládání nastavení (pozadí, pravidla) do vaultu – postavy a vypravěči mají vlastní endpointy
@@ -1226,19 +1240,15 @@ export default function StoryEditor() {
       order: values.order,
       contextScenes: values.contextScenes,
       mode: values.mode,
-      proseTextColor: values.proseTextColor,
     }
 
-    // Nejdřív scéna (kontrola duplicitního názvu), teprve pak obrázky pojmenované podle ní
+    // Nejdřív scéna (kontrola duplicitního názvu), teprve pak obrázek pojmenovaný podle ní
     let saved = editing
-      ? await api.updateScene(gameName, editing.id, { ...base, image: values.image === null ? null : undefined, proseTexture: values.proseTexture === null ? null : undefined })
+      ? await api.updateScene(gameName, editing.id, { ...base, image: values.image === null ? null : undefined })
       : await api.createScene(gameName, base)
 
-    if (values.image || values.proseTexture) {
-      const patch: SceneInput = { ...base }
-      if (values.image) patch.image = await api.storeImage(gameName, 'scene', values.image, saved.title)
-      if (values.proseTexture) patch.proseTexture = await api.storeImage(gameName, 'texture', values.proseTexture, saved.title)
-      saved = await api.updateScene(gameName, saved.id, patch)
+    if (values.image) {
+      saved = await api.updateScene(gameName, saved.id, { ...base, image: await api.storeImage(gameName, 'scene', values.image, saved.title) })
     }
 
     // Vložení/přesun přečísluje i ostatní scény → načíst aktuální seznam z BE
@@ -1683,12 +1693,15 @@ export default function StoryEditor() {
               game={gameName}
               sceneId={currentScene.id}
               doc={proseDoc?.sceneId === currentScene.id ? proseDoc.doc : undefined}
-              texture={currentScene.proseTexture}
-              textColor={currentScene.proseTextColor}
+              background={currentScene.proseBackground}
+              font={currentScene.proseFont}
+              fontPresets={proseFonts}
               onSave={handleProseSave}
               onUploadImage={handleProseUploadImage}
-              onTextureChange={handleProseTextureChange}
-              onTextColorChange={color => handleProseAppearance({ proseTextColor: color })}
+              onBackgroundChange={handleProseBackgroundChange}
+              onFontChange={font => handleProseAppearance({ proseFont: font })}
+              onFontPresetsChange={handleProseFontPresets}
+              onLibraryChanged={handleProseLibraryChanged}
               aiPrompts={currentScene.prosePrompts}
               onGenerateAi={handleProseAi}
               onDeleteAiPrompt={handleProseDeletePrompt}
@@ -2063,7 +2076,6 @@ export default function StoryEditor() {
           scene={editingScene}
           scenes={scenes}
           image={editingScene ? assetUrl(gameName, editingScene.image, assetVersion) : null}
-          proseTexture={assetUrl(gameName, (editingScene ?? scenes[scenes.length - 1])?.proseTexture ?? null, assetVersion)}
           defaultMode={scenes.length > 0 ? scenes[scenes.length - 1].mode : 'play'}
           defaultTitle={`Scéna ${scenes.length + 1}`}
           defaultCharacters={scenes.length > 0 ? scenes[scenes.length - 1].characters : sceneCharacterOptions.map(c => c.name)}

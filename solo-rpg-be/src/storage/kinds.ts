@@ -10,8 +10,11 @@ import {
   LoreKnowledgeSchema,
   LoreTruthSchema,
   LoreTypeSchema,
+  ProseBackgroundSchema,
+  ProseFontSchema,
   ProsePromptEntrySchema,
   ProseTextColorSchema,
+  proseAppearanceFromLegacy,
   QuestObjectiveSchema,
   QuestStatusSchema,
   QuestTypeSchema,
@@ -55,10 +58,10 @@ export const SceneFields = z.object({
   darkBackground: z.boolean(),
   /** Režim scény: hraná (repliky) / próza (dokument editoru v `scene_documents`) */
   mode: SceneModeSchema,
-  /** Textura pod textem prózy (ImageRef: `assets/<id><ext>` nebo URL); null = jednolité pozadí */
-  proseTexture: z.string().nullable(),
-  /** Barva písma prózy */
-  proseTextColor: ProseTextColorSchema,
+  /** Pozadí stránky prózy (obrázek jako ImageRef `assets/<id><ext>` nebo URL, způsob vykreslení, barva podkladu) */
+  proseBackground: ProseBackgroundSchema,
+  /** Písmo prózy (jedno pro celou scénu) */
+  proseFont: ProseFontSchema,
   /** Historie AI v editoru prózy – pokyn + odpověď modelu (nejnovější první) */
   prosePrompts: z.array(ProsePromptEntrySchema),
   summary: z.string(),
@@ -160,8 +163,9 @@ export const KIND_VERSIONS: Record<EntityKind, { current: number; migrations: Re
   // v7: režim scény (play = dosavadní chování) + vzhled prózy (textura, barva písma)
   // v8: historie promptů pro AI pokračování prózy
   // v9: historie prózy ukládá i odpověď modelu a režim (continue / rewrite); staré řetězce → položky bez odpovědi
+  // v10: textura + přepínač barvy písma → pozadí (obrázek, režim, barva podkladu) a písmo (rodina, velikost, barva, stín)
   scene: {
-    current: 9,
+    current: 10,
     migrations: {
       1: old => ({ ...(old as object), summaryStale: false }),
       2: old => ({ ...(old as object), director: null }),
@@ -173,6 +177,11 @@ export const KIND_VERSIONS: Record<EntityKind, { current: number; migrations: Re
       8: old => {
         const o = old as { prosePrompts?: unknown }
         return { ...o, prosePrompts: legacyProsePrompts(o.prosePrompts) }
+      },
+      9: old => {
+        const { proseTexture, proseTextColor, ...rest } = old as { proseTexture?: unknown; proseTextColor?: unknown }
+        const texture = typeof proseTexture === 'string' && proseTexture ? proseTexture : null
+        return { ...rest, ...proseAppearanceFromLegacy(texture, ProseTextColorSchema.catch('light').parse(proseTextColor)) }
       },
     },
   },

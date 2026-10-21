@@ -19,6 +19,8 @@ import type {
   ProseDoc,
   ProseAiRequest,
   ProseAiResponse,
+  ProseImage,
+  ProseImageDeleteResponse,
   SceneInput,
   SceneMeta,
   SceneProse,
@@ -191,6 +193,29 @@ export async function storeImage(game: string, kind: AssetKind, image: File | st
   }
   if (/^https?:/i.test(image)) return assetFromUrl(game, kind, image, ownerName)
   return image
+}
+
+// ---------- knihovna obrázků prózy (per kampaň) ----------
+
+export const listProseImages = (game: string) => request<ProseImage[]>('GET', `${gamePath(game)}/prose-images`)
+
+/** Nahradí obrázek v knihovně novým souborem; BE přepíše odkazy ve všech textech i pozadích. Vrátí nový odkaz. */
+export async function replaceProseImage(game: string, imagePath: string, file: File): Promise<ImageRef> {
+  const form = new FormData()
+  form.append('file', file, file.name)
+  const result = await request<AssetResponse>('PUT', `${gamePath(game)}/prose-images/${encodeURIComponent(assetIdFromPath(imagePath))}`, form)
+  bumpAssetVersion()
+  return result.path
+}
+
+/** Smaže obrázek z knihovny i všechny odkazy na něj v kampani; vrátí počet odstraněných odkazů */
+export const deleteProseImage = (game: string, imagePath: string) =>
+  request<ProseImageDeleteResponse>('DELETE', `${gamePath(game)}/prose-images/${encodeURIComponent(assetIdFromPath(imagePath))}`).then(r => r.removedReferences)
+
+/** Id assetu z jeho veřejné cesty `assets/<id><ext>` */
+function assetIdFromPath(imagePath: string): string {
+  const file = imagePath.split('/').pop() ?? imagePath
+  return file.replace(/\.[^.]+$/, '')
 }
 
 // Verze obrázků: soubor ve vaultu má po přepsání stejnou cestu, takže by prohlížeč
