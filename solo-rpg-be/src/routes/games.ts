@@ -16,6 +16,7 @@ import {
   QuestInputSchema,
   LocationInputSchema,
   LoreInputSchema,
+  NoteInputSchema,
   GameSessionInputSchema,
   BackupGameRequestSchema,
   AiGenerateRequestSchema,
@@ -27,7 +28,7 @@ import {
   ProseAiRequestSchema,
   isValidGameName,
 } from '@solo-rpg/shared'
-import type { SceneProse, ProseAiResponse, AiSuggestion, AiSuggestionAcceptResponse, AiSuggestionState, DirectorState, NarrativeBrief, RulesPromptResponse, SceneContextSuggestionResponse } from '@solo-rpg/shared'
+import type { SceneProse, NoteDoc, ProseAiResponse, AiSuggestion, AiSuggestionAcceptResponse, AiSuggestionState, DirectorState, NarrativeBrief, RulesPromptResponse, SceneContextSuggestionResponse } from '@solo-rpg/shared'
 import { ConflictError, NotFoundError, ValidationError } from '../vault/StorageProvider.js'
 import type { VaultManager } from '../vault/VaultManager.js'
 import { backupGameFolder } from '../vault/backup.js'
@@ -56,6 +57,7 @@ const FactionParams = GameParams.extend({ faction: z.string().min(1) })
 const QuestParams = GameParams.extend({ quest: z.string().min(1) })
 const LocationParams = GameParams.extend({ location: z.string().min(1) })
 const LoreParams = GameParams.extend({ lore: z.string().min(1) })
+const NoteParams = GameParams.extend({ note: z.string().min(1) })
 const SessionParams = GameParams.extend({ session: z.string().min(1) })
 const SuggestionParams = SceneParams.extend({ suggestion: z.string().min(1) })
 const AssetParams = GameParams.extend({ asset: z.string().min(1) })
@@ -568,6 +570,44 @@ export async function registerGameRoutes(app: FastifyInstance, vault: VaultManag
   app.delete('/api/games/:game/lore/:lore', async (request, reply) => {
     const { game, lore } = LoreParams.parse(request.params)
     await vault.storage.deleteLore(game, lore)
+    return reply.code(204).send()
+  })
+
+  // ---------- poznámkové listy ----------
+
+  app.get('/api/games/:game/notes', async (request) => {
+    const { game } = GameParams.parse(request.params)
+    return vault.storage.listNotes(game)
+  })
+
+  app.post('/api/games/:game/notes', async (request, reply) => {
+    const { game } = GameParams.parse(request.params)
+    const input = NoteInputSchema.parse(request.body)
+    return reply.code(201).send(await vault.storage.createNote(game, input))
+  })
+
+  app.put('/api/games/:game/notes/:note', async (request) => {
+    const { game, note } = NoteParams.parse(request.params)
+    const input = NoteInputSchema.parse(request.body)
+    return vault.storage.updateNote(game, note, input)
+  })
+
+  app.delete('/api/games/:game/notes/:note', async (request, reply) => {
+    const { game, note } = NoteParams.parse(request.params)
+    await vault.storage.deleteNote(game, note)
+    return reply.code(204).send()
+  })
+
+  /** Obsah poznámkového listu (dokument editoru jako u prózy); `doc: null` = list zatím nic nemá */
+  app.get('/api/games/:game/notes/:note/doc', async (request): Promise<NoteDoc> => {
+    const { game, note } = NoteParams.parse(request.params)
+    return { doc: await vault.storage.getNoteDocument(game, note) }
+  })
+
+  app.put('/api/games/:game/notes/:note/doc', async (request, reply) => {
+    const { game, note } = NoteParams.parse(request.params)
+    const { doc } = z.object({ doc: ProseDocSchema }).parse(request.body)
+    await vault.storage.saveNoteDocument(game, note, doc)
     return reply.code(204).send()
   })
 

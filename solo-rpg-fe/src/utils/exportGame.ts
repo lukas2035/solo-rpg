@@ -1,5 +1,5 @@
-import type { Character, Faction, GameSettings, LoreEntry, Narrator, Quest, SceneMeta, StoryEntry, StoryLocation, StoryThread } from '@solo-rpg/shared'
-import { locationPath, questProgress } from '@solo-rpg/shared'
+import type { Character, Faction, GameSettings, LoreEntry, Narrator, Note, ProseDoc, Quest, SceneMeta, StoryEntry, StoryLocation, StoryThread } from '@solo-rpg/shared'
+import { locationPath, proseDocToMarkdown, questProgress } from '@solo-rpg/shared'
 import { THREAD_CERTAINTY_LABELS, THREAD_HORIZON_LABELS, THREAD_STATUS_LABELS, THREAD_TYPE_LABELS } from './threads'
 import { FACTION_STANCE_LABELS, FACTION_STATUS_LABELS, FACTION_TYPE_LABELS } from './factions'
 import { OBJECTIVE_STATUS_LABELS, QUEST_STATUS_LABELS, QUEST_TYPE_LABELS } from './quests'
@@ -22,13 +22,27 @@ export interface GameExportData {
   characters: Character[]
   narrators: Narrator[]
   scenes: SceneMeta[]
+  /**
+   * Id scén, které se mají exportovat. Když chybí, exportují se všechny. Při výběru se do souboru uvede,
+   * že jde o výběr scén důležitých pro kontext, a vynechané scény se vyjmenují jen názvem.
+   */
+  selectedSceneIds?: string[]
   /** Záznamy jednotlivých scén podle id scény (surová podoba z API – mluvčí podle jména) */
   entriesByScene: Record<string, StoryEntry[]>
+  /** Dokumenty scén v režimu prózy podle id scény (null = scéna zatím nemá text); hrané scény tu nejsou */
+  proseByScene?: Record<string, ProseDoc | null>
   threads: StoryThread[]
   factions: Faction[]
   quests: Quest[]
   locations: StoryLocation[]
   lore: LoreEntry[]
+  /**
+   * Poznámkové listy k přiložení: připnuté k exportovaným scénám; když některá exportovaná scéna nemá
+   * připnutý žádný list, přikládají se všechny listy hry. `doc` = null → list zatím nemá obsah.
+   */
+  notes?: { note: Note; doc: ProseDoc | null }[]
+  /** Některá exportovaná scéna nemá připnuté listy → přiloženy všechny (uvede se v textu) */
+  notesIncludeAll?: boolean
 }
 
 /** Odstraní obrázky (`![alt](url)`, `![[soubor]]`, `<img>`) a wikilinky převede na text (`[[Cíl|alias]]` → alias) */
@@ -66,6 +80,11 @@ function section(parts: (string | null | undefined)[]): string {
   return parts.filter((p): p is string => Boolean(p && p.trim())).join('\n\n')
 }
 
+/** Text scény v režimu prózy jako čistý markdown – bez obrázků (export je jen textový) */
+export function proseToPlainMarkdown(doc: ProseDoc | null | undefined): string {
+  return doc ? toPlainMarkdown(proseDocToMarkdown(doc, () => null)) : ''
+}
+
 function entryLine(entry: StoryEntry, characters: readonly Character[]): string {
   // Prompty pro AI nejsou součást příběhu
   if (entry.kind === 'prompt') return ''
@@ -78,14 +97,26 @@ function entryLine(entry: StoryEntry, characters: readonly Character[]): string 
 }
 
 export function buildGameMarkdown(data: GameExportData): string {
-  const { gameName, settings, rulesPrompt, characters, narrators, scenes, entriesByScene, threads, factions, quests, locations, lore } = data
+  const { gameName, settings, rulesPrompt, characters, narrators, scenes, selectedSceneIds, entriesByScene, proseByScene = {}, threads, factions, quests, locations, lore, notes = [], notesIncludeAll = false } = data
   const out: string[] = []
   const h = (level: number, title: string) => out.push(`${'#'.repeat(level)} ${toPlainMarkdown(title)}`)
 
+  const ordered = [...scenes].sort((a, b) => a.order - b.order)
+  const selected = selectedSceneIds ? new Set(selectedSceneIds) : null
+  // Výběr = jen část scén; soubor to musí říct, aby AI nečekala úplný příběh
+  const isSelection = selected !== null && ordered.some(s => !selected.has(s.id))
+  const exportedScenes = selected ? ordered.filter(s => selected.has(s.id)) : ordered
+  const omittedScenes = selected ? ordered.filter(s => !selected.has(s.id)) : []
+
   h(1, gameName)
   out.push(
-    'Kompletní textový export sólové RPG hry (postavy, svět, dějové nitě, questy a přepis všech scén). ' +
-      'Slouží jako kontext o hře – obsahuje i tajemství a skutečnou pravdu kampaně, které postavy nemusí znát.'
+    isSelection
+      ? 'Textový export sólové RPG hry (postavy, svět, dějové nitě, questy) s **výběrem scén**: obsahuje jen scény, ' +
+          'které hráč označil jako důležité pro vytvoření kontextu k aktuálnímu řešenému tématu. Ostatní scény kampaně jsou ' +
+          'v závěru vyjmenovány pouze názvem a jejich obsah v tomto souboru není. ' +
+          'Slouží jako kontext o hře – obsahuje i tajemství a skutečnou pravdu kampaně, které postavy nemusí znát.'
+      : 'Kompletní textový export sólové RPG hry (postavy, svět, dějové nitě, questy a přepis všech scén). ' +
+          'Slouží jako kontext o hře – obsahuje i tajemství a skutečnou pravdu kampaně, které postavy nemusí znát.'
   )
 
   // ---------- kostky a pravidla (vždy, i bez konkrétního systému) ----------
@@ -257,29 +288,79 @@ export function buildGameMarkdown(data: GameExportData): string {
   }
 
   // ---------- scény ----------
-  h(2, 'Příběh – scény')
-  if (!scenes.length) out.push('_Žádné scény._')
-  const ordered = [...scenes].sort((a, b) => a.order - b.order)
-  ordered.forEach((s, i) => {
-    h(3, `Scéna ${i + 1}: ${s.title}`)
-    const entries = entriesByScene[s.id] ?? []
+  h(2, isSelection ? 'Příběh – vybrané scény' : 'Příběh – scény')
+  if (isSelection) {
+    out.push(
+      `Níže je ${exportedScenes.length} z ${ordered.length} scén kampaně – výběr scén považovaných za důležité pro kontext. ` +
+        'Číslování scén odpovídá pořadí v celé kampani, takže mezery v číslech znamenají vynechané scény.'
+    )
+  }
+  if (!exportedScenes.length) out.push('_Žádné scény._')
+  exportedScenes.forEach(s => {
+    // Číslo podle pořadí v celé kampani, aby seděl odkaz i při výběru
+    h(3, `Scéna ${ordered.indexOf(s) + 1}: ${s.title}`)
+    // Próza = souvislý text místo přepisu replik
+    const body = s.mode === 'prose'
+      ? (() => {
+          const prose = proseToPlainMarkdown(proseByScene[s.id])
+          return prose ? `**Text**\n\n${prose}` : '_Scéna zatím nemá žádný text._'
+        })()
+      : (() => {
+          const entries = entriesByScene[s.id] ?? []
+          return entries.length ? `**Přepis**\n\n${entries.map(e => entryLine(e, characters)).filter(Boolean).join('\n\n')}` : '_Scéna zatím nemá žádné záznamy._'
+        })()
     out.push(
       section([
         fields(field('Lokace', s.location), field('Postavy ve scéně', list(s.characters))),
         block(null, s.description),
         block('Shrnutí scény', s.summary),
-        entries.length ? `**Přepis**\n\n${entries.map(e => entryLine(e, characters)).filter(Boolean).join('\n\n')}` : '_Scéna zatím nemá žádné záznamy._',
+        body,
       ])
     )
   })
 
+  if (omittedScenes.length) {
+    h(2, 'Scény vynechané z tohoto exportu')
+    out.push('Tyto scény kampaň obsahuje, ale do výběru pro kontext nebyly zahrnuty (uveden jen název a případné shrnutí):')
+    out.push(
+      omittedScenes
+        .map(s => {
+          const summary = toPlainMarkdown(s.summary)
+          return `- Scéna ${ordered.indexOf(s) + 1}: ${toPlainMarkdown(s.title)}${summary ? ` – ${summary}` : ''}`
+        })
+        .join('\n')
+    )
+  }
+
+  // ---------- průběžné poznámky ----------
+  if (notes.length) {
+    h(2, 'Průběžné poznámky')
+    out.push(
+      'Následují průběžné poznámky, které se využívaly v průběhu hraní těchto scén. ' +
+        (notesIncludeAll
+          ? 'Protože některé z exportovaných scén nemají přiřazený konkrétní poznámkový list, jsou přiloženy všechny poznámkové listy kampaně.'
+          : 'Jsou to poznámkové listy připnuté k exportovaným scénám.')
+    )
+    const sortedNotes = [...notes].sort((a, b) => a.note.title.localeCompare(b.note.title, 'cs'))
+    for (const { note, doc } of sortedNotes) {
+      h(3, `Poznámky: ${note.title}`)
+      const usedIn = exportedScenes.filter(s => s.notes.includes(note.title))
+      out.push(
+        section([
+          usedIn.length ? field('Připnuto ke scénám', usedIn.map(s => `Scéna ${ordered.indexOf(s) + 1}: ${s.title}`).join(', ')) : null,
+          proseToPlainMarkdown(doc) || '_List zatím nemá žádný obsah._',
+        ])
+      )
+    }
+  }
+
   return out.join('\n\n').trim() + '\n'
 }
 
-/** Bezpečný název souboru z názvu hry */
-export function exportFileName(gameName: string): string {
+/** Bezpečný název souboru z názvu hry; při výběru scén s příponou `-vyber-scen` */
+export function exportFileName(gameName: string, selection = false): string {
   const safe = gameName.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'hra'
-  return `${safe}.md`
+  return `${safe}${selection ? '-vyber-scen' : ''}.md`
 }
 
 /** Stáhne text jako soubor přes dočasný odkaz (bez serveru) */

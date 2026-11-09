@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { SceneMeta, SceneMode, StoryLocation } from '@solo-rpg/shared'
+import type { Note, SceneMeta, SceneMode, StoryLocation } from '@solo-rpg/shared'
 import ImageDropField from './ImageDropField'
 import CharacterModal, { type CharacterFormValues } from './CharacterModal'
 import { inputClass, selectAll } from '../utils/forms'
@@ -22,6 +22,8 @@ export interface SceneFormValues {
   contextScenes: string[]
   /** Režim scény: hraná (repliky postav) nebo próza (textový editor); vzhled prózy (pozadí, písmo) se nastavuje v editoru */
   mode: SceneMode
+  /** Názvy poznámkových listů připnutých ke scéně (výchozí v poznámkách, přikládají se k exportu) */
+  notes: string[]
 }
 
 /** Postava hry nabízená v checklistu */
@@ -51,6 +53,10 @@ interface SceneModalProps {
   allCharacters: SceneCharacterOption[]
   /** Lokace hry (výběr „odehrává se v“) */
   allLocations?: StoryLocation[]
+  /** Poznámkové listy hry (výběr připnutých) */
+  allNotes?: Note[]
+  /** Předvybrané připnuté listy pro novou scénu (typicky listy poslední scény) */
+  defaultNotes?: string[]
   /** Hra nemá žádnou scénu – dialog nelze zavřít bez vytvoření */
   required?: boolean
   /** Uloží scénu; při chybě (např. duplicitní název) vyhodí výjimku s hláškou pro uživatele */
@@ -66,7 +72,7 @@ interface SceneModalProps {
 }
 
 /** Dialog pro vytvoření a úpravu scény (název, pozice, obrázek = pozadí scény, markdown popis, shrnutí děje, přítomné postavy) */
-export default function SceneModal({ scene, scenes, image, defaultMode = 'play', defaultTitle = '', defaultCharacters = [], defaultLocation = null, allCharacters, allLocations = [], required = false, onSubmit, onCreateCharacter, onSummarize, onSuggestContextScenes, onDelete, onClose }: SceneModalProps) {
+export default function SceneModal({ scene, scenes, image, defaultMode = 'play', defaultTitle = '', defaultCharacters = [], defaultLocation = null, allCharacters, allLocations = [], allNotes = [], defaultNotes = [], required = false, onSubmit, onCreateCharacter, onSummarize, onSuggestContextScenes, onDelete, onClose }: SceneModalProps) {
   const isEdit = scene !== null
   const sorted = [...scenes].sort((a, b) => a.order - b.order)
   // Pozice podle indexu v seřazeném seznamu (soubory ve vaultu mohou mít mezery v číslování)
@@ -83,6 +89,10 @@ export default function SceneModal({ scene, scenes, image, defaultMode = 'play',
   const [suggestingContext, setSuggestingContext] = useState(false)
   const [selected, setSelected] = useState<string[]>(scene?.characters ?? defaultCharacters)
   const [location, setLocation] = useState<string | null>(scene ? scene.location : defaultLocation)
+  const [notes, setNotes] = useState<string[]>(scene?.notes ?? defaultNotes)
+  const sortedNotes = [...allNotes].sort((a, b) => a.title.localeCompare(b.title, 'cs'))
+  const notesSelected = sortedNotes.filter(n => notes.includes(n.title))
+  const notesAvailable = sortedNotes.filter(n => !notes.includes(n.title))
   const [creatingCharacter, setCreatingCharacter] = useState(false)
   const [editImage, setEditImage] = useState<string | null>(image)
   const [imageChanged, setImageChanged] = useState(false)
@@ -168,6 +178,7 @@ export default function SceneModal({ scene, scenes, image, defaultMode = 'play',
         order,
         contextScenes: contextSelected.map(s => s.title),
         mode,
+        notes: notesSelected.map(n => n.title),
       })
       onClose()
     } catch (err) {
@@ -425,6 +436,43 @@ export default function SceneModal({ scene, scenes, image, defaultMode = 'play',
                   <option value="">＋ přidat scénu…</option>
                   {contextAvailable.map(s => (
                     <option key={s.id} value={s.title}>{String(s.order).padStart(2, '0')} · {s.title}{s.summary.trim() ? '' : ' (bez shrnutí)'}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </fieldset>
+        )}
+
+        {allNotes.length > 0 && (
+          <fieldset className="flex flex-col gap-2 text-left text-sm text-[var(--text)]">
+            <legend className="mb-1">
+              📝 Připnuté poznámkové listy{' '}
+              <span className="opacity-60">(výchozí list v poznámkách u této scény; přikládají se k exportu scény)</span>
+            </legend>
+            <div className="flex flex-wrap gap-2 items-center">
+              {notesSelected.map(n => (
+                <span key={n.id} className="flex items-center gap-1 px-2 py-1 rounded-lg border border-[var(--accent)] bg-[var(--accent)]/15 text-xs">
+                  📌 {n.title}
+                  <button
+                    type="button"
+                    onClick={() => setNotes(prev => prev.filter(t => t !== n.title))}
+                    title="Odepnout"
+                    className="ml-1 opacity-60 hover:opacity-100"
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+              {notesAvailable.length > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => { if (e.target.value) setNotes(prev => [...prev, e.target.value]) }}
+                  className={`${inputClass} text-xs w-auto py-1`}
+                  title="Připnout poznámkový list"
+                >
+                  <option value="">＋ připnout list…</option>
+                  {notesAvailable.map(n => (
+                    <option key={n.id} value={n.title}>{n.title}</option>
                   ))}
                 </select>
               )}

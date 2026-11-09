@@ -1,4 +1,4 @@
-import type { Character, CharacterInput, Faction, FactionInput, GameDetail, GameMeta, GameSession, GameSessionInput, GameSettings, GameSetup, LocationInput, LoreEntry, LoreInput, Narrator, NarratorInput, ProseDoc, ProseImage, Quest, QuestInput, SceneDirector, SceneInput, SceneMeta, StoryEntry, StoryLocation, StoryThread, ThreadInput, AssetKind } from '@solo-rpg/shared'
+import type { Character, CharacterInput, Faction, FactionInput, GameDetail, GameMeta, GameSession, GameSessionInput, GameSettings, GameSetup, LocationInput, LoreEntry, LoreInput, Narrator, NarratorInput, Note, NoteInput, ProseDoc, ProseImage, Quest, QuestInput, SceneDirector, SceneInput, SceneMeta, StoryEntry, StoryLocation, StoryThread, ThreadInput, AssetKind } from '@solo-rpg/shared'
 
 export interface AssetInput {
   kind: AssetKind
@@ -77,6 +77,16 @@ export interface StorageProvider {
   createLore(name: string, input: LoreInput): Promise<LoreEntry>
   updateLore(name: string, loreId: string, input: LoreInput): Promise<LoreEntry>
   deleteLore(name: string, loreId: string): Promise<void>
+
+  /** Poznámkové listy hry (průběžné poznámky hráče; připnutí ke scénám nese `SceneMeta.notes`) */
+  listNotes(name: string): Promise<Note[]>
+  createNote(name: string, input: NoteInput): Promise<Note>
+  updateNote(name: string, noteId: string, input: NoteInput): Promise<Note>
+  /** Smaže list včetně obsahu a připnutí ke scénám */
+  deleteNote(name: string, noteId: string): Promise<void>
+  /** Obsah listu (dokument editoru); null = list zatím nic nemá. Neexistující list → NotFoundError */
+  getNoteDocument(name: string, noteId: string): Promise<ProseDoc | null>
+  saveNoteDocument(name: string, noteId: string, doc: ProseDoc): Promise<void>
 
   /** Herní sezení (stopky) – záznamy v jednom souboru `sessions.md` */
   listSessions(name: string): Promise<GameSession[]>

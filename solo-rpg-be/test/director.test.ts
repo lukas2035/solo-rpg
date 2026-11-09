@@ -13,7 +13,7 @@ const NO_OVERRIDE = { tension: null, phase: null }
 
 const character = (id: string, name: string) => ({ id, name, firstName: name.split(' ')[0], lastName: name.split(' ')[1] ?? '', nickname: name.split(' ')[0], image: null, notes: '' })
 const scene = (p: Partial<SceneMeta> & { id: string; title: string; order: number }): SceneMeta => ({
-  description: '', image: null, characters: [], location: null, narrator: null, ai: true, aiCharacters: [], aiPrompt: '', aiMode: 'advanced', rulesInAi: false, aiReview: 'panel', darkBackground: false, mode: 'play', proseBackground: DEFAULT_PROSE_BACKGROUND, proseFont: PROSE_FONT_LIGHT, prosePrompts: [], summary: '', summaryStale: false, entryCount: 0, contextScenes: [], createdAt: NOW, updatedAt: NOW, ...p,
+  description: '', image: null, characters: [], location: null, narrator: null, ai: true, aiCharacters: [], aiPrompt: '', aiMode: 'advanced', rulesInAi: false, aiReview: 'panel', darkBackground: false, mode: 'play', proseBackground: DEFAULT_PROSE_BACKGROUND, proseFont: PROSE_FONT_LIGHT, prosePrompts: [], summary: '', summaryStale: false, entryCount: 0, contextScenes: [], notes: [], createdAt: NOW, updatedAt: NOW, ...p,
 })
 const thread = (p: Partial<StoryThread> & { id: string; title: string }): StoryThread => ({
   type: 'threat', status: 'active', horizon: 'short-term', certainty: 'confirmed', revealCondition: '', clock: null,
@@ -39,7 +39,7 @@ function campaign(p: Partial<GameDetail> = {}): GameDetail {
       thread({ id: 'thr_hotovo', title: 'Hotová', status: 'resolved', characters: ['Klára Nováková'] }),
     ],
     quests: [quest({ id: 'qst_dopis', title: 'Najít dopis', characters: ['Klára Nováková'] }), quest({ id: 'qst_done', title: 'Hotový', status: 'completed' })],
-    factions: [], locations: [], lore: [],
+    factions: [], locations: [], lore: [], notes: [],
     ...p,
   }
 }

@@ -4,9 +4,9 @@ import { customAlphabet } from 'nanoid'
 const alphabet = '23456789abcdefghjkmnpqrstuvwxyz'
 const nano = customAlphabet(alphabet, 12)
 
-export type EntityKind = 'character' | 'narrator' | 'scene' | 'thread' | 'faction' | 'quest' | 'location' | 'lore' | 'session'
+export type EntityKind = 'character' | 'narrator' | 'scene' | 'thread' | 'faction' | 'quest' | 'location' | 'lore' | 'session' | 'note'
 
-export const ENTITY_KINDS: readonly EntityKind[] = ['character', 'narrator', 'scene', 'thread', 'faction', 'quest', 'location', 'lore', 'session']
+export const ENTITY_KINDS: readonly EntityKind[] = ['character', 'narrator', 'scene', 'thread', 'faction', 'quest', 'location', 'lore', 'session', 'note']
 
 const PREFIX: Record<EntityKind | 'game' | 'asset' | 'suggestion' | 'brief' | 'event', string> = {
   character: 'chr',
@@ -18,6 +18,7 @@ const PREFIX: Record<EntityKind | 'game' | 'asset' | 'suggestion' | 'brief' | 'e
   location: 'loc',
   lore: 'lor',
   session: 'ses',
+  note: 'not',
   game: 'gam',
   asset: 'ast',
   suggestion: 'sug',

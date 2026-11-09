@@ -31,8 +31,8 @@ interface CharacterBarProps {
   /** Pravý klik → smazat postavu z celé hry */
   onCharacterDelete?: (characterId: string) => void
   onExportMarkdown?: () => string
-  /** Stáhne celou hru (postavy, svět, všechny scény) jako jeden textový Markdown soubor */
-  onExportGame?: () => Promise<boolean>
+  /** Otevře dialog exportu hry (celá hra nebo vybrané scény) do jednoho textového Markdown souboru */
+  onExportGame?: () => void
   onRenameGame?: () => Promise<boolean>
   /** Otevře výběr aktuálního vypravěče */
   onSelectNarrator?: () => void
@@ -75,6 +75,12 @@ interface CharacterBarProps {
   onShowBackground?: () => void
   /** Ikona 🗗 vedle 🖼️ → otevřít obrázek pozadí v plovoucím okně */
   onFloatBackground?: () => void
+  /** 📝 Zobrazit poznámkové listy místo aktuální scény */
+  onToggleNotesInPlace?: () => void
+  notesInPlaceOpen?: boolean
+  /** 🗒 Otevřít poznámkové listy v plovoucím okně vedle scény */
+  onToggleNotesFloating?: () => void
+  notesFloatingOpen?: boolean
 }
 
 export default function CharacterBar({
@@ -117,26 +123,19 @@ export default function CharacterBar({
   onImportTranscript,
   onShowBackground,
   onFloatBackground,
+  onToggleNotesInPlace,
+  notesInPlaceOpen = false,
+  onToggleNotesFloating,
+  notesFloatingOpen = false,
 }: CharacterBarProps) {
   const navigate = useNavigate()
   const [aspectRatios, setAspectRatios] = useState<Record<string, number>>({})
   const [copied, setCopied] = useState(false)
-  const [feedback, setFeedback] = useState<'story-cleared' | 'story-clear-failed' | 'renamed' | 'rename-failed' | 'exported' | 'export-failed' | null>(null)
-  const [exporting, setExporting] = useState(false)
+  const [feedback, setFeedback] = useState<'story-cleared' | 'story-clear-failed' | 'renamed' | 'rename-failed' | null>(null)
 
   const showFeedback = (value: NonNullable<typeof feedback>) => {
     setFeedback(value)
     setTimeout(() => setFeedback(null), 1500)
-  }
-
-  const handleExportGame = async () => {
-    if (!onExportGame || exporting) return
-    setExporting(true)
-    try {
-      showFeedback((await onExportGame()) ? 'exported' : 'export-failed')
-    } finally {
-      setExporting(false)
-    }
   }
 
   const handleRenameGame = async () => {
@@ -311,12 +310,11 @@ export default function CharacterBar({
           {onExportGame && (
             <button
               type="button"
-              onClick={handleExportGame}
-              disabled={exporting}
-              title="Exportovat celou hru do jednoho Markdown souboru (jen text – kontext pro AI chat)"
-              className={`w-8 h-8 rounded-md border border-[var(--accent)]/60 bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all ${exporting ? 'opacity-60 cursor-wait' : ''}`}
+              onClick={onExportGame}
+              title="Exportovat hru (celou nebo vybrané scény) do jednoho Markdown souboru – kontext pro AI chat"
+              className="w-8 h-8 rounded-md border border-[var(--accent)]/60 bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all"
             >
-              {feedback === 'exported' ? '✓' : feedback === 'export-failed' ? '✗' : exporting ? '⏳' : '📄'}
+              📄
             </button>
           )}
           <button
@@ -486,6 +484,30 @@ export default function CharacterBar({
               </span>
             )}
           </button>
+          {onToggleNotesInPlace && (
+            <button
+              type="button"
+              onClick={onToggleNotesInPlace}
+              title={notesInPlaceOpen ? 'Zpět na scénu' : 'Zobrazit poznámkové listy místo scény'}
+              className={`w-8 h-8 rounded-md border bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all ${
+                notesInPlaceOpen ? 'border-[var(--accent)] bg-[var(--accent)]/20' : 'border-[var(--accent)]/60'
+              }`}
+            >
+              📝
+            </button>
+          )}
+          {onToggleNotesFloating && (
+            <button
+              type="button"
+              onClick={onToggleNotesFloating}
+              title={notesFloatingOpen ? 'Zavřít plovoucí okno s poznámkami' : 'Otevřít poznámkové listy v plovoucím okně (vedle scény)'}
+              className={`w-8 h-8 rounded-md border bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all ${
+                notesFloatingOpen ? 'border-[var(--accent)] bg-[var(--accent)]/20' : 'border-[var(--accent)]/60'
+              }`}
+            >
+              🗒
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -59,6 +59,13 @@ export class ObsidianExporter {
       const created = (await target.listFactions(game)).find(x => x.title === f.title)
       if (created) await target.updateFaction(game, created.id, { title: f.title, type: f.type, relations: f.relations })
     }
+    // Poznámkové listy před scénami, aby se připnutí (`notes`) ve scénách vyřešila
+    const noteIds = new Map<string, string>()
+    for (const n of detail.notes) {
+      await tick()
+      const created = await target.createNote(game, { title: n.title })
+      noteIds.set(n.id, created.id)
+    }
     const sceneIds = new Map<string, string>()
     for (const scene of [...detail.scenes].sort((a, b) => a.order - b.order)) {
       await tick()
@@ -92,6 +99,12 @@ export class ObsidianExporter {
       }
       const entries = await this.source.getSceneEntries(sourceName, scene.id)
       if (entries && entries.length > 0) await target.saveSceneEntries(game, targetId, entries)
+    }
+    for (const n of detail.notes) {
+      const targetId = noteIds.get(n.id)
+      if (!targetId) continue
+      const doc = await this.source.getNoteDocument(sourceName, n.id)
+      if (doc) await target.saveNoteDocument(game, targetId, await this.copyProseImages(doc, sourceName, target, game, n.title))
     }
     for (const s of [...(await this.source.listSessions(sourceName))].sort((a, b) => a.startedAt - b.startedAt)) {
       await target.createSession(game, s)

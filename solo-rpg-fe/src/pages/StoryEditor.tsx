@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { AiReview, AiSuggestion, BriefPatch, Character, CharacterInput, DirectorState, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, ProseAiRequest, ProseBackground, ProseDoc, ProseFont, ProseFontPreset, ProsePromptEntry, PulseOverride, Quest, QuestInput, QuestProposal, QuestStatus, RollOutcome, RulesSystem, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
+import type { AiReview, AiSuggestion, BriefPatch, Character, CharacterInput, DirectorState, Faction, FactionInput, FactionStance, GameSettings, GameSetup, ImageRef, LocationInput, LocationStatus, LoreEntry, LoreInput, LoreKnowledge, LoreTruth, Narrator, NarratorInput, Note, ProseAiRequest, ProseBackground, ProseDoc, ProseFont, ProseFontPreset, ProsePromptEntry, PulseOverride, Quest, QuestInput, QuestProposal, QuestStatus, RollOutcome, RulesSystem, SceneInput, SceneMeta, StoryEntry as ApiStoryEntry, StoryLocation, StoryThread, ThreadInput, ThreadStatus } from '@solo-rpg/shared'
 import { OPEN_THREAD_STATUSES, locationPath } from '@solo-rpg/shared'
 import CharacterBar from '../components/CharacterBar'
 import StoryPanel from '../components/StoryPanel'
@@ -8,6 +8,9 @@ import InputArea from '../components/InputArea'
 import ProseEditor from '../components/ProseEditor'
 import PortraitModal from '../components/PortraitModal'
 import FloatingPortrait from '../components/FloatingPortrait'
+import FloatingWindow from '../components/FloatingWindow'
+import NotesView from '../components/NotesView'
+import NotesPinModal from '../components/NotesPinModal'
 import NarratorPickerModal from '../components/NarratorPickerModal'
 import NarratorModal, { type NarratorFormValues } from '../components/NarratorModal'
 import AiSceneModal, { type AiSceneSettings } from '../components/AiSceneModal'
@@ -18,6 +21,7 @@ import DirectorPanel from '../components/DirectorPanel'
 import QuestProposalsPanel, { type PendingQuestProposal } from '../components/QuestProposalsPanel'
 import RulesModal, { type RulesFormValues } from '../components/RulesModal'
 import ImportTranscriptModal from '../components/ImportTranscriptModal'
+import ExportGameModal from '../components/ExportGameModal'
 import SessionModal from '../components/SessionModal'
 import { useSessionTimer } from '../hooks/useSessionTimer'
 import CharacterModal, { type CharacterFormValues } from '../components/CharacterModal'
@@ -38,7 +42,7 @@ import LoreModal from '../components/LoreModal'
 import SidePanel, { type SidePanelTab } from '../components/SidePanel'
 import type { EntityOption } from '../components/EntityChecklist'
 import * as api from '../utils/api'
-import { buildGameMarkdown, downloadTextFile, exportFileName } from '../utils/exportGame'
+import { buildGameMarkdown, downloadTextFile, exportFileName, proseToPlainMarkdown } from '../utils/exportGame'
 import { assetUrl, useAssetVersion } from '../utils/api'
 import { FACTION_TYPE_ICONS } from '../utils/factions'
 import { LOCATION_TYPE_ICONS } from '../utils/locations'
@@ -78,6 +82,13 @@ const SHOW_AI_PROMPTS_KEY = 'solo-rpg:showAiPrompts'
 type CharacterModalState = { mode: 'create' } | { mode: 'edit'; id: string }
 /** Zástupné ID v seznamu plovoucích oken pro obrázek pozadí (ID postav začínají jinak) */
 const BACKGROUND_FLOAT_ID = '__background__'
+
+/** Výchozí poloha plovoucího okna s poznámkami: vpravo od scény (na širokém monitoru vedle hry), na menším displeji užší */
+function notesFloatingDefaultBox() {
+  const width = Math.min(560, Math.max(360, Math.round(window.innerWidth * 0.28)))
+  const height = Math.max(320, window.innerHeight - 200)
+  return { x: window.innerWidth - width - 24, y: 150, width, height }
+}
 type SceneModalState = { mode: 'create' } | { mode: 'edit'; id: string }
 type NarratorModalState = { mode: 'create' } | { mode: 'edit'; id: string }
 type ThreadModalState = { mode: 'create' } | { mode: 'edit'; id: string }
@@ -112,7 +123,14 @@ export default function StoryEditor() {
   const [narratorModal, setNarratorModal] = useState<NarratorModalState | null>(null)
   const [showAiModal, setShowAiModal] = useState(false)
   const [showRulesModal, setShowRulesModal] = useState(false)
+  const [showExportModal, setShowExportModal] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
+  /** Poznámkové listy hry (nezávislé na scénách; připnutí je uložené u scén) */
+  const [notes, setNotes] = useState<Note[]>([])
+  /** 📝 poznámky místo scény / 🗒 poznámky v plovoucím okně / 🗂 hromadné připnutí ke scénám */
+  const [showNotesInPlace, setShowNotesInPlace] = useState(false)
+  const [showNotesFloating, setShowNotesFloating] = useState(false)
+  const [showNotesPinModal, setShowNotesPinModal] = useState(false)
   /** Pravidla pod příběhem (popis systému) – součást nastavení hry; zda se posílají AI je per scéna (`SceneMeta.rulesInAi`) */
   const [rules, setRules] = useState('')
   /** Systém pravidel pro překlad obtížnosti v režii a ruční korekce pulsu kampaně – součást nastavení hry */
@@ -247,6 +265,40 @@ export default function StoryEditor() {
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : 'Prompt se nepodařilo smazat.')
     }
+  }
+
+  // ---------- poznámkové listy ----------
+
+  /** Listy se změnily (vytvoření / přejmenování / smazání) → znovu načíst listy i scény (BE přepisuje názvy v připnutí) */
+  const reloadNotes = async () => {
+    const [nextNotes, nextScenes] = await Promise.all([api.listNotes(gameName), api.listScenes(gameName)])
+    setNotes(nextNotes)
+    setScenes(nextScenes)
+  }
+  /** Uloží připnuté listy aktuální scény */
+  const handlePinnedNotesChange = async (noteTitles: string[]) => {
+    if (!currentScene) throw new Error('Není vybraná scéna.')
+    const saved = await api.updateScene(gameName, currentScene.id, { title: currentScene.title, notes: noteTitles })
+    setScenes(prev => prev.map(s => (s.id === saved.id ? saved : s)))
+  }
+  /** Hromadné připnutí z dialogu: uloží jen změněné scény */
+  const handleBulkPinNotes = async (changes: Record<string, string[]>) => {
+    for (const [sceneId, noteTitles] of Object.entries(changes)) {
+      const scene = scenes.find(s => s.id === sceneId)
+      if (!scene) continue
+      await api.updateScene(gameName, sceneId, { title: scene.title, notes: noteTitles })
+    }
+    setScenes(await api.listScenes(gameName))
+  }
+  const notesViewProps = {
+    game: gameName,
+    notes,
+    scene: currentScene,
+    onNotesChanged: reloadNotes,
+    onPinnedChange: handlePinnedNotesChange,
+    onOpenBulkPin: () => setShowNotesPinModal(true),
+    onUploadImage: handleProseUploadImage,
+    onLibraryChanged: handleProseLibraryChanged,
   }
   // V pásu a při psaní jen postavy aktuální scény (+ dočasní mluvčí, kteří v ní mluví); AI postavy označené
   const displayCharacters = useMemo(() => {
@@ -452,6 +504,7 @@ export default function StoryEditor() {
         setQuests(detail.quests)
         setLocations(detail.locations)
         setLore(detail.lore)
+        setNotes(detail.notes)
         setCurrentSceneId(scene?.id ?? null)
         // Hra bez scén → nejdřív vytvořit první scénu
         if (!scene) setSceneModal({ mode: 'create' })
@@ -1079,15 +1132,18 @@ export default function StoryEditor() {
   }
 
   const handleExportMarkdown = () =>
-    storyEntries
-      // Prompty pro AI nejsou součást příběhu
-      .filter(entry => entry.kind !== 'prompt')
-      // U víceřádkového markdownu začíná text na novém řádku pod jménem mluvčího
-      .map(entry => `**${entry.character ? entry.character.nickname : entry.narrator?.name ?? 'Vypravěč'}**:${entry.markdown ? '\n' : ' '}${entry.text}`)
-      .join('\n\n')
+    // Próza: souvislý text scény (bez obrázků) místo replik
+    isProse
+      ? proseToPlainMarkdown(proseDoc?.sceneId === currentSceneId ? proseDoc.doc : null)
+      : storyEntries
+          // Prompty pro AI nejsou součást příběhu
+          .filter(entry => entry.kind !== 'prompt')
+          // U víceřádkového markdownu začíná text na novém řádku pod jménem mluvčího
+          .map(entry => `**${entry.character ? entry.character.nickname : entry.narrator?.name ?? 'Vypravěč'}**:${entry.markdown ? '\n' : ' '}${entry.text}`)
+          .join('\n\n')
 
-  /** Export celé hry do jednoho textového .md souboru (čerstvá data z vaultu včetně záznamů všech scén) */
-  const handleExportGame = async (): Promise<boolean> => {
+  /** Export hry do jednoho textového .md souboru (čerstvá data z vaultu); `selectedSceneIds` = jen vybrané scény jako kontext */
+  const handleExportGame = async (selectedSceneIds?: string[]): Promise<boolean> => {
     try {
       const detail = await api.getGame(gameName)
       // Sekce o kostkách/pravidlech stejná jako pro AI; při chybě (např. chybějící soubor promptu) se použije záložní text z FE
@@ -1095,10 +1151,22 @@ export default function StoryEditor() {
         console.warn('Nepodařilo se načíst prompt o pravidlech, export použije záložní text:', error)
         return undefined
       })
+      const wanted = selectedSceneIds ? new Set(selectedSceneIds) : null
       const entriesByScene: Record<string, ApiStoryEntry[]> = {}
+      const proseByScene: Record<string, ProseDoc | null> = {}
+      // Obsah se načítá jen pro scény, které budou v exportu
       for (const scene of detail.scenes) {
-        entriesByScene[scene.id] = await api.getSceneEntries(gameName, scene.id)
+        if (wanted && !wanted.has(scene.id)) continue
+        if (scene.mode === 'prose') proseByScene[scene.id] = (await api.getSceneProse(gameName, scene.id)).doc
+        else entriesByScene[scene.id] = await api.getSceneEntries(gameName, scene.id)
       }
+      const isSelection = wanted !== null && detail.scenes.some(s => !wanted.has(s.id))
+      // Poznámkové listy: připnuté k exportovaným scénám; když některá nemá žádný, přiloží se všechny
+      const exportedScenes = detail.scenes.filter(s => !wanted || wanted.has(s.id))
+      const notesIncludeAll = exportedScenes.some(s => s.notes.length === 0)
+      const pinnedTitles = new Set(exportedScenes.flatMap(s => s.notes))
+      const exportNotes = detail.notes.filter(n => notesIncludeAll || pinnedTitles.has(n.title))
+      const notesWithDocs = await Promise.all(exportNotes.map(async note => ({ note, doc: (await api.getNoteDoc(gameName, note.id)).doc })))
       const markdown = buildGameMarkdown({
         gameName: detail.meta.name,
         settings: { rules: detail.setup.rules },
@@ -1106,14 +1174,18 @@ export default function StoryEditor() {
         characters: detail.setup.characters,
         narrators: detail.setup.narrators,
         scenes: detail.scenes,
+        selectedSceneIds,
         entriesByScene,
+        proseByScene,
         threads: detail.threads,
         factions: detail.factions,
         quests: detail.quests,
         locations: detail.locations,
         lore: detail.lore,
+        notes: notesWithDocs,
+        notesIncludeAll,
       })
-      downloadTextFile(exportFileName(detail.meta.name), markdown)
+      downloadTextFile(exportFileName(detail.meta.name, isSelection), markdown)
       return true
     } catch (error) {
       console.error('Export hry selhal:', error)
@@ -1136,6 +1208,7 @@ export default function StoryEditor() {
       setQuests(detail.quests)
       setLocations(detail.locations)
       setLore(detail.lore)
+      setNotes(detail.notes)
       setCurrentSceneId(scene?.id ?? null)
       applySetup({ ...detail.setup, characters: resolved.characters })
       setVaultChanges(null)
@@ -1240,6 +1313,7 @@ export default function StoryEditor() {
       order: values.order,
       contextScenes: values.contextScenes,
       mode: values.mode,
+      notes: values.notes,
     }
 
     // Nejdřív scéna (kontrola duplicitního názvu), teprve pak obrázek pojmenovaný podle ní
@@ -1603,7 +1677,7 @@ export default function StoryEditor() {
         onCharacterRemoveFromScene={(id) => void removeCharacterFromCurrentScene(id).catch(error => console.error('Odebrání postavy ze scény selhalo:', error))}
         onCharacterDelete={handleCharacterDelete}
         onExportMarkdown={handleExportMarkdown}
-        onExportGame={handleExportGame}
+        onExportGame={() => setShowExportModal(true)}
         onRenameGame={handleRenameGame}
         onSelectNarrator={() => setShowNarratorPicker(true)}
         onOpenAi={() => { if (currentScene) setShowAiModal(true) }}
@@ -1636,6 +1710,10 @@ export default function StoryEditor() {
           }
         }}
         onFloatBackground={displayBackground ? () => handlePortraitFloat(BACKGROUND_FLOAT_ID) : undefined}
+        onToggleNotesInPlace={() => { setShowNotesInPlace(v => !v); setShowNotesFloating(false) }}
+        notesInPlaceOpen={showNotesInPlace}
+        onToggleNotesFloating={() => { setShowNotesFloating(v => !v); setShowNotesInPlace(false) }}
+        notesFloatingOpen={showNotesFloating}
       />
 
       <SceneBar
@@ -1688,7 +1766,9 @@ export default function StoryEditor() {
       <div className="flex-1 flex overflow-hidden relative">
         {/* Obsah */}
         <div className="relative flex-1 min-w-0 flex flex-col">
-          {isProse && currentScene ? (
+          {showNotesInPlace ? (
+            <NotesView variant="inplace" {...notesViewProps} />
+          ) : isProse && currentScene ? (
             <ProseEditor
               game={gameName}
               sceneId={currentScene.id}
@@ -1870,6 +1950,30 @@ export default function StoryEditor() {
         />
       ))}
 
+      {/* Poznámkové listy v plovoucím okně (na širokém monitoru vpravo od scény) */}
+      {showNotesFloating && (
+        <FloatingWindow
+          title="📝 Poznámky"
+          defaultBox={notesFloatingDefaultBox()}
+          minWidth={360}
+          minHeight={260}
+          onClose={() => setShowNotesFloating(false)}
+        >
+          <NotesView variant="floating" {...notesViewProps} />
+        </FloatingWindow>
+      )}
+
+      {/* Hromadné připnutí poznámkových listů ke scénám */}
+      {showNotesPinModal && (
+        <NotesPinModal
+          scenes={scenes}
+          notes={notes}
+          currentSceneId={currentSceneId}
+          onSave={handleBulkPinNotes}
+          onClose={() => setShowNotesPinModal(false)}
+        />
+      )}
+
       {/* Portrait Modal */}
       {selectedPortrait && (
         <PortraitModal
@@ -1935,6 +2039,16 @@ export default function StoryEditor() {
           rulesSystem={rulesSystem}
           onSubmit={handleRulesSave}
           onClose={() => setShowRulesModal(false)}
+        />
+      )}
+
+      {/* Export hry do Markdownu – výběr scén, jejichž obsah půjde do souboru */}
+      {showExportModal && (
+        <ExportGameModal
+          scenes={scenes}
+          currentSceneId={currentSceneId}
+          onExport={handleExportGame}
+          onClose={() => setShowExportModal(false)}
         />
       )}
 
@@ -2082,6 +2196,8 @@ export default function StoryEditor() {
           defaultLocation={scenes.length > 0 ? scenes[scenes.length - 1].location : null}
           allCharacters={sceneCharacterOptions}
           allLocations={locations}
+          allNotes={notes}
+          defaultNotes={scenes.length > 0 ? scenes[scenes.length - 1].notes : []}
           required={scenes.length === 0}
           onSubmit={handleSceneSubmit}
           onCreateCharacter={createCharacterFromSceneModal}

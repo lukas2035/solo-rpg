@@ -129,7 +129,10 @@ export const sceneEntries = pgTable(
   table => [uniqueIndex('scene_entries_scene_id_idx').on(table.sceneId, table.id), index('scene_entries_scene_pos_idx').on(table.sceneId, table.position)],
 )
 
-/** Dokument prózy (scéna v režimu `prose`): celý TipTap/ProseMirror JSON strom bloků, jeden řádek na scénu */
+/**
+ * Dokument editoru (TipTap/ProseMirror JSON strom bloků), jeden řádek na entitu: próza scény v režimu `prose`
+ * a obsah poznámkového listu (`kind = 'note'`). `scene_id` je tedy id scény nebo poznámky (historický název sloupce).
+ */
 export const sceneDocuments = pgTable('scene_documents', {
   sceneId: text('scene_id')
     .primaryKey()

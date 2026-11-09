@@ -280,12 +280,31 @@ describe('sezení', () => {
 describe('export → import (round trip přes Obsidian vault)', () => {
   it('vyexportovaná hra se dá načíst v1 providerem a znovu importovat se stejným obsahem', async () => {
     const vault = path.join(tmp, 'vault')
+    // Prózová scéna s obrázkem z assetů – do vaultu se musí dostat jako markdown s překopírovaným obrázkem
+    const illustration = await storage.saveAsset(G, { kind: 'illustration', ownerName: 'Próza', filename: 'ilu.png', mimeType: 'image/png', data: Buffer.from('ilu') })
+    const prose = await storage.createScene(G, { title: 'Próza', mode: 'prose' })
+    await storage.saveSceneDocument(G, prose.id, {
+      type: 'doc',
+      content: [
+        { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Kapitola' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'Souvislý ', marks: [{ type: 'bold' }] }, { type: 'text', text: 'text.' }] },
+        { type: 'image', attrs: { src: illustration, layout: 'left', alt: 'ilu' } },
+      ],
+    })
     const exporter = new ObsidianExporter(storage, assetStore)
     const dir = await exporter.exportGame(G, vault)
     expect(dir).toBe(path.join(vault, G))
     const v1 = new ObsidianVaultProvider(vault)
     const exported = await v1.getGame(G)
     const original = (await storage.getGame(G))!
+    const exportedProse = exported!.scenes.find(s => s.title === 'Próza')!
+    expect(exportedProse.mode).toBe('prose')
+    const proseFiles = await fs.readdir(path.join(dir, 'scenes'))
+    const proseFile = proseFiles.find(f => f.includes('Próza'))!
+    const proseBody = await fs.readFile(path.join(dir, 'scenes', proseFile), 'utf8')
+    expect(proseBody).toContain('## Kapitola')
+    expect(proseBody).toContain('**Souvislý** text.')
+    expect(proseBody).toMatch(/!\[ilu\]\(illustrations\/[^)]+\) <!-- layout="left" -->/)
     expect(exported?.setup.characters.map(c => c.name)).toEqual(original.setup.characters.map(c => c.name))
     expect(exported?.scenes.map(s => [s.order, s.title, s.characters])).toEqual(original.scenes.map(s => [s.order, s.title, s.characters]))
     expect(exported?.quests[0].objectives).toEqual(original.quests[0].objectives)
@@ -295,6 +314,7 @@ describe('export → import (round trip přes Obsidian vault)', () => {
     const importer = new VaultImporter(vault, storage)
     await expect(importer.importGame(G)).rejects.toBeInstanceOf(ConflictError)
     const report = await importer.importGame(G, { replace: true })
+    // Próza se z vaultu zpět neimportuje (jen jednosměrný markdown), takže její ilustrace se nepočítá – jen portrét
     expect(report.assets).toBe(1)
     expect(report.missingAssets).toEqual([])
     const reimported = (await storage.getGame(G))!

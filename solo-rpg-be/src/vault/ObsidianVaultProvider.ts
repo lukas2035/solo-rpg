@@ -31,6 +31,8 @@ import {
   type LoreInput,
   type Narrator,
   type NarratorInput,
+  type Note,
+  type NoteInput,
   type ProseDoc,
   type ProseImage,
   type Quest,
@@ -106,6 +108,8 @@ const LOCATION_DIR = 'locations'
 /** Obrázky lokací odděleně od portrétů postav */
 const LOCATION_IMAGE_DIR = `${PORTRAIT_DIR}/locations`
 const LORE_DIR = 'lore'
+/** Poznámkové listy hráče (volný text v editoru prózy, uložené jako markdown) */
+const NOTE_DIR = 'notes'
 /** Obrázky v textu prózy a textury pod ní */
 const ILLUSTRATION_DIR = 'illustrations'
 const TEXTURE_DIR = 'textures'
@@ -181,6 +185,13 @@ interface LoreFile {
   fileName: string
   data: Frontmatter
   lore: LoreEntry
+}
+
+interface NoteFile {
+  fileName: string
+  data: Frontmatter
+  body: string
+  note: Note
 }
 
 function toTimestamp(value: unknown, fallback: number): number {
@@ -484,6 +495,7 @@ export class ObsidianVaultProvider implements StorageProvider {
     const quests = await this.readQuests(dir)
     const locations = await this.readLocations(dir)
     const lore = await this.readLore(dir)
+    const notes = await this.readNotes(dir)
     return {
       meta: this.metaFromGameFile(name.trim(), file, stat),
       setup: this.setupFromGameFile(file, characters.map(c => c.character), narrators.map(n => n.narrator)),
@@ -493,6 +505,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       quests: quests.map(q => q.quest),
       locations: locations.map(l => l.location),
       lore: lore.map(l => l.lore),
+      notes: notes.map(n => n.note),
     }
   }
 
@@ -1115,6 +1128,7 @@ export class ObsidianVaultProvider implements StorageProvider {
           ...readProseAppearance(data),
           prosePrompts: legacyProsePrompts(data.prosePrompts),
           contextScenes: parseCharacterLinks(data.contextScenes),
+          notes: parseCharacterLinks(data.notes),
           createdAt: toTimestamp(data.createdAt, stat.birthtimeMs),
           updatedAt: toTimestamp(data.updatedAt, stat.mtimeMs),
         },
@@ -1182,6 +1196,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       prosePrompts: meta.prosePrompts.length ? meta.prosePrompts : null,
       summaryStale: meta.summaryStale ? true : null,
       contextScenes: meta.contextScenes.length ? toCharacterLinks(meta.contextScenes) : null,
+      notes: meta.notes.length ? toCharacterLinks(meta.notes) : null,
       createdAt: toIso(meta.createdAt),
       updatedAt: toIso(meta.updatedAt),
     }
@@ -1260,6 +1275,8 @@ export class ObsidianVaultProvider implements StorageProvider {
       summaryStale: false,
       entryCount: 0,
       contextScenes: (input.contextScenes ?? []).filter(t => scenes.some(s => s.meta.title === t)),
+      // Připnuté poznámkové listy se dědí ze sousední scény
+      notes: await this.normalizeNoteRefs(dir, input.notes ?? neighbor?.meta.notes ?? []),
       image: input.image ?? null,
       characters,
       location: await this.normalizeLocationRef(dir, input.location ?? null),
@@ -1342,6 +1359,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       aiCharacters: aiCharacters.filter(n => characters.includes(n)),
       aiPrompt: input.aiPrompt ?? previous.aiPrompt,
       contextScenes: input.contextScenes ? input.contextScenes.filter(t => t !== title && scenes.some(s => s.meta.title === t)) : previous.contextScenes,
+      notes: input.notes ? await this.normalizeNoteRefs(dir, input.notes) : previous.notes,
       updatedAt: Date.now(),
     }
     await this.writeSceneFile(dir, meta, current.entriesBody, current.data)
@@ -2532,6 +2550,131 @@ export class ObsidianVaultProvider implements StorageProvider {
     if (!current) throw new NotFoundError(`Záznam lore „${loreId}“ neexistuje.`)
     // Na lore nic neodkazuje (vazby vlastní záznam sám) – stačí smazat soubor
     await removeIfExists(path.join(dir, LORE_DIR, current.fileName))
+    await this.touchGame(dir)
+  }
+
+  // ---------- poznámkové listy (notes/*.md) ----------
+
+  private async readNotes(dir: string): Promise<NoteFile[]> {
+    const noteDir = path.join(dir, NOTE_DIR)
+    const files = await listFiles(noteDir, '.md')
+    const entries: NoteFile[] = []
+    for (const fileName of files) {
+      const raw = await readTextIfExists(path.join(noteDir, fileName))
+      if (raw === null) continue
+      const parsed = matter(raw)
+      const data = parsed.data as Frontmatter
+      const stat = await fs.stat(path.join(noteDir, fileName))
+      const title = typeof data.title === 'string' && data.title.trim() ? data.title.trim() : fileName.replace(/\.md$/i, '')
+      entries.push({
+        fileName,
+        data,
+        body: parsed.content,
+        note: {
+          id: typeof data.id === 'string' && data.id ? data.id : `note-${title}`,
+          title,
+          createdAt: toTimestamp(data.createdAt, stat.birthtimeMs),
+          updatedAt: toTimestamp(data.updatedAt, stat.mtimeMs),
+        },
+      })
+    }
+    return entries.sort((a, b) => a.note.title.localeCompare(b.note.title, 'cs'))
+  }
+
+  private assertNoteTitleFree(existing: NoteFile[], title: string, exceptId?: string): void {
+    const key = nameKey(title)
+    if (existing.some(n => n.note.id !== exceptId && nameKey(n.note.title) === key)) {
+      throw new ConflictError(`Poznámkový list „${title}“ už existuje. Zvol jiný název.`)
+    }
+  }
+
+  /** Názvy poznámkových listů: jen existující (kanonický zápis), bez duplicit */
+  private async normalizeNoteRefs(dir: string, titles: string[]): Promise<string[]> {
+    const notes = await this.readNotes(dir)
+    const result: string[] = []
+    for (const title of titles) {
+      const found = notes.find(n => nameKey(n.note.title) === nameKey(title))
+      if (found && !result.includes(found.note.title)) result.push(found.note.title)
+    }
+    return result
+  }
+
+  private async writeNoteFile(dir: string, note: Note, body: string, extra: Frontmatter): Promise<void> {
+    const data: Frontmatter = {
+      ...extra,
+      id: note.id,
+      title: note.title,
+      createdAt: toIso(note.createdAt),
+      updatedAt: toIso(note.updatedAt),
+    }
+    const content = body.trim() ? `\n${body.trimEnd()}\n` : ''
+    await writeFileAtomic(path.join(dir, NOTE_DIR, `${safeFileName(note.title)}.md`), matter.stringify(content, data))
+  }
+
+  /** Po přejmenování (newTitle) / smazání (null) listu upravit `notes` ve všech scénách */
+  private async renameNoteInScenes(dir: string, oldTitle: string, newTitle: string | null): Promise<void> {
+    for (const scene of await this.readScenes(dir)) {
+      if (!scene.meta.notes.includes(oldTitle)) continue
+      await this.writeSceneFile(dir, { ...scene.meta, notes: replaceRef(scene.meta.notes, oldTitle, newTitle) }, scene.entriesBody, scene.data)
+    }
+  }
+
+  async listNotes(name: string): Promise<Note[]> {
+    const dir = await this.requireGameDir(name)
+    return (await this.readNotes(dir)).map(n => n.note)
+  }
+
+  async createNote(gameName: string, input: NoteInput): Promise<Note> {
+    const dir = await this.requireGameDir(gameName)
+    await ensureDir(path.join(dir, NOTE_DIR))
+    const existing = await this.readNotes(dir)
+    const title = input.title.trim()
+    this.assertNoteTitleFree(existing, title)
+    const now = Date.now()
+    const note: Note = { id: `note-${now}`, title, createdAt: now, updatedAt: now }
+    await this.writeNoteFile(dir, note, '', {})
+    await this.touchGame(dir)
+    return note
+  }
+
+  async updateNote(gameName: string, noteId: string, input: NoteInput): Promise<Note> {
+    const dir = await this.requireGameDir(gameName)
+    const existing = await this.readNotes(dir)
+    const current = existing.find(n => n.note.id === noteId)
+    if (!current) throw new NotFoundError(`Poznámkový list „${noteId}“ neexistuje.`)
+    const title = input.title.trim()
+    this.assertNoteTitleFree(existing, title, noteId)
+    // Název = název souboru; id zůstává
+    if (title !== current.note.title) await removeIfExists(path.join(dir, NOTE_DIR, current.fileName))
+    const note: Note = { ...current.note, title, updatedAt: Date.now() }
+    await this.writeNoteFile(dir, note, current.body, current.data)
+    if (title !== current.note.title) await this.renameNoteInScenes(dir, current.note.title, title)
+    await this.touchGame(dir)
+    return note
+  }
+
+  async deleteNote(gameName: string, noteId: string): Promise<void> {
+    const dir = await this.requireGameDir(gameName)
+    const current = (await this.readNotes(dir)).find(n => n.note.id === noteId)
+    if (!current) throw new NotFoundError(`Poznámkový list „${noteId}“ neexistuje.`)
+    await removeIfExists(path.join(dir, NOTE_DIR, current.fileName))
+    await this.renameNoteInScenes(dir, current.note.title, null)
+    await this.touchGame(dir)
+  }
+
+  /** Vault drží obsah listu jen jako markdown (export) – zpět do editoru se nenačítá */
+  async getNoteDocument(name: string, noteId: string): Promise<ProseDoc | null> {
+    const dir = await this.requireGameDir(name)
+    if (!(await this.readNotes(dir)).some(n => n.note.id === noteId)) throw new NotFoundError(`Poznámkový list „${noteId}“ neexistuje.`)
+    return null
+  }
+
+  /** Zapíše obsah listu jako markdown do těla souboru; cesty obrázků už musí být vaultové */
+  async saveNoteDocument(name: string, noteId: string, doc: ProseDoc): Promise<void> {
+    const dir = await this.requireGameDir(name)
+    const current = (await this.readNotes(dir)).find(n => n.note.id === noteId)
+    if (!current) throw new NotFoundError(`Poznámkový list „${noteId}“ neexistuje.`)
+    await this.writeNoteFile(dir, { ...current.note, updatedAt: Date.now() }, proseDocToMarkdown(doc), current.data)
     await this.touchGame(dir)
   }
 

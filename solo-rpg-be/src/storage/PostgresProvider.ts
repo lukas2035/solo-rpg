@@ -17,6 +17,8 @@ import type {
   LoreInput,
   Narrator,
   NarratorInput,
+  Note,
+  NoteInput,
   ProseDoc,
   ProseImage,
   Quest,
@@ -196,6 +198,7 @@ const KIND_LABEL: Record<EntityKind, string> = {
   location: 'Lokace',
   lore: 'Záznam lore',
   session: 'Sezení',
+  note: 'Poznámkový list',
 }
 
 const CONFLICT_MESSAGE: Record<EntityKind, (name: string) => string> = {
@@ -208,6 +211,7 @@ const CONFLICT_MESSAGE: Record<EntityKind, (name: string) => string> = {
   location: n => `Lokace „${n}“ už existuje. Zvol jiný název.`,
   lore: n => `Záznam lore „${n}“ už existuje. Zvol jiný název.`,
   session: () => 'Sezení se stejným začátkem už existuje.',
+  note: n => `Poznámkový list „${n}“ už existuje. Zvol jiný název.`,
 }
 
 const PARENT_SELF_MESSAGE = {
@@ -509,6 +513,7 @@ export class PostgresProvider implements StorageProvider {
       summaryStale: e.fields.summaryStale,
       entryCount: snap.entryCounts.get(e.row.id) ?? 0,
       contextScenes: snap.manyNames(e, 'contextScenes'),
+      notes: snap.manyNames(e, 'notes'),
       createdAt: ms(e.row.createdAt),
       updatedAt: ms(e.row.updatedAt),
     }
@@ -616,6 +621,10 @@ export class PostgresProvider implements StorageProvider {
     }
   }
 
+  private toNote(e: Entity<'note'>): Note {
+    return { id: e.row.id, title: e.row.name, createdAt: ms(e.row.createdAt), updatedAt: ms(e.row.updatedAt) }
+  }
+
   private toSession(e: Entity<'session'>): GameSession {
     return {
       id: e.row.id,
@@ -654,6 +663,7 @@ export class PostgresProvider implements StorageProvider {
       quests: snap.list('quest').map(q => this.toQuest(snap, q)),
       locations: snap.list('location').map(l => this.toLocation(snap, l, paths)),
       lore: snap.list('lore').map(l => this.toLore(snap, l)),
+      notes: snap.list('note').map(n => this.toNote(n)),
     }
   }
 
@@ -919,6 +929,9 @@ export class PostgresProvider implements StorageProvider {
       await this.setLink(tx, snap.game.id, id, 'location', snap.resolveOne('location', input.location))
       await this.setLink(tx, snap.game.id, id, 'narrator', narratorId)
       await this.setLinks(tx, snap.game.id, id, 'contextScenes', snap.resolveMany('scene', input.contextScenes, id))
+      // Připnuté poznámkové listy se dědí ze sousední scény
+      const noteIds = input.notes ? snap.resolveMany('note', input.notes) : neighbor ? snap.many(neighbor, 'notes').map(n => n.row.id) : []
+      await this.setLinks(tx, snap.game.id, id, 'notes', noteIds)
 
       const after = await this.loadSnapshot(tx, snap.game)
       const created = after.require('scene', id)
@@ -971,6 +984,7 @@ export class PostgresProvider implements StorageProvider {
       if (input.location !== undefined) await this.setLink(tx, snap.game.id, sceneId, 'location', snap.resolveOne('location', input.location))
       if (input.narrator !== undefined) await this.setLink(tx, snap.game.id, sceneId, 'narrator', snap.requireOne('narrator', input.narrator))
       if (input.contextScenes) await this.setLinks(tx, snap.game.id, sceneId, 'contextScenes', snap.resolveMany('scene', input.contextScenes, sceneId))
+      if (input.notes) await this.setLinks(tx, snap.game.id, sceneId, 'notes', snap.resolveMany('note', input.notes))
 
       // Přesun na jinou pozici: přeskládat a přečíslovat
       const currentIndex = scenes.indexOf(current)
@@ -1060,20 +1074,29 @@ export class PostgresProvider implements StorageProvider {
   async getSceneDocument(name: string, sceneId: string): Promise<ProseDoc | null> {
     const snap = await this.snapshot(this.db, name)
     snap.require('scene', sceneId)
-    const rows = await this.db.select({ doc: sceneDocuments.doc }).from(sceneDocuments).where(eq(sceneDocuments.sceneId, sceneId)).limit(1)
-    return rows[0] ? (rows[0].doc as ProseDoc) : null
+    return this.readDocument(sceneId)
   }
 
   async saveSceneDocument(name: string, sceneId: string, doc: ProseDoc): Promise<void> {
     await this.mutate(name, async (tx, snap) => {
       snap.require('scene', sceneId)
-      const now = new Date()
-      await tx
-        .insert(sceneDocuments)
-        .values({ sceneId, gameId: snap.game.id, doc, updatedAt: now })
-        .onConflictDoUpdate({ target: sceneDocuments.sceneId, set: { doc, updatedAt: now } })
-      await tx.update(entities).set({ updatedAt: now }).where(eq(entities.id, sceneId))
+      await this.writeDocument(tx, snap.game.id, sceneId, doc)
     })
+  }
+
+  /** Dokument editoru vlastněný entitou (scéna v režimu próza nebo poznámkový list) */
+  private async readDocument(ownerId: string): Promise<ProseDoc | null> {
+    const rows = await this.db.select({ doc: sceneDocuments.doc }).from(sceneDocuments).where(eq(sceneDocuments.sceneId, ownerId)).limit(1)
+    return rows[0] ? (rows[0].doc as ProseDoc) : null
+  }
+
+  private async writeDocument(tx: Tx, gameId: string, ownerId: string, doc: ProseDoc): Promise<void> {
+    const now = new Date()
+    await tx
+      .insert(sceneDocuments)
+      .values({ sceneId: ownerId, gameId, doc, updatedAt: now })
+      .onConflictDoUpdate({ target: sceneDocuments.sceneId, set: { doc, updatedAt: now } })
+    await tx.update(entities).set({ updatedAt: now }).where(eq(entities.id, ownerId))
   }
 
   // ---------- dějové nitě ----------
@@ -1440,6 +1463,55 @@ export class PostgresProvider implements StorageProvider {
     await this.mutate(gameName, async (tx, snap) => {
       snap.require('lore', loreId)
       await tx.delete(entities).where(eq(entities.id, loreId))
+    })
+  }
+
+  // ---------- poznámkové listy ----------
+
+  async listNotes(name: string): Promise<Note[]> {
+    const snap = await this.snapshot(this.db, name)
+    return snap.list('note').map(n => this.toNote(n))
+  }
+
+  async createNote(gameName: string, input: NoteInput): Promise<Note> {
+    return this.mutate(gameName, async (tx, snap) => {
+      const title = input.title.trim()
+      snap.assertNameFree('note', title)
+      const id = await this.insertEntity(tx, snap.game.id, 'note', { name: title, fields: {} })
+      const final = await this.loadSnapshot(tx, snap.game)
+      return this.toNote(final.require('note', id))
+    })
+  }
+
+  async updateNote(gameName: string, noteId: string, input: NoteInput): Promise<Note> {
+    return this.mutate(gameName, async (tx, snap) => {
+      const current = snap.require('note', noteId)
+      const title = input.title.trim()
+      snap.assertNameFree('note', title, noteId)
+      await this.updateEntity(tx, noteId, { name: title, fields: current.fields })
+      const final = await this.loadSnapshot(tx, snap.game)
+      return this.toNote(final.require('note', noteId))
+    })
+  }
+
+  /** Obsah (`scene_documents`) i připnutí ke scénám (`links`) zmizí kaskádou přes FK na entitu */
+  async deleteNote(gameName: string, noteId: string): Promise<void> {
+    await this.mutate(gameName, async (tx, snap) => {
+      snap.require('note', noteId)
+      await tx.delete(entities).where(eq(entities.id, noteId))
+    })
+  }
+
+  async getNoteDocument(name: string, noteId: string): Promise<ProseDoc | null> {
+    const snap = await this.snapshot(this.db, name)
+    snap.require('note', noteId)
+    return this.readDocument(noteId)
+  }
+
+  async saveNoteDocument(name: string, noteId: string, doc: ProseDoc): Promise<void> {
+    await this.mutate(name, async (tx, snap) => {
+      snap.require('note', noteId)
+      await this.writeDocument(tx, snap.game.id, noteId, doc)
     })
   }
 

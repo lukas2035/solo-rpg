@@ -10,7 +10,7 @@ const DAY = 86_400_000
 
 const character = (id: string, name: string, notes = '') => ({ id, name, firstName: name.split(' ')[0], lastName: name.split(' ')[1] ?? '', nickname: name.split(' ')[0], image: null, notes })
 const scene = (p: Partial<SceneMeta> & { id: string; title: string; order: number }): SceneMeta => ({
-  description: '', image: null, characters: [], location: null, narrator: null, ai: true, aiCharacters: [], aiPrompt: '', aiMode: 'advanced', rulesInAi: false, aiReview: 'panel', darkBackground: false, mode: 'play', proseBackground: DEFAULT_PROSE_BACKGROUND, proseFont: PROSE_FONT_LIGHT, prosePrompts: [], summary: '', summaryStale: false, entryCount: 0, contextScenes: [], createdAt: NOW, updatedAt: NOW, ...p,
+  description: '', image: null, characters: [], location: null, narrator: null, ai: true, aiCharacters: [], aiPrompt: '', aiMode: 'advanced', rulesInAi: false, aiReview: 'panel', darkBackground: false, mode: 'play', proseBackground: DEFAULT_PROSE_BACKGROUND, proseFont: PROSE_FONT_LIGHT, prosePrompts: [], summary: '', summaryStale: false, entryCount: 0, contextScenes: [], notes: [], createdAt: NOW, updatedAt: NOW, ...p,
 })
 const thread = (p: Partial<StoryThread> & { id: string; title: string }): StoryThread => ({
   type: 'threat', status: 'active', horizon: 'short-term', certainty: 'confirmed', revealCondition: '', clock: null,
@@ -58,6 +58,7 @@ function campaign(): GameDetail {
     factions: [faction({ id: 'fac_cech', title: 'Cech', characters: ['Julia Kreuzová'], secrets: 'Cech vede upír.' })],
     locations: [location({ id: 'loc_praha', title: 'Praha', description: 'Hlavní město.' }), location({ id: 'loc_brno', title: 'Brno' })],
     lore: [lore({ id: 'lor_cech', title: 'Historie cechu', factions: ['Cech'] })],
+    notes: [],
   }
 }
 

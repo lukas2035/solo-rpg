@@ -206,3 +206,53 @@ code {
 .prose-content h2 { clear: both; }
 .prose-content::after { content: ''; display: block; clear: both; }
 .prose-content .ProseMirror-selectednode { outline: none; }
+/* Tabulky (@tiptap/extension-table): obal umožňuje vodorovné rolování, sloupce lze roztahovat tažením za hranu */
+.prose-content .tableWrapper {
+  overflow-x: auto;
+  clear: both;
+  margin: 1em 0;
+}
+.prose-content table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  margin: 0;
+  overflow: hidden;
+  font-size: 0.9em;
+  line-height: 1.4;
+}
+.prose-content th,
+.prose-content td {
+  border: 1px solid var(--prose-rule);
+  padding: 0.35em 0.6em;
+  vertical-align: top;
+  text-align: left;
+  position: relative;
+  min-width: 3em;
+  box-sizing: border-box;
+}
+.prose-content th {
+  font-weight: 700;
+  background: color-mix(in srgb, var(--prose-fg) 10%, transparent);
+}
+.prose-content td > * + *,
+.prose-content th > * + * { margin-top: 0.35em; }
+.prose-content .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  pointer-events: none;
+  z-index: 2;
+}
+.prose-content .column-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: -1px;
+  right: -2px;
+  width: 4px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 3;
+}
+.prose-page .resize-cursor { cursor: col-resize; }

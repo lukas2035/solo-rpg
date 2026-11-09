@@ -1,9 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type Editor, type JSONContent, type NodeViewProps } from '@tiptap/react'
+import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, useEditorState, type Editor, type JSONContent, type NodeViewProps } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import { Placeholder } from '@tiptap/extensions'
 import { Markdown } from '@tiptap/markdown'
+import { TableKit } from '@tiptap/extension-table'
 import type { ImageRef, ProseAiRequest, ProseBackground, ProseDoc, ProseFont, ProseFontPreset, ProseImageLayout, ProsePromptEntry } from '@solo-rpg/shared'
 import { assetUrl, useAssetVersion } from '../utils/api'
 import { proseBackgroundStyle, proseFontStyle } from '../utils/proseStyle'
@@ -13,41 +14,51 @@ import ProseFontModal from './ProseFontModal'
 import ProseImageLibraryModal from './ProseImageLibraryModal'
 import FloatingPortrait from './FloatingPortrait'
 import PortraitModal from './PortraitModal'
+import TableInsertModal from './TableInsertModal'
+import TableContextMenu from './TableContextMenu'
 import { restoreMissingImages } from '../utils/proseImages'
 
 /**
- * Textový editor pro scény v režimu „próza“ (WYSIWYG markdown přes TipTap/ProseMirror).
+ * Textový editor pro scény v režimu „próza“ a pro poznámkové listy (WYSIWYG markdown přes TipTap/ProseMirror).
  *
  * Dokument se drží jako TipTap JSON (ProseDoc) a ukládá se automaticky s prodlevou; při odchodu ze scény
  * se rozpracovaný stav uloží okamžitě. Obrázky v textu nesou jako `src` odkaz do vaultu (ImageRef),
  * na URL se překládají až při vykreslení – export i přesun vaultu tak nic nerozbijí.
+ *
+ * AI a změna vzhledu (pozadí, písmo) jsou volitelné – poznámky je nepotřebují a příslušná tlačítka se skryjí.
  */
 
 interface ProseEditorProps {
   game: string
-  /** Id scény – změna přepne dokument (a uloží ten předchozí) */
+  /** Id dokumentu (scéna nebo poznámkový list) – změna přepne dokument (a uloží ten předchozí) */
   sceneId: string
-  /** Načtený dokument; null = nová prázdná scéna, undefined = ještě se načítá (editor je zatím jen pro čtení) */
+  /** Načtený dokument; null = nový prázdný, undefined = ještě se načítá (editor je zatím jen pro čtení) */
   doc: ProseDoc | null | undefined
   /** Vzhled stránky (per scéna): pozadí a písmo */
   background: ProseBackground
   font: ProseFont
   /** Knihovna písem kampaně (GameSettings.proseFonts) */
-  fontPresets: ProseFontPreset[]
+  fontPresets?: ProseFontPreset[]
   onSave: (sceneId: string, doc: ProseDoc) => Promise<void>
   /** Uloží obrázek (soubor nebo URL) do vaultu a vrátí odkaz pro `src` */
   onUploadImage: (image: File | string) => Promise<ImageRef>
-  /** Uloží pozadí scény; nový soubor / URL v `image` rodič nejdřív nahraje */
-  onBackgroundChange: (draft: ProseBackgroundDraft) => Promise<void>
-  onFontChange: (font: ProseFont) => Promise<void>
-  onFontPresetsChange: (presets: ProseFontPreset[]) => Promise<void>
+  /** Uloží pozadí scény; nový soubor / URL v `image` rodič nejdřív nahraje. Bez handleru se tlačítko skryje */
+  onBackgroundChange?: (draft: ProseBackgroundDraft) => Promise<void>
+  onFontChange?: (font: ProseFont) => Promise<void>
+  onFontPresetsChange?: (presets: ProseFontPreset[]) => Promise<void>
   /** Knihovna obrázků změnila odkazy (nahrazení / smazání) – rodič znovu načte scény a dokument */
   onLibraryChanged: () => Promise<void>
   /** Historie AI této scény – pokyny i odpovědi (nejnovější první) */
-  aiPrompts: ProsePromptEntry[]
-  /** Pošle požadavek AI a vrátí markdown od modelu (pokračování, nebo nový úsek místo označeného) */
-  onGenerateAi: (body: ProseAiRequest) => Promise<string>
-  onDeleteAiPrompt: (entry: ProsePromptEntry) => Promise<void>
+  aiPrompts?: ProsePromptEntry[]
+  /** Pošle požadavek AI a vrátí markdown od modelu (pokračování, nebo nový úsek místo označeného). Bez handleru se AI skryje */
+  onGenerateAi?: (body: ProseAiRequest) => Promise<string>
+  onDeleteAiPrompt?: (entry: ProsePromptEntry) => Promise<void>
+  /** Text prázdného dokumentu */
+  placeholder?: string
+  /** Třídy vnějšího obalu (výchozí = karta s okraji ve scéně; plovoucí okno chce vyplnit celý prostor) */
+  className?: string
+  /** Vlastní obsah na začátku lišty (např. výběr poznámkového listu) */
+  toolbarStart?: React.ReactNode
 }
 
 /** Úsek dokumentu k přepracování AI: pozice v ProseMirroru + markdown úseku a textu kolem (kontext pro model) */
@@ -259,7 +270,7 @@ function imageUrlFromTransfer(data: DataTransfer): string | null {
   return /^https?:.*\.(png|jpe?g|gif|webp|avif)(\?.*)?$/i.test(url) || /^data:image\//i.test(url) ? url : null
 }
 
-export default function ProseEditor({ game, sceneId, doc, background, font, fontPresets, onSave, onUploadImage, onBackgroundChange, onFontChange, onFontPresetsChange, onLibraryChanged, aiPrompts, onGenerateAi, onDeleteAiPrompt }: ProseEditorProps) {
+export default function ProseEditor({ game, sceneId, doc, background, font, fontPresets = [], onSave, onUploadImage, onBackgroundChange, onFontChange, onFontPresetsChange, onLibraryChanged, aiPrompts = [], onGenerateAi, onDeleteAiPrompt, placeholder, className, toolbarStart }: ProseEditorProps) {
   const version = useAssetVersion()
   const [status, setStatus] = useState<'saved' | 'dirty' | 'saving' | 'error'>('saved')
   const [uploading, setUploading] = useState(0)
@@ -267,6 +278,9 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
   const [backgroundOpen, setBackgroundOpen] = useState(false)
   const [fontOpen, setFontOpen] = useState(false)
   const [library, setLibrary] = useState<'insert' | 'browse' | null>(null)
+  // Tabulky: dialog před vložením + kontextová nabídka (pravé tlačítko nad tabulkou)
+  const [tableOpen, setTableOpen] = useState(false)
+  const [tableMenu, setTableMenu] = useState<{ x: number; y: number } | null>(null)
   // AI dialog: otevřený? + úsek zachycený při otevření (null = dokument je prázdný, úprava není možná)
   const [aiOpen, setAiOpen] = useState(false)
   const [aiRange, setAiRange] = useState<AiSelectionRange | null>(null)
@@ -320,7 +334,9 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
     extensions: [
       StarterKit.configure({ link: false }),
       ProseImage,
-      Placeholder.configure({ placeholder: 'Začni psát… „# “ pro nadpis, „- “ pro seznam, „> “ pro citaci' }),
+      // Tabulky (řádky, sloupce, záhlaví, změna šířky sloupců tažením); Tab v poslední buňce přidá řádek
+      TableKit.configure({ table: { resizable: true, lastColumnResizable: false } }),
+      Placeholder.configure({ placeholder: placeholder ?? 'Začni psát… „# “ pro nadpis, „- “ pro seznam, „> “ pro citaci' }),
       // Parsování markdownu z AI při vkládání (insertContentAt s contentType: 'markdown')
       Markdown,
     ],
@@ -471,6 +487,7 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
   const continueAi = async (prompt: string) => {
     const ed = editorRef.current
     if (!ed) throw new Error('Editor není připraven.')
+    if (!onGenerateAi) throw new Error('AI není pro tento dokument k dispozici.')
     // Dosavadní text si BE bere z úložiště – rozpracované změny napřed uložit
     await flush(ed, latest.current.sceneId)
     const text = (await onGenerateAi({ mode: 'continue', prompt })).trim()
@@ -484,6 +501,7 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
    *  Obrázky, které model z úseku vynechal, se do výsledku vrátí (viz restoreMissingImages). */
   const rewriteAi = async (prompt: string, previous?: string) => {
     if (!aiRange) throw new Error('Není co upravovat.')
+    if (!onGenerateAi) throw new Error('AI není pro tento dokument k dispozici.')
     const text = (await onGenerateAi({ mode: 'rewrite', prompt, selection: aiRange.selection, before: aiRange.before, after: aiRange.after, previous })).trim()
     if (!text) throw new Error('AI vrátila prázdný text.')
     const fixed = restoreMissingImages(aiRange.selection, text)
@@ -527,6 +545,25 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
     await onLibraryChanged()
   }
 
+  const insertTable = (rows: number, cols: number, withHeaderRow: boolean) => {
+    editor?.chain().focus().insertTable({ rows, cols, withHeaderRow }).run()
+  }
+
+  /** Pravé tlačítko nad tabulkou → vlastní nabídka (kurzor se nejdřív přesune na kliknutou buňku) */
+  const handleContextMenu = (e: React.MouseEvent) => {
+    const ed = editorRef.current
+    if (!ed) return
+    const target = e.target as HTMLElement
+    if (!target.closest('.prose-content table')) return
+    e.preventDefault()
+    const hit = ed.view.posAtCoords({ left: e.clientX, top: e.clientY })
+    if (hit) ed.chain().focus().setTextSelection(hit.pos).run()
+    setTableMenu({ x: e.clientX, y: e.clientY })
+  }
+
+  // Výběr v tabulce (editor se při pouhém posunu kurzoru nepřekresluje – proto přes useEditorState)
+  const inTable = useEditorState({ editor, selector: ({ editor: ed }) => ed?.isActive('table') ?? false }) ?? false
+
   const statusLabel = uploading > 0
     ? `Nahrávám obrázek${uploading > 1 ? ` (${uploading})` : ''}…`
     : doc === undefined ? 'Načítám…' : status === 'saving' ? 'Ukládám…' : status === 'dirty' ? 'Neuloženo' : status === 'error' ? '⚠️ Uložení selhalo' : 'Uloženo'
@@ -535,9 +572,15 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
   const active = (name: string, attrs?: Record<string, unknown>) => (editor?.isActive(name, attrs) ? 'bg-[var(--accent)]/40' : '')
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col m-4 mt-0 rounded-xl overflow-hidden border border-white/10 shadow-xl">
+    <div className={className ?? 'flex-1 min-h-0 flex flex-col m-4 mt-0 rounded-xl overflow-hidden border border-white/10 shadow-xl'}>
       {/* Lišta editoru */}
       <div className="flex-shrink-0 flex items-center gap-1 px-2 py-1.5 bg-black/85 text-white border-b border-white/10 flex-wrap">
+        {toolbarStart && (
+          <>
+            {toolbarStart}
+            <span className="w-px h-5 bg-white/20 mx-1" />
+          </>
+        )}
         <button type="button" title="Nadpis 1 (Ctrl+Alt+1)" onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()} className={`${toolButton} font-bold ${active('heading', { level: 1 })}`}>H1</button>
         <button type="button" title="Nadpis 2 (Ctrl+Alt+2)" onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()} className={`${toolButton} font-bold ${active('heading', { level: 2 })}`}>H2</button>
         <button type="button" title="Nadpis 3 (Ctrl+Alt+3)" onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()} className={`${toolButton} font-bold ${active('heading', { level: 3 })}`}>H3</button>
@@ -550,26 +593,43 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
         <button type="button" title="Číslovaný seznam" onClick={() => editor?.chain().focus().toggleOrderedList().run()} className={`${toolButton} ${active('orderedList')}`}>1≡</button>
         <button type="button" title="Citace" onClick={() => editor?.chain().focus().toggleBlockquote().run()} className={`${toolButton} ${active('blockquote')}`}>❝</button>
         <button type="button" title="Oddělovač (---)" onClick={() => editor?.chain().focus().setHorizontalRule().run()} className={toolButton}>―</button>
+        <button
+          type="button"
+          title={inTable ? 'Tabulka: pravým tlačítkem nad tabulkou otevřeš nabídku řádků a sloupců' : 'Vložit tabulku'}
+          disabled={doc === undefined}
+          onClick={e => { if (inTable) setTableMenu({ x: e.clientX, y: e.clientY + 12 }); else setTableOpen(true) }}
+          className={`${toolButton} ${active('table')}`}
+        >
+          ▦ Tabulka
+        </button>
         <span className="w-px h-5 bg-white/20 mx-1" />
         <button type="button" title="Vložit nový obrázek (nebo přetáhni / vlož ze schránky)" onClick={pickImage} className={toolButton}>🖼 Obrázek</button>
         <button type="button" title="Vložit obrázek z knihovny kampaně" disabled={doc === undefined} onClick={() => setLibrary('insert')} className={toolButton}>📚 Z knihovny</button>
+        {onGenerateAi && (
+          <>
+            <span className="w-px h-5 bg-white/20 mx-1" />
+            <button
+              type="button"
+              title={aiDraft ? 'AI: čeká návrh úpravy k potvrzení – otevřít' : 'AI: pokračovat v příběhu, nebo přepracovat označený text'}
+              disabled={doc === undefined}
+              onClick={openAi}
+              className={`${toolButton} text-cyan-300 ${aiDraft ? 'bg-cyan-500/25 ring-1 ring-cyan-400/60' : ''}`}
+            >
+              🤖 AI{aiDraft ? ' ●' : ''}
+            </button>
+          </>
+        )}
         <span className="w-px h-5 bg-white/20 mx-1" />
-        <button
-          type="button"
-          title={aiDraft ? 'AI: čeká návrh úpravy k potvrzení – otevřít' : 'AI: pokračovat v příběhu, nebo přepracovat označený text'}
-          disabled={doc === undefined}
-          onClick={openAi}
-          className={`${toolButton} text-cyan-300 ${aiDraft ? 'bg-cyan-500/25 ring-1 ring-cyan-400/60' : ''}`}
-        >
-          🤖 AI{aiDraft ? ' ●' : ''}
-        </button>
-        <span className="w-px h-5 bg-white/20 mx-1" />
-        <button type="button" title="Pozadí stránky: obrázek, způsob vykreslení, barva podkladu" onClick={() => setBackgroundOpen(true)} className={toolButton}>
-          🧻 Pozadí
-        </button>
-        <button type="button" title="Písmo scény: rodina, velikost, barva, stín; knihovna písem kampaně" onClick={() => setFontOpen(true)} className={toolButton}>
-          🔤 Písmo
-        </button>
+        {onBackgroundChange && (
+          <button type="button" title="Pozadí stránky: obrázek, způsob vykreslení, barva podkladu" onClick={() => setBackgroundOpen(true)} className={toolButton}>
+            🧻 Pozadí
+          </button>
+        )}
+        {onFontChange && (
+          <button type="button" title="Písmo scény: rodina, velikost, barva, stín; knihovna písem kampaně" onClick={() => setFontOpen(true)} className={toolButton}>
+            🔤 Písmo
+          </button>
+        )}
         <button type="button" title="Knihovna obrázků kampaně: náhledy, nahrazení, mazání" onClick={() => setLibrary('browse')} className={toolButton}>
           🗂 Knihovna
         </button>
@@ -581,6 +641,7 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
         className="prose-page flex-1 min-h-0 overflow-y-auto"
         style={{ ...proseBackgroundStyle(background, backgroundUrl), ...proseFontStyle(font) }}
         onClick={e => { if (e.target === e.currentTarget) editor?.commands.focus('end') }}
+        onContextMenu={handleContextMenu}
       >
         <div className="max-w-3xl mx-auto px-10 py-10 min-h-full cursor-text" onClick={e => { if (e.target === e.currentTarget) editor?.commands.focus('end') }}>
           <ProseImageContext.Provider value={imageContext}>
@@ -589,7 +650,7 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
         </div>
       </div>
 
-      {aiOpen && (
+      {aiOpen && onGenerateAi && (
         <ProseAiModal
           prompts={aiPrompts}
           rewriteTarget={aiRange}
@@ -598,11 +659,13 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
           onContinue={continueAi}
           onRewrite={rewriteAi}
           onApplyRewrite={applyRewrite}
-          onDeletePrompt={onDeleteAiPrompt}
+          onDeletePrompt={onDeleteAiPrompt ?? (async () => {})}
           onClose={() => setAiOpen(false)}
         />
       )}
-      {backgroundOpen && (
+      {tableOpen && <TableInsertModal onInsert={insertTable} onClose={() => setTableOpen(false)} />}
+      {tableMenu && editor && <TableContextMenu editor={editor} x={tableMenu.x} y={tableMenu.y} onClose={() => setTableMenu(null)} />}
+      {backgroundOpen && onBackgroundChange && (
         <ProseBackgroundModal
           game={game}
           value={background}
@@ -611,12 +674,12 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
           onClose={() => setBackgroundOpen(false)}
         />
       )}
-      {fontOpen && (
+      {fontOpen && onFontChange && (
         <ProseFontModal
           value={font}
           presets={fontPresets}
           onSave={onFontChange}
-          onPresetsChange={onFontPresetsChange}
+          onPresetsChange={onFontPresetsChange ?? (async () => {})}
           onClose={() => setFontOpen(false)}
         />
       )}

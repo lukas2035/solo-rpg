@@ -98,6 +98,7 @@ export class VaultImporter {
       location: new Map(),
       lore: new Map(),
       session: new Map(),
+      note: new Map(),
     }
     const add = async <K extends EntityKind>(kind: K, name: string, data: Parameters<PostgresProvider['importEntity']>[2]): Promise<string> => {
       const id = await this.target.importEntity(gameId, kind, data as never)
@@ -218,6 +219,10 @@ export class VaultImporter {
         updatedAt: l.updatedAt,
       })
     }
+    // Poznámkové listy: vault drží obsah jen jako markdown, do Postgresu se přenese jen název (a připnutí ke scénám)
+    for (const n of detail.notes) {
+      await add('note', n.title, { name: n.title, fields: {}, createdAt: n.createdAt, updatedAt: n.updatedAt })
+    }
     for (const s of await reader.listSessions(gameName)) {
       await add('session', s.id, {
         name: String(s.startedAt),
@@ -253,6 +258,7 @@ export class VaultImporter {
       await links(id, 'location', resolve('location', s.location ? [s.location] : []))
       await links(id, 'narrator', resolve('narrator', s.narrator ? [s.narrator] : []))
       await links(id, 'contextScenes', resolve('scene', s.contextScenes).filter(x => x !== id))
+      await links(id, 'notes', resolve('note', s.notes))
     }
     for (const t of detail.threads) {
       const id = ids.thread.get(t.title)!

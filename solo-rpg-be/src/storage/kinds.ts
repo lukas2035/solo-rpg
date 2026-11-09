@@ -115,6 +115,8 @@ export const SessionFields = z.object({
   description: z.string(),
   ...legacy,
 })
+/** Poznámkový list: název je ve sloupci `name`, obsah (ProseDoc) v `scene_documents` pod id listu */
+export const NoteFields = z.object({ ...legacy })
 
 export const FIELD_SCHEMAS = {
   character: CharacterFields,
@@ -126,6 +128,7 @@ export const FIELD_SCHEMAS = {
   location: LocationFields,
   lore: LoreFields,
   session: SessionFields,
+  note: NoteFields,
 } satisfies Record<EntityKind, z.ZodTypeAny>
 
 export type FieldsOf<K extends EntityKind> = z.infer<(typeof FIELD_SCHEMAS)[K]>
@@ -191,6 +194,7 @@ export const KIND_VERSIONS: Record<EntityKind, { current: number; migrations: Re
   location: { current: 1, migrations: {} },
   lore: { current: 1, migrations: {} },
   session: { current: 1, migrations: {} },
+  note: { current: 1, migrations: {} },
 }
 
 /** Projde řetězcem migrací od `storedVersion` k aktuální verzi a zvaliduje výsledek. */
@@ -232,6 +236,8 @@ export const LINK_SPECS: Record<EntityKind, Record<string, LinkSpec>> = {
     aiCharacters: { target: 'character', cardinality: 'many' },
     location: { target: 'location', cardinality: 'one' },
     contextScenes: { target: 'scene', cardinality: 'many' },
+    /** Poznámkové listy připnuté ke scéně */
+    notes: { target: 'note', cardinality: 'many' },
   },
   thread: {
     characters: { target: 'character', cardinality: 'many' },
@@ -265,6 +271,7 @@ export const LINK_SPECS: Record<EntityKind, Record<string, LinkSpec>> = {
     threads: { target: 'thread', cardinality: 'many' },
   },
   session: {},
+  note: {},
 }
 
 export const FactionRelationData = z.object({ stance: FactionStanceSchema, note: z.string() })

@@ -16,6 +16,9 @@ import type {
   ImageRef,
   Narrator,
   NarratorInput,
+  Note,
+  NoteDoc,
+  NoteInput,
   ProseDoc,
   ProseAiRequest,
   ProseAiResponse,
@@ -378,6 +381,20 @@ export const updateLore = (game: string, loreId: string, input: LoreInput) =>
   request<LoreEntry>('PUT', `${gamePath(game)}/lore/${encodeURIComponent(loreId)}`, input)
 export const deleteLore = (game: string, loreId: string) =>
   request<void>('DELETE', `${gamePath(game)}/lore/${encodeURIComponent(loreId)}`)
+
+// ---------- poznámkové listy ----------
+
+export const listNotes = (game: string) => request<Note[]>('GET', `${gamePath(game)}/notes`)
+export const createNote = (game: string, input: NoteInput) => request<Note>('POST', `${gamePath(game)}/notes`, input)
+export const updateNote = (game: string, noteId: string, input: NoteInput) =>
+  request<Note>('PUT', `${gamePath(game)}/notes/${encodeURIComponent(noteId)}`, input)
+export const deleteNote = (game: string, noteId: string) =>
+  request<void>('DELETE', `${gamePath(game)}/notes/${encodeURIComponent(noteId)}`)
+/** Obsah listu – stejný dokument jako próza; `doc: null` = zatím prázdný */
+export const getNoteDoc = (game: string, noteId: string) =>
+  request<NoteDoc>('GET', `${gamePath(game)}/notes/${encodeURIComponent(noteId)}/doc`)
+export const saveNoteDoc = (game: string, noteId: string, doc: ProseDoc) =>
+  request<void>('PUT', `${gamePath(game)}/notes/${encodeURIComponent(noteId)}/doc`, { doc } satisfies NoteDoc)
 
 // ---------- herní sezení (stopky) ----------
 

@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+export { proseDocToMarkdown } from './proseMarkdown'
+
 /**
  * Odkaz na obrázek:
  *  - cesta relativní ke složce hry ve vaultu (např. `portraits/Aria.png`)
@@ -236,7 +238,8 @@ export type ProseImageLayout = z.infer<typeof ProseImageLayoutSchema>
 /**
  * Dokument prózy = strom bloků ve formátu ProseMirror/TipTap JSON (kořen `type: 'doc'`).
  * Uzly: paragraph, heading (attrs.level), bulletList/orderedList/listItem, blockquote, horizontalRule, codeBlock,
- * image (attrs.src = ImageRef, attrs.layout = ProseImageLayout, attrs.alt). Značky: bold, italic, strike, code.
+ * image (attrs.src = ImageRef, attrs.layout = ProseImageLayout, attrs.alt), table → tableRow → tableCell/tableHeader.
+ * Značky: bold, italic, strike, code.
  * Ukládá se celý najednou (JSONB v tabulce `scene_documents`), do Obsidianu se exportuje jako markdown.
  */
 export interface ProseNode {
@@ -361,6 +364,8 @@ export const SceneMetaSchema = z.object({
    * Prázdné = výchozí chování (všechny předchozí scény se shrnutím, od nejnovější, do rozpočtu).
    */
   contextScenes: z.array(z.string()),
+  /** Názvy poznámkových listů připnutých k této scéně (frontmatter `notes` jako wikilinky; dědí se do nové scény) */
+  notes: z.array(z.string()),
   createdAt: z.number(),
   updatedAt: z.number(),
 })
@@ -396,8 +401,31 @@ export const SceneInputSchema = z.object({
   prosePrompts: z.array(ProsePromptEntrySchema).max(100).optional(),
   summary: z.string().max(20000).optional(),
   contextScenes: z.array(z.string().trim().min(1)).max(50).optional(),
+  /** Názvy poznámkových listů připnutých ke scéně; undefined při vytvoření = převzít ze sousední scény */
+  notes: z.array(z.string().trim().min(1)).max(100).optional(),
 })
 export type SceneInput = z.infer<typeof SceneInputSchema>
+
+/**
+ * Poznámkový list = volné průběžné poznámky hráče k dobrodružství (dokument stejného editoru jako próza).
+ * Hra jich může mít víc (podle prostředí, kde se děj zrovna odehrává); ke scénám se „připínají“ (`SceneMeta.notes`),
+ * připnutí se dědí do další scény. Obsah se drží zvlášť jako ProseDoc (`GET/PUT …/notes/:note/doc`).
+ */
+export const NoteSchema = z.object({
+  id: z.string().min(1),
+  /** Název listu = identita (unikátní v rámci hry) */
+  title: z.string().min(1),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+})
+export type Note = z.infer<typeof NoteSchema>
+
+export const NoteInputSchema = z.object({ title: z.string().trim().min(1).max(100) })
+export type NoteInput = z.infer<typeof NoteInputSchema>
+
+/** Odpověď `GET …/notes/:note/doc` a tělo `PUT`; null = list zatím nemá žádný text */
+export const NoteDocSchema = z.object({ doc: ProseDocSchema.nullable() })
+export type NoteDoc = z.infer<typeof NoteDocSchema>
 
 /**
  * Thread = otevřená dějová nit kampaně (komplikace, hrozba, záhada, příležitost, závazek, vztah).
@@ -829,6 +857,8 @@ export const GameDetailSchema = z.object({
   quests: z.array(QuestSchema),
   locations: z.array(StoryLocationSchema),
   lore: z.array(LoreEntrySchema),
+  /** Poznámkové listy hry (bez obsahu – ten se načítá zvlášť) */
+  notes: z.array(NoteSchema),
 })
 export type GameDetail = z.infer<typeof GameDetailSchema>
 
