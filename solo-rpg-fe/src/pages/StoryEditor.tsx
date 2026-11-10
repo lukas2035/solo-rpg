@@ -1785,6 +1785,7 @@ export default function StoryEditor() {
               aiPrompts={currentScene.prosePrompts}
               onGenerateAi={handleProseAi}
               onDeleteAiPrompt={handleProseDeletePrompt}
+              speakers={[currentNarrator?.name ?? null, ...displayCharacters.map(c => c.nickname)]}
             />
           ) : (
           <>

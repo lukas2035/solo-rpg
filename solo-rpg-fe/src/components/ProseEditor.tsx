@@ -59,6 +59,11 @@ interface ProseEditorProps {
   className?: string
   /** Vlastní obsah na začátku lišty (např. výběr poznámkového listu) */
   toolbarStart?: React.ReactNode
+  /**
+   * Mluvčí pro zkratky Alt/Ctrl+číslo (stejně jako v hraném režimu): index 0 = vypravěč (klávesa 0),
+   * 1–9 = postavy. Zkratka vloží nový odstavec s „Jméno: “ a kurzorem za mezerou.
+   */
+  speakers?: (string | null)[]
 }
 
 /** Úsek dokumentu k přepracování AI: pozice v ProseMirroru + markdown úseku a textu kolem (kontext pro model) */
@@ -270,7 +275,7 @@ function imageUrlFromTransfer(data: DataTransfer): string | null {
   return /^https?:.*\.(png|jpe?g|gif|webp|avif)(\?.*)?$/i.test(url) || /^data:image\//i.test(url) ? url : null
 }
 
-export default function ProseEditor({ game, sceneId, doc, background, font, fontPresets = [], onSave, onUploadImage, onBackgroundChange, onFontChange, onFontPresetsChange, onLibraryChanged, aiPrompts = [], onGenerateAi, onDeleteAiPrompt, placeholder, className, toolbarStart }: ProseEditorProps) {
+export default function ProseEditor({ game, sceneId, doc, background, font, fontPresets = [], onSave, onUploadImage, onBackgroundChange, onFontChange, onFontPresetsChange, onLibraryChanged, aiPrompts = [], onGenerateAi, onDeleteAiPrompt, placeholder, className, toolbarStart, speakers }: ProseEditorProps) {
   const version = useAssetVersion()
   const [status, setStatus] = useState<'saved' | 'dirty' | 'saving' | 'error'>('saved')
   const [uploading, setUploading] = useState(0)
@@ -293,7 +298,7 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
   const timerRef = useRef<number | null>(null)
   const dirtyRef = useRef(false)
   // Aktuální hodnoty pro callbacky z TipTapu (ty se registrují jednou)
-  const latest = useRef({ sceneId, onSave, onUploadImage })
+  const latest = useRef({ sceneId, onSave, onUploadImage, speakers })
   const editorRef = useRef<Editor | null>(null)
 
   const flush = useCallback(async (ed: Editor, id: string) => {
@@ -344,6 +349,26 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
     editable: doc !== undefined,
     editorProps: {
       attributes: { class: 'prose-content outline-none min-h-full' },
+      // Alt/Ctrl/AltGr+číslo → nový odstavec „Jméno: “ (mluvčí jako v hraném režimu; 0 = vypravěč)
+      handleKeyDown: (view, event) => {
+        const altGr = event.getModifierState('AltGraph')
+        if ((!event.ctrlKey && !event.altKey && !altGr) || event.shiftKey || event.metaKey) return false
+        // e.code = fyzická klávesa, nezávislá na rozložení klávesnice
+        const match = event.code.match(/^(?:Digit|Numpad)([0-9])$/)
+        if (!match) return false
+        const name = latest.current.speakers?.[parseInt(match[1])]
+        if (!name) return false
+        event.preventDefault()
+        const ed = editorRef.current
+        if (!ed) return true
+        const { $from, empty } = view.state.selection
+        // Prázdný odstavec se nerozděluje – jméno se vloží rovnou do něj
+        const inEmptyParagraph = empty && $from.parent.type.name === 'paragraph' && $from.parent.content.size === 0
+        const chain = ed.chain().focus()
+        if (!inEmptyParagraph) chain.splitBlock().setParagraph()
+        chain.unsetAllMarks().insertContent({ type: 'text', text: `${name}: ` }).run()
+        return true
+      },
       // Vložení / přetažení obrázků → upload do vaultu a vložení uzlu
       handlePaste: (view, event) => {
         const files = Array.from(event.clipboardData?.files ?? []).filter(isImageFile)
@@ -386,7 +411,7 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
     },
   })
   useEffect(() => {
-    latest.current = { sceneId, onSave, onUploadImage }
+    latest.current = { sceneId, onSave, onUploadImage, speakers }
     editorRef.current = editor
     aiDraftRef.current = aiDraft
   })
