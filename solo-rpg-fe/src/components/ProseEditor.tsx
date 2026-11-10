@@ -60,7 +60,7 @@ interface ProseEditorProps {
   /** Vlastní obsah na začátku lišty (např. výběr poznámkového listu) */
   toolbarStart?: React.ReactNode
   /**
-   * Mluvčí pro zkratky Alt/Ctrl+číslo (stejně jako v hraném režimu): index 0 = vypravěč (klávesa 0),
+   * Mluvčí pro zkratky Alt/Ctrl/AltGr+číslo (stejně jako v hraném režimu): index 0 = vypravěč (klávesa 0),
    * 1–9 = postavy. Zkratka vloží nový odstavec s „Jméno: “ a kurzorem za mezerou.
    */
   speakers?: (string | null)[]
@@ -275,6 +275,39 @@ function imageUrlFromTransfer(data: DataTransfer): string | null {
   return /^https?:.*\.(png|jpe?g|gif|webp|avif)(\?.*)?$/i.test(url) || /^data:image\//i.test(url) ? url : null
 }
 
+const SPEAKER_SHORTCUTS_KEY = 'prose.speakerShortcuts'
+
+/**
+ * Mrtvé klávesy české klávesnice pod AltGr+číslo: samostatný (mezerový) znak a odpovídající kombinující diakritika.
+ * Stav mrtvé klávesy drží Windows, prohlížeč ho zrušit neumí – proto se po zkratce AltGr+číslo
+ * následující vložený znak zpětně očistí právě od této diakritiky.
+ */
+const ALTGR_DEAD_KEYS: Record<string, { spacing: string; combining: string }> = {
+  '1': { spacing: '~', combining: '\u0303' },
+  '2': { spacing: 'ˇ', combining: '\u030C' },
+  '3': { spacing: '^', combining: '\u0302' },
+  '4': { spacing: '˘', combining: '\u0306' },
+  '5': { spacing: '°', combining: '\u030A' },
+  '6': { spacing: '˛', combining: '\u0328' },
+  '7': { spacing: '`', combining: '\u0300' },
+  '8': { spacing: '˙', combining: '\u0307' },
+  '9': { spacing: '´', combining: '\u0301' },
+  '0': { spacing: '˝', combining: '\u030B' },
+}
+/** Jak dlouho po zkratce AltGr+číslo čekat na znak, který mrtvá klávesa „nakazí“ */
+const ALTGR_CLEANUP_WINDOW_MS = 5000
+
+/** Odstraní z vloženého textu první výskyt diakritiky mrtvé klávesy (samostatný znak i kombinaci s písmenem) */
+function stripDeadKey(text: string, digit: string): string {
+  const dead = ALTGR_DEAD_KEYS[digit]
+  if (!dead) return text
+  if (text.startsWith(dead.spacing)) return text.slice(dead.spacing.length)
+  const nfd = text.normalize('NFD')
+  const i = nfd.indexOf(dead.combining)
+  if (i === -1) return text
+  return (nfd.slice(0, i) + nfd.slice(i + 1)).normalize('NFC')
+}
+
 export default function ProseEditor({ game, sceneId, doc, background, font, fontPresets = [], onSave, onUploadImage, onBackgroundChange, onFontChange, onFontPresetsChange, onLibraryChanged, aiPrompts = [], onGenerateAi, onDeleteAiPrompt, placeholder, className, toolbarStart, speakers }: ProseEditorProps) {
   const version = useAssetVersion()
   const [status, setStatus] = useState<'saved' | 'dirty' | 'saving' | 'error'>('saved')
@@ -300,6 +333,15 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
   // Aktuální hodnoty pro callbacky z TipTapu (ty se registrují jednou)
   const latest = useRef({ sceneId, onSave, onUploadImage, speakers })
   const editorRef = useRef<Editor | null>(null)
+  /** Zkratky Alt/Ctrl+číslo pro jméno mluvčího – uživatelská volba (localStorage), výchozí zapnuto */
+  const [speakerShortcuts, setSpeakerShortcuts] = useState(() => localStorage.getItem(SPEAKER_SHORTCUTS_KEY) !== 'off')
+  const speakerShortcutsRef = useRef(speakerShortcuts)
+  useEffect(() => { speakerShortcutsRef.current = speakerShortcuts }, [speakerShortcuts])
+  /** Po zkratce AltGr+číslo: číslice (= která mrtvá klávesa) a dokdy čekat na znak k očištění */
+  const altGrDeadRef = useRef<{ digit: string; until: number } | null>(null)
+  const toggleSpeakerShortcuts = () => {
+    setSpeakerShortcuts(v => { localStorage.setItem(SPEAKER_SHORTCUTS_KEY, v ? 'off' : 'on'); return !v })
+  }
 
   const flush = useCallback(async (ed: Editor, id: string) => {
     if (timerRef.current) { window.clearTimeout(timerRef.current); timerRef.current = null }
@@ -349,24 +391,43 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
     editable: doc !== undefined,
     editorProps: {
       attributes: { class: 'prose-content outline-none min-h-full' },
-      // Alt/Ctrl/AltGr+číslo → nový odstavec „Jméno: “ (mluvčí jako v hraném režimu; 0 = vypravěč)
+      // Alt+číslo, Ctrl+číslo nebo AltGr+číslo → odstavec „Jméno: “ (mluvčí jako v hraném režimu; 0 = vypravěč).
+      // AltGr+číslo je na české klávesnici mrtvá klávesa (ˇ ^ ˘ …), jejíž stav drží OS – následující znak se proto
+      // očistí v handleTextInput
       handleKeyDown: (view, event) => {
-        const altGr = event.getModifierState('AltGraph')
+        if (!speakerShortcutsRef.current) return false
+        // AltGr se v prohlížečích hlásí buď jako Ctrl+Alt, nebo jen jako modifikátor 'AltGraph'
+        const altGr = event.getModifierState('AltGraph') || (event.ctrlKey && event.altKey)
         if ((!event.ctrlKey && !event.altKey && !altGr) || event.shiftKey || event.metaKey) return false
         // e.code = fyzická klávesa, nezávislá na rozložení klávesnice
         const match = event.code.match(/^(?:Digit|Numpad)([0-9])$/)
         if (!match) return false
-        const name = latest.current.speakers?.[parseInt(match[1])]
+        const digit = match[1]
+        const name = latest.current.speakers?.[parseInt(digit)]
         if (!name) return false
         event.preventDefault()
         const ed = editorRef.current
         if (!ed) return true
         const { $from, empty } = view.state.selection
-        // Prázdný odstavec se nerozděluje – jméno se vloží rovnou do něj
-        const inEmptyParagraph = empty && $from.parent.type.name === 'paragraph' && $from.parent.content.size === 0
+        // Na prázdném řádku se nový odstavec nepřidává – jméno se vloží rovnou do něj
+        const inEmptyBlock = empty && $from.parent.isTextblock && $from.parent.textContent.trim() === ''
         const chain = ed.chain().focus()
-        if (!inEmptyParagraph) chain.splitBlock().setParagraph()
+        if (inEmptyBlock) chain.setParagraph()
+        else chain.splitBlock().setParagraph()
         chain.unsetAllMarks().insertContent({ type: 'text', text: `${name}: ` }).run()
+        // Numpad pod AltGr mrtvou klávesu nedává
+        altGrDeadRef.current = altGr && event.code.startsWith('Digit') ? { digit, until: Date.now() + ALTGR_CLEANUP_WINDOW_MS } : null
+        return true
+      },
+      // První znak po zkratce AltGr+číslo zbavit diakritiky mrtvé klávesy („ˇ“ → nic, „č“ → „c“, „ˇč“ → „č“)
+      handleTextInput: (view, from, to, text) => {
+        const pending = altGrDeadRef.current
+        if (!pending) return false
+        altGrDeadRef.current = null
+        if (Date.now() > pending.until) return false
+        const cleaned = stripDeadKey(text, pending.digit)
+        if (cleaned === text) return false
+        view.dispatch(view.state.tr.insertText(cleaned, from, to))
         return true
       },
       // Vložení / přetažení obrázků → upload do vaultu a vložení uzlu
@@ -658,6 +719,18 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
         <button type="button" title="Knihovna obrázků kampaně: náhledy, nahrazení, mazání" onClick={() => setLibrary('browse')} className={toolButton}>
           🗂 Knihovna
         </button>
+        {speakers && (
+          <button
+            type="button"
+            onClick={toggleSpeakerShortcuts}
+            title={speakerShortcuts
+              ? 'Zkratky mluvčích zapnuté: Alt/Ctrl/AltGr+1–9 vloží „Jméno postavy: “, 0 = vypravěč – kliknutím vypnout'
+              : 'Zkratky mluvčích (Alt/Ctrl+číslo vloží jméno postavy) jsou vypnuté – kliknutím zapnout'}
+            className={`${toolButton} ${speakerShortcuts ? 'bg-[var(--accent)]/40' : 'opacity-60'}`}
+          >
+            ⌨ 1–9
+          </button>
+        )}
         <span className={`ml-auto text-xs ${status === 'error' ? 'text-red-300' : 'opacity-60'}`}>{statusLabel}</span>
       </div>
 
