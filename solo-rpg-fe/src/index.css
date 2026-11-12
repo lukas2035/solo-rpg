@@ -143,6 +143,12 @@ code {
 .prose-content > * + * {
   margin-top: 0.75em;
 }
+/* Stránka: editovatelný prvek zabírá celou šířku, text drží šířku 43rem (dříve max-w-3xl + px-10) přes padding.
+   Díky tomu lze výběr myší začít i ukončit v okrajích vedle textu. */
+.prose-sheet {
+  box-sizing: border-box;
+  padding: 2.5rem max(2.5rem, calc((100% - 43rem) / 2));
+}
 .prose-content h1,
 .prose-content h2,
 .prose-content h3 {

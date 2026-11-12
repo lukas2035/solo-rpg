@@ -5,7 +5,7 @@ import Image from '@tiptap/extension-image'
 import { Placeholder } from '@tiptap/extensions'
 import { Markdown } from '@tiptap/markdown'
 import { TableKit } from '@tiptap/extension-table'
-import type { ImageRef, ProseAiRequest, ProseBackground, ProseDoc, ProseFont, ProseFontPreset, ProseImageLayout, ProsePromptEntry } from '@solo-rpg/shared'
+import { importedTablesToNodes, type ImageRef, type ProseAiRequest, type ProseBackground, type ProseDoc, type ProseFont, type ProseFontPreset, type ProseImageLayout, type ProsePromptEntry } from '@solo-rpg/shared'
 import { assetUrl, useAssetVersion } from '../utils/api'
 import { proseBackgroundStyle, proseFontStyle } from '../utils/proseStyle'
 import ProseAiModal, { type ProseAiDraft, type ProseRewriteTarget } from './ProseAiModal'
@@ -14,7 +14,7 @@ import ProseFontModal from './ProseFontModal'
 import ProseImageLibraryModal from './ProseImageLibraryModal'
 import FloatingPortrait from './FloatingPortrait'
 import PortraitModal from './PortraitModal'
-import TableInsertModal from './TableInsertModal'
+import TableInsertModal, { type TableInsertSpec } from './TableInsertModal'
 import TableContextMenu from './TableContextMenu'
 import { restoreMissingImages } from '../utils/proseImages'
 
@@ -390,7 +390,8 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
     content: doc ?? EMPTY_DOC,
     editable: doc !== undefined,
     editorProps: {
-      attributes: { class: 'prose-content outline-none min-h-full' },
+      // Odsazení stránky je součástí editovatelného prvku (.prose-sheet), aby výběr myší šel začít i skončit v okrajích
+      attributes: { class: 'prose-content prose-sheet outline-none min-h-full' },
       // Alt+číslo, Ctrl+číslo nebo AltGr+číslo → odstavec „Jméno: “ (mluvčí jako v hraném režimu; 0 = vypravěč).
       // AltGr+číslo je na české klávesnici mrtvá klávesa (ˇ ^ ˘ …), jejíž stav drží OS – následující znak se proto
       // očistí v handleTextInput
@@ -631,8 +632,15 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
     await onLibraryChanged()
   }
 
-  const insertTable = (rows: number, cols: number, withHeaderRow: boolean) => {
-    editor?.chain().focus().insertTable({ rows, cols, withHeaderRow }).run()
+  const insertTable = (spec: TableInsertSpec) => {
+    if (!editor) return
+    if (spec.kind === 'empty') {
+      editor.chain().focus().insertTable({ rows: spec.rows, cols: spec.cols, withHeaderRow: spec.withHeaderRow }).run()
+      return
+    }
+    // Naimportované tabulky vložit jako hotové uzly (název + tabulka); za poslední přidat odstavec, aby šlo psát dál
+    const nodes = importedTablesToNodes(spec.tables, spec.titleStyle, spec.withHeaderRow) as JSONContent[]
+    editor.chain().focus().insertContent([...nodes, { type: 'paragraph' }]).run()
   }
 
   /** Pravé tlačítko nad tabulkou → vlastní nabídka (kurzor se nejdřív přesune na kliknutou buňku) */
@@ -741,7 +749,7 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
         onClick={e => { if (e.target === e.currentTarget) editor?.commands.focus('end') }}
         onContextMenu={handleContextMenu}
       >
-        <div className="max-w-3xl mx-auto px-10 py-10 min-h-full cursor-text" onClick={e => { if (e.target === e.currentTarget) editor?.commands.focus('end') }}>
+        <div className="min-h-full cursor-text" onClick={e => { if (e.target === e.currentTarget) editor?.commands.focus('end') }}>
           <ProseImageContext.Provider value={imageContext}>
             <EditorContent editor={editor} className="min-h-full" />
           </ProseImageContext.Provider>
