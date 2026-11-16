@@ -2705,6 +2705,7 @@ export class ObsidianVaultProvider implements StorageProvider {
       startedAt,
       endedAt: Date.now(),
       durationSeconds: input.durationSeconds,
+      ...(input.customDurationSeconds !== undefined ? { customDurationSeconds: input.customDurationSeconds } : {}),
       fun: input.fun,
       description: input.description?.trim() ?? '',
     }
@@ -2721,11 +2722,14 @@ export class ObsidianVaultProvider implements StorageProvider {
     if (input.startedAt !== current.startedAt && existing.some(s => s.startedAt === input.startedAt)) {
       throw new ConflictError('Sezení se stejným začátkem už existuje.')
     }
+    // Vlastní doba se bere jen ze vstupu – vynechání ji zruší
+    const { customDurationSeconds: _dropped, ...rest } = current
     const session: GameSession = {
-      ...current,
+      ...rest,
       id: sessionId(input.startedAt),
       startedAt: input.startedAt,
       durationSeconds: input.durationSeconds,
+      ...(input.customDurationSeconds !== undefined ? { customDurationSeconds: input.customDurationSeconds } : {}),
       fun: input.fun,
       description: input.description?.trim() ?? current.description,
     }

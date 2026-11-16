@@ -111,6 +111,7 @@ export const SessionFields = z.object({
   startedAt: z.number(),
   endedAt: z.number(),
   durationSeconds: z.number().int().min(0),
+  customDurationSeconds: z.number().int().min(0).optional(),
   fun: z.number(),
   description: z.string(),
   ...legacy,

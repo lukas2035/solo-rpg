@@ -1,4 +1,4 @@
-import type { GameSession } from '@solo-rpg/shared'
+import { sessionDurationSeconds, type GameSession } from '@solo-rpg/shared'
 
 /**
  * Formát souboru `sessions.md` (jeden na hru, čitelný v Obsidianu):
@@ -12,11 +12,14 @@ import type { GameSession } from '@solo-rpg/shared'
  * - Začátek: 2026-09-14T18:15:00.000Z
  * - Konec: 2026-09-14T19:40:12.000Z
  * - Délka (s): 4990
+ * - Vlastní délka (s): 5400
  * - Zábavnost: 7.5
  *
  * Volitelný popis, jak sezení bavilo…
  * ```
  *
+ * „Délka (s)“ je doba naměřená stopkami; „Vlastní délka (s)“ je nepovinná ručně opravená doba, která má
+ * v nadpisu i souhrnu přednost.
  * Nadpis a souhrn jsou jen pro čtení, zdrojem pravdy jsou odrážky pod nadpisem. Id sezení = `startedAt` v ms.
  * Sezení jsou řazená od nejnovějšího – nový zápis se objeví hned pod souhrnem.
  */
@@ -44,7 +47,7 @@ function formatDate(ms: number): string {
 
 function summary(sessions: GameSession[]): string {
   if (sessions.length === 0) return 'Zatím žádné sezení.'
-  const total = sessions.reduce((sum, s) => sum + s.durationSeconds, 0)
+  const total = sessions.reduce((sum, s) => sum + sessionDurationSeconds(s), 0)
   const avg = sessions.reduce((sum, s) => sum + s.fun, 0) / sessions.length
   return `Celkem: ${sessions.length} sezení · ${formatDuration(total)} · průměrná zábavnost ${formatFun(Math.round(avg * 10) / 10)}`
 }
@@ -56,12 +59,13 @@ export function serializeSessions(sessions: GameSession[]): string {
   const sorted = [...sessions].sort(byNewest)
   const blocks = sorted.map(s => {
     const lines = [
-      `## ${formatDate(s.startedAt)} · ${formatDuration(s.durationSeconds)} · ${formatFun(s.fun)}`,
+      `## ${formatDate(s.startedAt)} · ${formatDuration(sessionDurationSeconds(s))} · ${formatFun(s.fun)}`,
       `- Začátek: ${new Date(s.startedAt).toISOString()}`,
       `- Konec: ${new Date(s.endedAt).toISOString()}`,
       `- Délka (s): ${s.durationSeconds}`,
-      `- Zábavnost: ${s.fun}`,
     ]
+    if (s.customDurationSeconds !== undefined) lines.push(`- Vlastní délka (s): ${s.customDurationSeconds}`)
+    lines.push(`- Zábavnost: ${s.fun}`)
     const description = s.description.trim()
     if (description) lines.push('', description)
     return lines.join('\n')
@@ -91,12 +95,15 @@ export function parseSessions(raw: string): GameSession[] {
     if (Number.isNaN(startedAt)) continue
     const endedAt = Date.parse(fields.get('konec') ?? '')
     const durationSeconds = Number.parseInt(fields.get('délka (s)') ?? '0', 10)
+    const customRaw = fields.get('vlastní délka (s)')
+    const customDurationSeconds = customRaw === undefined ? NaN : Number.parseInt(customRaw, 10)
     const fun = Number.parseFloat((fields.get('zábavnost') ?? '0').replace(',', '.'))
     sessions.push({
       id: sessionId(startedAt),
       startedAt,
       endedAt: Number.isNaN(endedAt) ? startedAt + durationSeconds * 1000 : endedAt,
       durationSeconds: Number.isNaN(durationSeconds) ? 0 : Math.max(0, durationSeconds),
+      ...(Number.isNaN(customDurationSeconds) ? {} : { customDurationSeconds: Math.max(0, customDurationSeconds) }),
       fun: Number.isNaN(fun) ? 0 : Math.min(10, Math.max(0, Math.round(fun * 2) / 2)),
       description,
     })

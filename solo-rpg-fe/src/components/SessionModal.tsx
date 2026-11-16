@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
-import type { GameSession } from '@solo-rpg/shared'
+import { sessionDurationSeconds, type GameSession } from '@solo-rpg/shared'
 import { inputClass } from '../utils/forms'
 import * as api from '../utils/api'
 import type { useSessionTimer } from '../hooks/useSessionTimer'
+import SessionsExportModal from './SessionsExportModal'
+import { formatSessionDate as formatDate, formatSessionDuration as formatDuration, formatSessionFun as formatFun } from '../utils/exportSessions'
 
 type Timer = ReturnType<typeof useSessionTimer>
 
@@ -12,6 +14,35 @@ interface SessionModalProps {
   onClose: () => void
 }
 
+/** Rozepsaná úprava uloženého sezení; vlastní doba se zadává v hodinách a minutách */
+interface EditState {
+  id: string
+  fun: number
+  description: string
+  useCustomDuration: boolean
+  customHours: string
+  customMinutes: string
+}
+
+function toEditState(session: GameSession): EditState {
+  const custom = session.customDurationSeconds ?? session.durationSeconds
+  return {
+    id: session.id,
+    fun: session.fun,
+    description: session.description,
+    useCustomDuration: session.customDurationSeconds !== undefined,
+    customHours: String(Math.floor(custom / 3600)),
+    customMinutes: String(Math.round((custom % 3600) / 60)),
+  }
+}
+
+function customSecondsFrom(edit: EditState): number | undefined {
+  if (!edit.useCustomDuration) return undefined
+  const h = Math.max(0, Number.parseInt(edit.customHours, 10) || 0)
+  const m = Math.max(0, Number.parseInt(edit.customMinutes, 10) || 0)
+  return h * 3600 + m * 60
+}
+
 function formatClock(ms: number): string {
   const total = Math.floor(ms / 1000)
   const h = Math.floor(total / 3600)
@@ -19,15 +50,6 @@ function formatClock(ms: number): string {
   const s = total % 60
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
-
-function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.round((seconds % 3600) / 60)
-  return h ? `${h} h ${String(m).padStart(2, '0')} min` : `${m} min`
-}
-
-const formatFun = (fun: number) => fun.toLocaleString('cs-CZ', { maximumFractionDigits: 1 })
-const formatDate = (ms: number) => new Date(ms).toLocaleString('cs-CZ', { day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
 /** Hodnocení 0–10 po půl stupních: 10 hvězd, každá půlka klikatelná; pod tím posuvník pro klávesnici */
 function FunRating({ value, onChange }: { value: number; onChange: (fun: number) => void }) {
@@ -65,13 +87,14 @@ export default function SessionModal({ game, timer, onClose }: SessionModalProps
   const [sessions, setSessions] = useState<GameSession[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [editing, setEditing] = useState<{ id: string; fun: number; description: string } | null>(null)
+  const [editing, setEditing] = useState<EditState | null>(null)
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !exporting) onClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, exporting])
 
   useEffect(() => {
     api.listSessions(game).then(setSessions).catch(err => setError(err instanceof Error ? err.message : 'Načtení sezení selhalo.'))
@@ -122,6 +145,7 @@ export default function SessionModal({ game, timer, onClose }: SessionModalProps
       const saved = await api.updateSession(game, session.id, {
         startedAt: session.startedAt,
         durationSeconds: session.durationSeconds,
+        customDurationSeconds: customSecondsFrom(editing),
         fun: editing.fun,
         description: editing.description,
       })
@@ -133,7 +157,7 @@ export default function SessionModal({ game, timer, onClose }: SessionModalProps
   }
 
   const list = [...(sessions ?? [])].sort((a, b) => b.startedAt - a.startedAt)
-  const totalSeconds = list.reduce((sum, s) => sum + s.durationSeconds, 0)
+  const totalSeconds = list.reduce((sum, s) => sum + sessionDurationSeconds(s), 0)
   const avgFun = list.length ? list.reduce((sum, s) => sum + s.fun, 0) / list.length : 0
 
   return (
@@ -196,13 +220,24 @@ export default function SessionModal({ game, timer, onClose }: SessionModalProps
 
         {/* Historie */}
         <div className="flex flex-col gap-2">
-          <div className="flex items-baseline justify-between">
+          <div className="flex items-baseline justify-between gap-3">
             <h3 className="font-semibold text-[var(--accent)]">Odehraná sezení</h3>
-            {list.length > 0 && (
-              <span className="text-xs opacity-70">
-                {list.length}× · celkem {formatDuration(totalSeconds)} · průměr {formatFun(Math.round(avgFun * 10) / 10)}/10
-              </span>
-            )}
+            <div className="flex items-baseline gap-3">
+              {list.length > 0 && (
+                <span className="text-xs opacity-70">
+                  {list.length}× · celkem {formatDuration(totalSeconds)} · průměr {formatFun(Math.round(avgFun * 10) / 10)}/10
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => setExporting(true)}
+                disabled={!list.length}
+                title="Exportovat sezení do schránky nebo .md souboru"
+                className="px-3 py-1 rounded-lg border border-[var(--accent)]/40 hover:border-[var(--accent)] text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                📄 Export
+              </button>
+            </div>
           </div>
           {sessions === null ? (
             <div className="text-sm opacity-60">Načítám…</div>
@@ -212,12 +247,20 @@ export default function SessionModal({ game, timer, onClose }: SessionModalProps
             <ul className="flex flex-col gap-2">
               {list.map(session => (
                 <li key={session.id} className="p-3 rounded-lg border border-[var(--accent)]/20 bg-black/30 text-sm">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-wrap">
                     <span className="font-semibold">{formatDate(session.startedAt)}</span>
-                    <span className="opacity-70">{formatDuration(session.durationSeconds)}</span>
+                    <span className="opacity-70">{formatDuration(sessionDurationSeconds(session))}</span>
+                    {session.customDurationSeconds !== undefined && (
+                      <span
+                        title={`Doba nastavená ručně; stopky naměřily ${formatDuration(session.durationSeconds)}`}
+                        className="px-1.5 py-0.5 rounded border border-sky-400/40 text-sky-300 text-xs"
+                      >
+                        vlastní doba · naměřeno {formatDuration(session.durationSeconds)}
+                      </span>
+                    )}
                     <span className="text-amber-300 font-bold">★ {formatFun(session.fun)}</span>
                     <span className="ml-auto flex gap-1">
-                      <button type="button" title="Upravit hodnocení a popis" onClick={() => setEditing(editing?.id === session.id ? null : { id: session.id, fun: session.fun, description: session.description })} className="px-2 py-0.5 rounded-md border border-[var(--accent)]/40 hover:border-[var(--accent)] transition-colors">✏️</button>
+                      <button type="button" title="Upravit hodnocení, popis a dobu" onClick={() => setEditing(editing?.id === session.id ? null : toEditState(session))} className="px-2 py-0.5 rounded-md border border-[var(--accent)]/40 hover:border-[var(--accent)] transition-colors">✏️</button>
                       <button type="button" title="Smazat sezení" onClick={() => void handleDelete(session)} className="px-2 py-0.5 rounded-md border border-red-400/40 text-red-300 hover:border-red-400 transition-colors">✕</button>
                     </span>
                   </div>
@@ -225,6 +268,42 @@ export default function SessionModal({ game, timer, onClose }: SessionModalProps
                     <div className="mt-3 flex flex-col gap-2">
                       <FunRating value={editing.fun} onChange={(fun) => setEditing(prev => (prev ? { ...prev, fun } : prev))} />
                       <textarea value={editing.description} onChange={(e) => setEditing(prev => (prev ? { ...prev, description: e.target.value } : prev))} rows={3} className={`${inputClass} resize-y text-sm`} />
+                      {/* Doba: naměřená zůstává, vlastní ji jen překryje */}
+                      <div className="flex flex-col gap-2 p-2 rounded-md border border-[var(--accent)]/20 bg-black/30">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={editing.useCustomDuration}
+                            onChange={(e) => setEditing(prev => (prev ? { ...prev, useCustomDuration: e.target.checked } : prev))}
+                            className="accent-[var(--accent)]"
+                          />
+                          <span>Nastavit vlastní dobu <span className="opacity-60">(stopky naměřily {formatDuration(session.durationSeconds)})</span></span>
+                        </label>
+                        {editing.useCustomDuration && (
+                          <div className="flex items-center gap-2 text-xs">
+                            <input
+                              type="number"
+                              min={0}
+                              value={editing.customHours}
+                              onChange={(e) => setEditing(prev => (prev ? { ...prev, customHours: e.target.value } : prev))}
+                              className={`${inputClass} w-20 text-sm`}
+                              aria-label="Hodiny"
+                            />
+                            <span>h</span>
+                            <input
+                              type="number"
+                              min={0}
+                              max={59}
+                              value={editing.customMinutes}
+                              onChange={(e) => setEditing(prev => (prev ? { ...prev, customMinutes: e.target.value } : prev))}
+                              className={`${inputClass} w-20 text-sm`}
+                              aria-label="Minuty"
+                            />
+                            <span>min</span>
+                            <span className="opacity-60 ml-2">U sezení se zobrazí, že jde o vlastní nastavenou dobu; naměřená se zachová.</span>
+                          </div>
+                        )}
+                      </div>
                       <div className="flex gap-2">
                         <button type="button" onClick={() => void handleEditSave(session)} className="px-3 py-1 rounded-md bg-[var(--accent)] text-white text-xs font-bold">Uložit</button>
                         <button type="button" onClick={() => setEditing(null)} className="px-3 py-1 rounded-md border border-[var(--accent)]/40 text-xs">Zrušit</button>
@@ -239,6 +318,7 @@ export default function SessionModal({ game, timer, onClose }: SessionModalProps
           )}
         </div>
       </div>
+      {exporting && <SessionsExportModal game={game} sessions={list} onClose={() => setExporting(false)} />}
     </div>
   )
 }

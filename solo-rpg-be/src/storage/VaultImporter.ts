@@ -226,7 +226,7 @@ export class VaultImporter {
     for (const s of await reader.listSessions(gameName)) {
       await add('session', s.id, {
         name: String(s.startedAt),
-        fields: { startedAt: s.startedAt, endedAt: s.endedAt, durationSeconds: s.durationSeconds, fun: s.fun, description: s.description },
+        fields: { startedAt: s.startedAt, endedAt: s.endedAt, durationSeconds: s.durationSeconds, customDurationSeconds: s.customDurationSeconds, fun: s.fun, description: s.description },
         createdAt: s.startedAt,
         updatedAt: s.endedAt,
       })

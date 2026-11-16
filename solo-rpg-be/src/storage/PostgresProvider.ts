@@ -631,6 +631,7 @@ export class PostgresProvider implements StorageProvider {
       startedAt: e.fields.startedAt,
       endedAt: e.fields.endedAt,
       durationSeconds: e.fields.durationSeconds,
+      ...(e.fields.customDurationSeconds !== undefined ? { customDurationSeconds: e.fields.customDurationSeconds } : {}),
       fun: e.fields.fun,
       description: e.fields.description,
     }
@@ -1533,7 +1534,7 @@ export class PostgresProvider implements StorageProvider {
       while (existing.some(s => s.fields.startedAt === startedAt)) startedAt++
       const id = await this.insertEntity(tx, snap.game.id, 'session', {
         name: String(startedAt),
-        fields: { startedAt, endedAt: Date.now(), durationSeconds: input.durationSeconds, fun: input.fun, description: input.description?.trim() ?? '' },
+        fields: { startedAt, endedAt: Date.now(), durationSeconds: input.durationSeconds, customDurationSeconds: input.customDurationSeconds, fun: input.fun, description: input.description?.trim() ?? '' },
       })
       return this.toSession((await this.loadSnapshot(tx, snap.game)).require('session', id))
     })
@@ -1551,6 +1552,8 @@ export class PostgresProvider implements StorageProvider {
           ...current.fields,
           startedAt: input.startedAt,
           durationSeconds: input.durationSeconds,
+          // Vynechání vlastní doby ve vstupu ji zruší
+          customDurationSeconds: input.customDurationSeconds,
           fun: input.fun,
           description: input.description?.trim() ?? current.fields.description,
         },

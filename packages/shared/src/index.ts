@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 export { proseDocToMarkdown } from './proseMarkdown'
+export { parseImportedTables, importedTablesToNodes, type ImportedTable, type ImportedTableTitleStyle } from './proseTableImport'
 
 /**
  * Odkaz na obrázek:
@@ -788,8 +789,10 @@ export const GameSessionSchema = z.object({
   startedAt: z.number(),
   /** Uložení záznamu (ms) */
   endedAt: z.number(),
-  /** Čistý herní čas bez pauz (s) */
+  /** Čistý herní čas naměřený stopkami bez pauz (s) – původní hodnota, nikdy se nepřepisuje */
   durationSeconds: z.number().int().min(0),
+  /** Ručně nastavená doba (s), když stopky neodpovídaly skutečnosti; naměřená doba zůstává v `durationSeconds` */
+  customDurationSeconds: z.number().int().min(0).optional(),
   /** Zábavnost 0–10 po půl stupních */
   fun: FunRatingSchema,
   description: z.string(),
@@ -799,10 +802,17 @@ export type GameSession = z.infer<typeof GameSessionSchema>
 export const GameSessionInputSchema = z.object({
   startedAt: z.number().int().positive(),
   durationSeconds: z.number().int().min(0),
+  /** Vynechání (undefined) vlastní dobu zruší */
+  customDurationSeconds: z.number().int().min(0).optional(),
   fun: FunRatingSchema,
   description: z.string().max(10000).optional(),
 })
 export type GameSessionInput = z.infer<typeof GameSessionInputSchema>
+
+/** Platná doba sezení (s): vlastní, pokud je nastavená, jinak naměřená */
+export function sessionDurationSeconds(session: Pick<GameSession, 'durationSeconds' | 'customDurationSeconds'>): number {
+  return session.customDurationSeconds ?? session.durationSeconds
+}
 
 /** Řetězec rodičů lokace od kořene k lokaci samotné (breadcrumb); cyklus/chybějící rodič řetězec ukončí */
 export function locationPath(location: StoryLocation, all: readonly StoryLocation[]): StoryLocation[] {
