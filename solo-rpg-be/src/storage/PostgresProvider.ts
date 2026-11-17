@@ -27,12 +27,13 @@ import type {
   SceneDirector,
   SceneInput,
   SceneMeta,
+  SessionDraft,
   StoryEntry,
   StoryLocation,
   StoryThread,
   ThreadInput,
 } from '@solo-rpg/shared'
-import { DEFAULT_PROSE_BACKGROUND, fullName, isRemoteImage, isValidGameName, PROSE_FONT_LIGHT, ProseFontPresetSchema, proseImageRefs, PulseOverrideSchema, remapProseImages, RulesSystemSchema } from '@solo-rpg/shared'
+import { DEFAULT_PROSE_BACKGROUND, fullName, isRemoteImage, isValidGameName, PROSE_FONT_LIGHT, ProseFontPresetSchema, proseImageRefs, PulseOverrideSchema, remapProseImages, RulesSystemSchema, SessionDraftSchema } from '@solo-rpg/shared'
 import { ConflictError, NotFoundError, ValidationError, type AssetInput, type GameEvent, type GameEventInput, type StorageProvider } from '../vault/StorageProvider.js'
 import { imageExtension, safeFileName } from '../vault/fsUtils.js'
 import { assetKey, sha256, type AssetStore } from './AssetStore.js'
@@ -1567,6 +1568,19 @@ export class PostgresProvider implements StorageProvider {
       snap.require('session', id)
       await tx.delete(entities).where(eq(entities.id, id))
     })
+  }
+
+  /** Poškozený / starý tvar v DB se bere jako žádné rozepsané sezení */
+  async getSessionDraft(name: string): Promise<SessionDraft | null> {
+    const game = await this.requireGameRow(this.db, name)
+    const parsed = SessionDraftSchema.safeParse(game.sessionDraft)
+    return parsed.success ? parsed.data : null
+  }
+
+  /** Průběžné ukládání při psaní – záměrně nemění `updated_at` hry */
+  async saveSessionDraft(name: string, draft: SessionDraft | null): Promise<void> {
+    const game = await this.requireGameRow(this.db, name)
+    await this.db.update(games).set({ sessionDraft: draft }).where(eq(games.id, game.id))
   }
 
   // ---------- události ----------

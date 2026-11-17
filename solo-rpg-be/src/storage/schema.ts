@@ -33,6 +33,8 @@ export const games = pgTable(
     pulseOverride: jsonb('pulse_override').notNull().default({ tension: null, phase: null }),
     /** Knihovna písem prózy kampaně (GameSettings.proseFonts – pole ProseFontPreset) */
     proseFonts: jsonb('prose_fonts').notNull().default([]),
+    /** Rozepsané herní sezení (SessionDraft – historie stopek, hodnocení, popis); null = žádné */
+    sessionDraft: jsonb('session_draft'),
     /** Pozadí hry: buď lokální asset, nebo vzdálená URL (nejvýš jedno) */
     backgroundAssetId: text('background_asset_id'),
     backgroundUrl: text('background_url'),

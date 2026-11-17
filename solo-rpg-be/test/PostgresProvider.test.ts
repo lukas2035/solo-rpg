@@ -275,6 +275,18 @@ describe('sezení', () => {
     await storage.deleteSession(G, b.id)
     expect(await storage.listSessions(G)).toHaveLength(1)
   })
+
+  it('rozepsané sezení: uloží historii stopek, přepíše ji a null ji zahodí', async () => {
+    expect(await storage.getSessionDraft(G)).toBeNull()
+    const draft = { events: [{ type: 'start' as const, at: 1_700_000_000_000 }, { type: 'pause' as const, at: 1_700_000_060_000 }, { type: 'start' as const, at: 1_700_000_120_000 }], fun: 6.5, description: 'rozepsáno' }
+    await storage.saveSessionDraft(G, draft)
+    expect(await storage.getSessionDraft(G)).toEqual(draft)
+    await storage.saveSessionDraft(G, { ...draft, description: 'dál' })
+    expect((await storage.getSessionDraft(G))?.description).toBe('dál')
+    await storage.saveSessionDraft(G, null)
+    expect(await storage.getSessionDraft(G)).toBeNull()
+    await expect(storage.getSessionDraft('Neexistuje')).rejects.toBeInstanceOf(NotFoundError)
+  })
 })
 
 describe('export → import (round trip přes Obsidian vault)', () => {

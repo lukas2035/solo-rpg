@@ -18,6 +18,7 @@ import {
   LoreInputSchema,
   NoteInputSchema,
   GameSessionInputSchema,
+  SessionDraftSchema,
   BackupGameRequestSchema,
   AiGenerateRequestSchema,
   AiSuggestionAcceptRequestSchema,
@@ -28,7 +29,7 @@ import {
   ProseAiRequestSchema,
   isValidGameName,
 } from '@solo-rpg/shared'
-import type { SceneProse, NoteDoc, ProseAiResponse, AiSuggestion, AiSuggestionAcceptResponse, AiSuggestionState, DirectorState, NarrativeBrief, RulesPromptResponse, SceneContextSuggestionResponse } from '@solo-rpg/shared'
+import type { SceneProse, NoteDoc, SessionDraftResponse, ProseAiResponse, AiSuggestion, AiSuggestionAcceptResponse, AiSuggestionState, DirectorState, NarrativeBrief, RulesPromptResponse, SceneContextSuggestionResponse } from '@solo-rpg/shared'
 import { ConflictError, NotFoundError, ValidationError } from '../vault/StorageProvider.js'
 import type { VaultManager } from '../vault/VaultManager.js'
 import { backupGameFolder } from '../vault/backup.js'
@@ -622,6 +623,19 @@ export async function registerGameRoutes(app: FastifyInstance, vault: VaultManag
     const { game } = GameParams.parse(request.params)
     const input = GameSessionInputSchema.parse(request.body)
     return reply.code(201).send(await vault.storage.createSession(game, input))
+  })
+
+  /** Rozepsané sezení (historie stopek + hodnocení + popis); `draft: null` = žádné / zahodit */
+  app.get('/api/games/:game/session-draft', async (request): Promise<SessionDraftResponse> => {
+    const { game } = GameParams.parse(request.params)
+    return { draft: await vault.storage.getSessionDraft(game) }
+  })
+
+  app.put('/api/games/:game/session-draft', async (request, reply) => {
+    const { game } = GameParams.parse(request.params)
+    const { draft } = z.object({ draft: SessionDraftSchema.nullable() }).parse(request.body)
+    await vault.storage.saveSessionDraft(game, draft)
+    return reply.code(204).send()
   })
 
   app.put('/api/games/:game/sessions/:session', async (request) => {

@@ -814,6 +814,52 @@ export function sessionDurationSeconds(session: Pick<GameSession, 'durationSecon
   return session.customDurationSeconds ?? session.durationSeconds
 }
 
+/** Událost stopek rozepsaného sezení: spuštění (i pokračování po pauze) nebo pauza */
+export const SessionDraftEventSchema = z.object({
+  type: z.enum(['start', 'pause']),
+  /** Okamžik události (ms) */
+  at: z.number().int().positive(),
+})
+export type SessionDraftEvent = z.infer<typeof SessionDraftEventSchema>
+
+/**
+ * Rozepsané (ještě neuložené) herní sezení hry. Uběhlý čas se neukládá – dopočítává se z historie
+ * stopek start → pauza → start → …; končí-li historie spuštěním, stopky běží.
+ */
+export const SessionDraftSchema = z.object({
+  events: z
+    .array(SessionDraftEventSchema)
+    .max(5000)
+    .refine(
+      events => events.every((e, i) => e.type === (i % 2 === 0 ? 'start' : 'pause') && (i === 0 || e.at >= events[i - 1].at)),
+      { message: 'Historie stopek musí střídat start a pauzu a jít v čase vzestupně.' },
+    ),
+  fun: FunRatingSchema,
+  description: z.string().max(10000),
+})
+export type SessionDraft = z.infer<typeof SessionDraftSchema>
+
+/** Odpověď / tělo `…/session-draft`; `draft: null` = žádné rozepsané sezení */
+export interface SessionDraftResponse {
+  draft: SessionDraft | null
+}
+
+/** Čistý čas rozepsaného sezení (ms) dopočítaný z historie stopek; běžící úsek se počítá do `now` */
+export function sessionDraftElapsedMs(events: readonly SessionDraftEvent[], now: number): number {
+  let total = 0
+  for (let i = 0; i < events.length; i += 2) {
+    const end = i + 1 < events.length ? events[i + 1].at : now
+    total += Math.max(0, end - events[i].at)
+  }
+  return total
+}
+
+/** Začátek aktuálně běžícího úseku stopek (ms); null = stopky stojí nebo jsou v pauze */
+export function sessionDraftRunningSince(events: readonly SessionDraftEvent[]): number | null {
+  const last = events.at(-1)
+  return last?.type === 'start' ? last.at : null
+}
+
 /** Řetězec rodičů lokace od kořene k lokaci samotné (breadcrumb); cyklus/chybějící rodič řetězec ukončí */
 export function locationPath(location: StoryLocation, all: readonly StoryLocation[]): StoryLocation[] {
   const chain: StoryLocation[] = [location]

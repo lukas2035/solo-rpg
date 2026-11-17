@@ -23,6 +23,7 @@ import RulesModal, { type RulesFormValues } from '../components/RulesModal'
 import ImportTranscriptModal from '../components/ImportTranscriptModal'
 import ExportGameModal from '../components/ExportGameModal'
 import SessionModal from '../components/SessionModal'
+import SessionOverrunDialog from '../components/SessionOverrunDialog'
 import { useSessionTimer } from '../hooks/useSessionTimer'
 import CharacterModal, { type CharacterFormValues } from '../components/CharacterModal'
 import SceneModal, { type SceneFormValues } from '../components/SceneModal'
@@ -1987,6 +1988,16 @@ export default function StoryEditor() {
       {/* Herní sezení: stopky, hodnocení, historie */}
       {showSessionModal && (
         <SessionModal game={gameName} timer={sessionTimer} onClose={() => setShowSessionModal(false)} />
+      )}
+
+      {/* Stopky při načtení kampaně běží déle než hodinu → rozdělit čas na hraní a pauzu (nad dialogem sezení) */}
+      {sessionTimer.overrun && (
+        <SessionOverrunDialog
+          key={sessionTimer.overrun.since}
+          overrun={sessionTimer.overrun}
+          onResolve={(keepMs, resume) => sessionTimer.overrun && sessionTimer.resolveOverrun(sessionTimer.overrun, keepMs, resume)}
+          onKeepAll={sessionTimer.dismissOverrun}
+        />
       )}
 
       {/* AI vypravěč pro aktuální scénu – vykreslen před výběrem vypravěče a pravidly, aby se dialogy otevřené z něj zobrazily nad ním */}

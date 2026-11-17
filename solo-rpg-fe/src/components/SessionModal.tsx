@@ -83,7 +83,7 @@ function FunRating({ value, onChange }: { value: number; onChange: (fun: number)
 
 /** Dialog herního sezení: stopky (start / pauza / reset), hodnocení zábavnosti, popis a historie sezení hry */
 export default function SessionModal({ game, timer, onClose }: SessionModalProps) {
-  const { state, running, elapsed } = timer
+  const { state, running, elapsed, loaded } = timer
   const [sessions, setSessions] = useState<GameSession[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -115,7 +115,7 @@ export default function SessionModal({ game, timer, onClose }: SessionModalProps
     setError(null)
     try {
       const saved = await api.createSession(game, {
-        startedAt: state.startedAt ?? Date.now() - elapsed,
+        startedAt: timer.startedAt ?? Date.now() - elapsed,
         durationSeconds: elapsedSeconds,
         fun: state.fun,
         description: state.description,
@@ -177,14 +177,14 @@ export default function SessionModal({ game, timer, onClose }: SessionModalProps
             {formatClock(elapsed)}
           </div>
           <div className="text-xs opacity-60">
-            {running ? '▶ Sezení běží' : elapsed > 0 ? '⏸ Pozastaveno' : 'Stopky stojí'}
-            {state.startedAt && ` · začátek ${formatDate(state.startedAt)}`}
+            {!loaded ? 'Načítám rozepsané sezení…' : running ? '▶ Sezení běží' : elapsed > 0 ? '⏸ Pozastaveno' : 'Stopky stojí'}
+            {timer.startedAt && ` · začátek ${formatDate(timer.startedAt)}`}
           </div>
           <div className="flex gap-2">
             {running ? (
               <button type="button" onClick={timer.pause} className="px-5 py-2 rounded-lg bg-amber-500 text-black font-bold hover:opacity-90 transition-opacity">⏸ Pauza</button>
             ) : (
-              <button type="button" onClick={timer.start} className="px-5 py-2 rounded-lg bg-emerald-500 text-black font-bold hover:opacity-90 transition-opacity">
+              <button type="button" onClick={timer.start} disabled={!loaded} className="px-5 py-2 rounded-lg bg-emerald-500 text-black font-bold hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity">
                 {elapsed > 0 ? '▶ Pokračovat' : '▶ Spustit'}
               </button>
             )}
@@ -203,6 +203,8 @@ export default function SessionModal({ game, timer, onClose }: SessionModalProps
             <textarea
               value={state.description}
               onChange={(e) => timer.setDescription(e.target.value)}
+              disabled={!loaded}
+              maxLength={10000}
               rows={4}
               className={`${inputClass} resize-y text-sm`}
               placeholder="Např. skvělá scéna v klubu, ale vypravěč moc opakoval popisy…"
@@ -216,6 +218,7 @@ export default function SessionModal({ game, timer, onClose }: SessionModalProps
           </div>
         </div>
 
+        {timer.error && <div className="px-3 py-2 rounded-lg bg-amber-900/70 border border-amber-500 text-sm text-amber-100">{timer.error}</div>}
         {error && <div className="px-3 py-2 rounded-lg bg-red-900/70 border border-red-500 text-sm text-red-100">{error}</div>}
 
         {/* Historie */}

@@ -73,7 +73,7 @@ solo-rpg/
 │       │               SidePanel (aside se záložkami Nitě | Frakce), ThreadsPanel + ThreadModal (dějové nitě),
 │       │               FactionsPanel + FactionModal (frakce), ChipGroup (chipy pro výčty), EntityChecklist (checklist entit),
 │       │               InputArea, PortraitModal, FloatingPortrait (plovoucí okno portrétu), StoryPanel, SessionModal (stopky + hodnocení + historie sezení)
-│       ├── hooks/ useSessionTimer.ts (stav stopek v localStorage per hra)
+│       ├── hooks/ useSessionTimer.ts (rozepsané sezení – historie stopek, hodnocení, popis; ukládá se na BE per hra)
 │       └── utils/ api.ts (API klient, ApiError; každý request nese `x-vault-path`), vaultPath.ts (cesta k hrám v localStorage `solo-rpg:vault-path` + useVaultPath),
 │                  forms.ts (selectAll, inputClass), threads.ts / factions.ts (české popisky/barvy výčtů),
 │                  exportGame.ts (buildGameMarkdown – celá hra do jednoho textového .md bez obrázků; toPlainMarkdown ruší obrázky
@@ -249,9 +249,15 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
   `Délka (s)`, `Zábavnost` (tečka), prázdný řádek, popis (volný markdown až k dalšímu `## `). Parser bere odrážky jen do prvního
   ne-odrážkového řádku, takže odrážky v popisu nevadí. `ObsidianVaultProvider.list/create/update/deleteSession` (create posune
   `startedAt` o 1 ms při kolizi, `touchGame`), routy `GET/POST/PUT/DELETE /api/games/:game/sessions[/:session]`.
-- **FE:** `hooks/useSessionTimer(game)` – stav `{startedAt, accumulatedMs, runningSince, fun, description}` v localStorage
-  `solo-rpg:session-timer:<hra>` (přežije zavření dialogu i reload; běžící úsek se dopočítá z `runningSince`), tik 1 s jen za běhu,
-  `start/pause/reset/clear/setFun/setDescription`; stav vázaný na hru bez efektu (derivace v renderu kvůli oxlint react rules).
+- **Rozepsané sezení (draft) – na BE:** shared `SessionDraft {events: [{type: 'start'|'pause', at}], fun, description}` (události se
+  střídají a jdou vzestupně; uběhlý čas se **neukládá**, dopočítá ho `sessionDraftElapsedMs`, běh = poslední událost `start`).
+  Postgres: sloupec `games.session_draft` (JSONB, null = nic; migrace `0008_session_draft`), `get/saveSessionDraft` (nemění `updated_at` hry;
+  vault provider jen v paměti), routy `GET/PUT /api/games/:game/session-draft` (`{draft}`).
+- **FE:** `hooks/useSessionTimer(game)` – draft načte z BE při zobrazení kampaně (do té doby `loaded = false` a ovládání nic nemění),
+  události stopek ukládá hned, popis/hodnocení s debounce 600 ms + `pagehide` (keepalive) a odchod ze stránky; při chybě opakuje po 5 s.
+  Starý stav z localStorage `solo-rpg:session-timer:<hra>` se při prvním načtení převede na BE a smaže. Tik 1 s jen za běhu,
+  `start/pause/reset/clear/setFun/setDescription`. Běží-li stopky při načtení bez přerušení > 1 h, vrací `overrun` →
+  `SessionOverrunDialog` (ve `StoryEditor`): hráč zvolí, kolik započítat, zbytek se zapíše jako pauza (`resolveOverrun`), pak běh / pauza.
   `SessionModal` – velké hodiny, ▶/⏸/↺, `FunRating` (10 hvězd s klikatelnými půlkami + range 0–10 step 0,5), textarea popisu,
   „💾 Uložit sezení“ (POST, pak `timer.clear()`), historie (řazená od nejnovější, celkem/průměr, inline ✏️ úprava fun+popisu, ✕ smazání).
   `CharacterBar` tlačítko ⏱️ (`onOpenSession`, `sessionRunning` = zelené + pulzující tečka, `sessionPaused` = oranžové).

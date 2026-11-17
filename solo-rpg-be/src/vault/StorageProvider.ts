@@ -1,4 +1,4 @@
-import type { Character, CharacterInput, Faction, FactionInput, GameDetail, GameMeta, GameSession, GameSessionInput, GameSettings, GameSetup, LocationInput, LoreEntry, LoreInput, Narrator, NarratorInput, Note, NoteInput, ProseDoc, ProseImage, Quest, QuestInput, SceneDirector, SceneInput, SceneMeta, StoryEntry, StoryLocation, StoryThread, ThreadInput, AssetKind } from '@solo-rpg/shared'
+import type { Character, CharacterInput, Faction, FactionInput, GameDetail, GameMeta, GameSession, GameSessionInput, GameSettings, GameSetup, LocationInput, LoreEntry, LoreInput, Narrator, NarratorInput, Note, NoteInput, ProseDoc, ProseImage, Quest, QuestInput, SceneDirector, SceneInput, SceneMeta, SessionDraft, StoryEntry, StoryLocation, StoryThread, ThreadInput, AssetKind } from '@solo-rpg/shared'
 
 export interface AssetInput {
   kind: AssetKind
@@ -93,6 +93,9 @@ export interface StorageProvider {
   createSession(name: string, input: GameSessionInput): Promise<GameSession>
   updateSession(name: string, sessionId: string, input: GameSessionInput): Promise<GameSession>
   deleteSession(name: string, sessionId: string): Promise<void>
+  /** Rozepsané (neuložené) sezení hry včetně historie stopek; null = žádné */
+  getSessionDraft(name: string): Promise<SessionDraft | null>
+  saveSessionDraft(name: string, draft: SessionDraft | null): Promise<void>
 
   /** Neměnný log událostí hry (AI návrhy, později patche stavu) – viz tabulka `events` */
   appendEvent(name: string, event: GameEventInput): Promise<void>

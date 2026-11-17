@@ -45,6 +45,8 @@ import type {
   LoreInput,
   GameSession,
   GameSessionInput,
+  SessionDraft,
+  SessionDraftResponse,
   VaultInfo,
   PickResponse,
   BackupGameResponse,
@@ -85,9 +87,10 @@ function vaultQuery(separator: '?' | '&'): string {
   return vaultPath ? `${separator}vault=${encodeURIComponent(vaultPath)}` : ''
 }
 
-async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, url: string, body?: unknown, init?: { keepalive?: boolean }): Promise<T> {
   const response = await fetch(`${API_BASE}${url}`, {
     method,
+    keepalive: init?.keepalive,
     headers: {
       ...vaultHeaders(),
       ...(body instanceof FormData || body === undefined ? {} : { 'content-type': 'application/json' }),
@@ -404,6 +407,11 @@ export const updateSession = (game: string, sessionId: string, input: GameSessio
   request<GameSession>('PUT', `${gamePath(game)}/sessions/${encodeURIComponent(sessionId)}`, input)
 export const deleteSession = (game: string, sessionId: string) =>
   request<void>('DELETE', `${gamePath(game)}/sessions/${encodeURIComponent(sessionId)}`)
+/** Rozepsané sezení hry (historie stopek, hodnocení, popis); `draft: null` = žádné */
+export const getSessionDraft = (game: string) => request<SessionDraftResponse>('GET', `${gamePath(game)}/session-draft`)
+/** `keepalive` = požadavek doběhne i při zavírání / obnovení stránky */
+export const saveSessionDraft = (game: string, draft: SessionDraft | null, keepalive = false) =>
+  request<void>('PUT', `${gamePath(game)}/session-draft`, { draft } satisfies SessionDraftResponse, { keepalive })
 
 // ---------- změny ve vaultu ----------
 

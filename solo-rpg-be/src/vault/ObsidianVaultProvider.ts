@@ -24,6 +24,7 @@ import {
   type GameMeta,
   type GameSession,
   type GameSessionInput,
+  type SessionDraft,
   type GameSettings,
   type GameSetup,
   type LocationInput,
@@ -2744,6 +2745,18 @@ export class ObsidianVaultProvider implements StorageProvider {
     if (!existing.some(s => s.id === id)) throw new NotFoundError(`Sezení „${id}“ neexistuje.`)
     await this.writeSessions(dir, existing.filter(s => s.id !== id))
     await this.touchGame(dir)
+  }
+
+  /** Rozepsané sezení se do vaultu nezapisuje – drží se jen v paměti */
+  private readonly sessionDrafts = new Map<string, SessionDraft>()
+  async getSessionDraft(name: string): Promise<SessionDraft | null> {
+    await this.requireGameDir(name)
+    return this.sessionDrafts.get(name) ?? null
+  }
+  async saveSessionDraft(name: string, draft: SessionDraft | null): Promise<void> {
+    await this.requireGameDir(name)
+    if (draft) this.sessionDrafts.set(name, draft)
+    else this.sessionDrafts.delete(name)
   }
 
   /** Vault je jen cíl exportu / zdroj importu – log událostí nevede a stav Directoru drží jen v paměti */
