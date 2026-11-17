@@ -88,8 +88,10 @@ interface ProseImageContextValue {
   onReplace: (pos: number, image: File | string) => void
   /** Otevřít obrázek v plovoucím okně (dvojklik na obrázek nebo 🗗 v jeho liště) */
   onFloat: (src: ImageRef) => void
+  /** Zobrazit obrázek na celou obrazovku (⛶ v jeho liště) */
+  onFullscreen: (url: string) => void
 }
-const ProseImageContext = createContext<ProseImageContextValue>({ game: '', onReplace: () => {}, onFloat: () => {} })
+const ProseImageContext = createContext<ProseImageContextValue>({ game: '', onReplace: () => {}, onFloat: () => {}, onFullscreen: () => {} })
 
 /** Obrázek s rozložením: přes celou šířku / vlevo vedle textu / vpravo vedle textu */
 const ProseImage = Image.extend({
@@ -178,6 +180,16 @@ function ProseImageView({ node, updateAttributes, deleteNode, selected, editor, 
             className="w-7 h-7 rounded-md hover:bg-white/15 disabled:opacity-40"
           >
             🗗
+          </button>
+          <button
+            type="button"
+            title="Zobrazit na celou obrazovku"
+            disabled={!url}
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => { if (url) storage.onFullscreen(url) }}
+            className="w-7 h-7 rounded-md hover:bg-white/15 disabled:opacity-40"
+          >
+            ⛶
           </button>
           <button
             type="button"
@@ -500,6 +512,7 @@ export default function ProseEditor({ game, sceneId, doc, background, font, font
       })()
     },
     onFloat: src => setFloatingImages(prev => [...prev.filter(s => s !== src), src]),
+    onFullscreen: url => setFullscreenImage({ url, name: 'Ilustrace' }),
   }), [game])
 
   const floatingWindows = useMemo(
