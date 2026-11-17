@@ -77,8 +77,9 @@ solo-rpg/
 │       └── utils/ api.ts (API klient, ApiError; každý request nese `x-vault-path`), vaultPath.ts (cesta k hrám v localStorage `solo-rpg:vault-path` + useVaultPath),
 │                  forms.ts (selectAll, inputClass), threads.ts / factions.ts (české popisky/barvy výčtů),
 │                  exportGame.ts (buildGameMarkdown – celá hra do jednoho textového .md bez obrázků; toPlainMarkdown ruší obrázky
-│                  a wikilinky; downloadTextFile přes Blob; volá se z CharacterBar 📄 → StoryEditor.handleExportGame, který
-│                  si čerstvě stáhne getGame + getSceneEntries všech scén)
+│                  a wikilinky; downloadTextFile přes Blob; volá se z CharacterBar 📤 → ExportGameModal → StoryEditor.handleExportGame, který
+│                  si čerstvě stáhne getGame + getSceneEntries všech scén; defaultExportNotes = výchozí výběr poznámkových listů
+│                  (připnuté k exportovaným scénám / všechny), v ExportGameModal lze tlačítkem 📝 ručně přidat další → `extraNoteIds`)
 │                  (bývalý import z IndexedDB – legacyBrowserStorage/importLegacyGames – byl odstraněn, data jsou jen ve vaultu)
 └── vault/                  výchozí VAULT_PATH (gitignored jako `/vault/` – POZOR, ne `vault/`, to by ignorovalo i src/vault) – otevřít v Obsidianu „Open folder as vault“
 ```
@@ -259,7 +260,7 @@ Nová hra **nemá** automatickou „Scéna 1“ – FE při hře bez scén otev�
   `start/pause/reset/clear/setFun/setDescription`. Běží-li stopky při načtení bez přerušení > 1 h, vrací `overrun` →
   `SessionOverrunDialog` (ve `StoryEditor`): hráč zvolí, kolik započítat, zbytek se zapíše jako pauza (`resolveOverrun`), pak běh / pauza.
   `SessionModal` – velké hodiny, ▶/⏸/↺, `FunRating` (10 hvězd s klikatelnými půlkami + range 0–10 step 0,5), textarea popisu,
-  „💾 Uložit sezení“ (POST, pak `timer.clear()`), historie (řazená od nejnovější, celkem/průměr, inline ✏️ úprava fun+popisu, ✕ smazání).
+  „🏁 Ukončit a uložit sezení“ (POST, pak `timer.clear()`), historie (řazená od nejnovější, celkem/průměr, inline ✏️ úprava fun+popisu, ✕ smazání).
   `CharacterBar` tlačítko ⏱️ (`onOpenSession`, `sessionRunning` = zelené + pulzující tečka, `sessionPaused` = oranžové).
 
 ### AI vypravěč / OpenRouter (FE + BE) – první verze

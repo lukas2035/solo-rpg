@@ -212,7 +212,7 @@ export default function SessionModal({ game, timer, onClose }: SessionModalProps
           </label>
           <div className="flex items-center gap-3">
             <button type="button" onClick={() => void handleSave()} disabled={!canSave} className="px-5 py-2 rounded-lg bg-[var(--accent)] text-white font-bold hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity">
-              💾 Uložit sezení
+              🏁 Ukončit a uložit sezení
             </button>
             <span className="text-xs opacity-60">Uloží čas {formatClock(elapsed)}, hodnocení a popis do <code>sessions.md</code> a vynuluje stopky.</span>
           </div>

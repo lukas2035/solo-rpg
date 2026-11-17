@@ -40,9 +40,22 @@ export interface GameExportData {
    * Poznámkové listy k přiložení: připnuté k exportovaným scénám; když některá exportovaná scéna nemá
    * připnutý žádný list, přikládají se všechny listy hry. `doc` = null → list zatím nemá obsah.
    */
-  notes?: { note: Note; doc: ProseDoc | null }[]
+  notes?: { note: Note; doc: ProseDoc | null; extra?: boolean }[]
   /** Některá exportovaná scéna nemá připnuté listy → přiloženy všechny (uvede se v textu) */
   notesIncludeAll?: boolean
+}
+
+/**
+ * Výchozí výběr poznámkových listů pro export: listy připnuté k exportovaným scénám; když některá
+ * exportovaná scéna nemá připnutý žádný list, přikládají se všechny listy hry (`includeAll`).
+ */
+export function defaultExportNotes<N extends Pick<Note, 'title'>>(
+  exportedScenes: readonly Pick<SceneMeta, 'notes'>[],
+  notes: readonly N[]
+): { notes: N[]; includeAll: boolean } {
+  const includeAll = exportedScenes.some(s => s.notes.length === 0)
+  const pinnedTitles = new Set(exportedScenes.flatMap(s => s.notes))
+  return { notes: notes.filter(n => includeAll || pinnedTitles.has(n.title)), includeAll }
 }
 
 /** Odstraní obrázky (`![alt](url)`, `![[soubor]]`, `<img>`) a wikilinky převede na text (`[[Cíl|alias]]` → alias) */
@@ -339,15 +352,17 @@ export function buildGameMarkdown(data: GameExportData): string {
       'Následují průběžné poznámky, které se využívaly v průběhu hraní těchto scén. ' +
         (notesIncludeAll
           ? 'Protože některé z exportovaných scén nemají přiřazený konkrétní poznámkový list, jsou přiloženy všechny poznámkové listy kampaně.'
-          : 'Jsou to poznámkové listy připnuté k exportovaným scénám.')
+          : 'Jsou to poznámkové listy připnuté k exportovaným scénám.') +
+        (notes.some(n => n.extra) ? ' Hráč k nim navíc ručně přiložil další poznámkové listy, které považuje za užitečné pro kontext.' : '')
     )
     const sortedNotes = [...notes].sort((a, b) => a.note.title.localeCompare(b.note.title, 'cs'))
-    for (const { note, doc } of sortedNotes) {
+    for (const { note, doc, extra } of sortedNotes) {
       h(3, `Poznámky: ${note.title}`)
       const usedIn = exportedScenes.filter(s => s.notes.includes(note.title))
       out.push(
         section([
           usedIn.length ? field('Připnuto ke scénám', usedIn.map(s => `Scéna ${ordered.indexOf(s) + 1}: ${s.title}`).join(', ')) : null,
+          extra ? '- **Přiloženo ručně hráčem** (list není připnutý k exportovaným scénám)' : null,
           proseToPlainMarkdown(doc) || '_List zatím nemá žádný obsah._',
         ])
       )

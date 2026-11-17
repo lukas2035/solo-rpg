@@ -43,7 +43,7 @@ import LoreModal from '../components/LoreModal'
 import SidePanel, { type SidePanelTab } from '../components/SidePanel'
 import type { EntityOption } from '../components/EntityChecklist'
 import * as api from '../utils/api'
-import { buildGameMarkdown, downloadTextFile, exportFileName, proseToPlainMarkdown } from '../utils/exportGame'
+import { buildGameMarkdown, defaultExportNotes, downloadTextFile, exportFileName, proseToPlainMarkdown } from '../utils/exportGame'
 import { assetUrl, useAssetVersion } from '../utils/api'
 import { FACTION_TYPE_ICONS } from '../utils/factions'
 import { LOCATION_TYPE_ICONS } from '../utils/locations'
@@ -1143,8 +1143,11 @@ export default function StoryEditor() {
           .map(entry => `**${entry.character ? entry.character.nickname : entry.narrator?.name ?? 'Vypravěč'}**:${entry.markdown ? '\n' : ' '}${entry.text}`)
           .join('\n\n')
 
-  /** Export hry do jednoho textového .md souboru (čerstvá data z vaultu); `selectedSceneIds` = jen vybrané scény jako kontext */
-  const handleExportGame = async (selectedSceneIds?: string[]): Promise<boolean> => {
+  /**
+   * Export hry do jednoho textového .md souboru (čerstvá data z vaultu); `selectedSceneIds` = jen vybrané scény jako kontext,
+   * `extraNoteIds` = poznámkové listy, které hráč ručně přidal nad rámec výchozího výběru
+   */
+  const handleExportGame = async (selectedSceneIds?: string[], extraNoteIds: string[] = []): Promise<boolean> => {
     try {
       const detail = await api.getGame(gameName)
       // Sekce o kostkách/pravidlech stejná jako pro AI; při chybě (např. chybějící soubor promptu) se použije záložní text z FE
@@ -1164,10 +1167,14 @@ export default function StoryEditor() {
       const isSelection = wanted !== null && detail.scenes.some(s => !wanted.has(s.id))
       // Poznámkové listy: připnuté k exportovaným scénám; když některá nemá žádný, přiloží se všechny
       const exportedScenes = detail.scenes.filter(s => !wanted || wanted.has(s.id))
-      const notesIncludeAll = exportedScenes.some(s => s.notes.length === 0)
-      const pinnedTitles = new Set(exportedScenes.flatMap(s => s.notes))
-      const exportNotes = detail.notes.filter(n => notesIncludeAll || pinnedTitles.has(n.title))
-      const notesWithDocs = await Promise.all(exportNotes.map(async note => ({ note, doc: (await api.getNoteDoc(gameName, note.id)).doc })))
+      const { notes: defaultNotes, includeAll: notesIncludeAll } = defaultExportNotes(exportedScenes, detail.notes)
+      // Ručně přidané listy (z dialogu exportu) nad rámec výchozího výběru
+      const defaultNoteIds = new Set(defaultNotes.map(n => n.id))
+      const extraIds = new Set(extraNoteIds.filter(id => !defaultNoteIds.has(id)))
+      const exportNotes = detail.notes.filter(n => defaultNoteIds.has(n.id) || extraIds.has(n.id))
+      const notesWithDocs = await Promise.all(
+        exportNotes.map(async note => ({ note, doc: (await api.getNoteDoc(gameName, note.id)).doc, extra: extraIds.has(note.id) }))
+      )
       const markdown = buildGameMarkdown({
         gameName: detail.meta.name,
         settings: { rules: detail.setup.rules },
@@ -2058,6 +2065,7 @@ export default function StoryEditor() {
       {showExportModal && (
         <ExportGameModal
           scenes={scenes}
+          notes={notes}
           currentSceneId={currentSceneId}
           onExport={handleExportGame}
           onClose={() => setShowExportModal(false)}

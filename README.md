@@ -60,9 +60,11 @@ AI_PROMPT_PATH=prompts/scene-prompt.md   # výchozí prompt pro vedení scény (
 - **Zálohovat hru** na úvodní stránce: vyber hru → dialog „Uložit jako“ s předvyplněným názvem
   `<hra> YYYY-MM-DD_HH-mm.zip` → hra se vyexportuje do vaultu a její složka se zabalí do zipu (`archiver`).
   Zálohu **všech** dat (DB dump + obrázky) dělá `npm run backup`.
-- **Export hry do textu** – tlačítko 📄 v horní liště otevřené hry stáhne `<hra>.md`: jeden Markdown soubor
+- **Export hry do textu** – tlačítko 📤 v horní liště otevřené hry stáhne `<hra>.md`: jeden Markdown soubor
   s vypravěči, postavami, lokacemi, frakcemi, questy, nitěmi, lore a přepisem všech scén (včetně shrnutí a tajemství).
   Jen text – obrázky se vynechají, wikilinky se převedou na prostý text. Hodí se jako kontext pro ChatGPT / Gemini.
+  Poznámkové listy se přikládají podle připnutí k exportovaným scénám (nemá-li některá scéna žádný, jdou všechny);
+  tlačítkem **📝 Poznámkové listy** v dialogu exportu lze ručně přidat i další.
 - **Import odehraného textu** – tlačítko 📥 v horní liště otevře dialog, kam vložíš přepis ze schránky (např. z Notionu).
   Repliky ve tvaru `**Jméno**: text` nebo `**Jméno:** text` (tučné nevadí) se rozdělí podle mluvčích a připíší na konec
   aktuální scény; jména se párují na postavy hry (celé jméno, přezdívka i křestní jméno) a vypravěče. Když jméno sedí na
@@ -100,7 +102,7 @@ AI_PROMPT_PATH=prompts/scene-prompt.md   # výchozí prompt pro vedení scény (
   řízené AI: se zapnutým přepínačem se k požadavku připojí prompt `prompts/rules-prompt.md` (`AI_RULES_PROMPT_PATH`)
   vysvětlující, že si házíš kostkami jako orákulem a výsledky zapisuješ do textu, plus tvůj popis pravidel. S vypnutým
   přepínačem se vypravěči o kostkách neposílá vůbec nic (čistě příběhové scény). Ke shrnutí scény i do textového exportu
-  hry (📄) jdou pravidla vždy – export používá stejný text (`rules-prompt.md` + tvůj popis) jako AI, takže úprava souboru
+  hry (📤) jdou pravidla vždy – export používá stejný text (`rules-prompt.md` + tvůj popis) jako AI, takže úprava souboru
   se projeví i v něm.
   Popis se ukládá do `game.md` za značku `<!-- rules -->` (tvé poznámky nad ní zůstávají), přepínač do scény jako `rulesInAi`.
 - **Režim AI scény**: v dialogu 🤖 AI zvolíš pro každou scénu **📜 Základní** (vypravěč dostane jen svůj prompt, postavy,
@@ -114,7 +116,7 @@ AI_PROMPT_PATH=prompts/scene-prompt.md   # výchozí prompt pro vedení scény (
 - ⏱️ v horním pásu otevře dialog sezení: **stopky** (spustit / pauza / pokračovat / reset), **zábavnost 0–10 po půl stupních**
   (hvězdičky nebo posuvník) a nepovinný **popis**, jak sezení bavilo. Sezení není vázané na scénu – běží v reálném čase,
   přežije zavření dialogu i obnovení stránky (localStorage per hra); tlačítko svítí zeleně za běhu, oranžově v pauze.
-- „💾 Uložit sezení“ zapíše datum, délku, hodnocení a popis do `sessions.md` ve složce hry a stopky vynuluje. V dialogu je
+- „🏁 Ukončit a uložit sezení“ zapíše datum, délku, hodnocení a popis do `sessions.md` ve složce hry a stopky vynuluje. V dialogu je
   i historie všech sezení (celkový čas, průměrná zábavnost, úprava hodnocení/popisu, smazání).
 
 Další příkazy: `npm run build` (typecheck + build všech workspaces), `npm run lint` (oxlint FE).

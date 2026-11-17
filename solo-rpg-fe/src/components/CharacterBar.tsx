@@ -314,7 +314,7 @@ export default function CharacterBar({
               title="Exportovat hru (celou nebo vybrané scény) do jednoho Markdown souboru – kontext pro AI chat"
               className="w-8 h-8 rounded-md border border-[var(--accent)]/60 bg-black/50 flex items-center justify-center cursor-pointer text-sm text-[var(--accent)] hover:bg-black/80 hover:border-[var(--accent)] transition-all"
             >
-              📄
+              📤
             </button>
           )}
           <button
