@@ -1,4 +1,5 @@
 ﻿import { useEffect, useRef, useState } from 'react'
+import { ALTGR_CLEANUP_WINDOW_MS, stripDeadKey } from '../utils/deadKeys'
 
 interface Character {
   id: string
@@ -48,6 +49,9 @@ export default function InputArea({ characters, showShortcutNumbers, onAddEntry,
   const previousCharacterIdRef = useRef<string | null>(null)
   // AltGr+číslo vloží na české klávesnici znak – po zpracování zkratky ho zahodit
   const suppressNextInputRef = useRef(false)
+  // AltGr+číslo je na české klávesnici mrtvá klávesa (ˇ ^ ˘ …), jejíž stav drží OS – znak nevloží hned,
+  // ale „nakazí“ až další psaný znak; ten se proto očistí (číslice = která mrtvá klávesa, dokdy čekat)
+  const altGrDeadRef = useRef<{ digit: string; until: number } | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   // Bez vypravěče nelze mluvit „za vypravěče“ → výchozí výběr padne na první postavu scény
@@ -80,27 +84,20 @@ export default function InputArea({ characters, showShortcutNumbers, onAddEntry,
       }
       // Alt+číslo, Ctrl+číslo nebo AltGr+číslo
       // AltGr se v prohlížečích hlásí buď jako Ctrl+Alt, nebo jen jako modifikátor 'AltGraph'
-      const altGr = e.getModifierState('AltGraph')
+      const altGr = e.getModifierState('AltGraph') || (e.ctrlKey && e.altKey)
       if ((!e.ctrlKey && !e.altKey && !altGr) || e.shiftKey || e.metaKey) return
       // e.code = fyzická klávesa, nezávislá na rozložení klávesnice (česká, …)
       const match = e.code.match(/^(?:Digit|Numpad)([0-9])$/)
       if (!match) return
       const digit = match[1]
 
-      if (digit === '0') {
-        if (!hasNarrator) return
-        e.preventDefault()
-        suppressNextInputRef.current = true
-        selectCharacter(null)
-        return
-      }
-
-      const character = characters[parseInt(digit) - 1]
-      if (character) {
-        e.preventDefault()
-        suppressNextInputRef.current = true
-        selectCharacter(character.id)
-      }
+      const character = digit === '0' ? null : characters[parseInt(digit) - 1]
+      if (digit === '0' ? !hasNarrator : !character) return
+      e.preventDefault()
+      suppressNextInputRef.current = true
+      // Numpad pod AltGr mrtvou klávesu nedává
+      altGrDeadRef.current = altGr && e.code.startsWith('Digit') ? { digit, until: Date.now() + ALTGR_CLEANUP_WINDOW_MS } : null
+      selectCharacter(character ? character.id : null)
     }
 
     const clearSuppress = () => {
@@ -303,7 +300,20 @@ export default function InputArea({ characters, showShortcutNumbers, onAddEntry,
             if (suppressNextInputRef.current) {
               e.preventDefault()
               suppressNextInputRef.current = false
+              return
             }
+            // První znak po zkratce AltGr+číslo zbavit diakritiky mrtvé klávesy („^“ → nic, „â“ → „a“, „^k“ → „k“)
+            const pending = altGrDeadRef.current
+            if (!pending) return
+            altGrDeadRef.current = null
+            if (Date.now() > pending.until) return
+            const data = (e.nativeEvent as InputEvent).data
+            if (!data) return
+            const cleaned = stripDeadKey(data, pending.digit)
+            if (cleaned === data) return
+            e.preventDefault()
+            // execCommand zachová pozici kurzoru i historii „zpět“ a změnu ohlásí přes onChange
+            if (cleaned) document.execCommand('insertText', false, cleaned)
           }}
           onKeyDown={(e) => {
             // Ctrl+Enter: ve víceřádkovém módu s víc řádky odešle záznam,
